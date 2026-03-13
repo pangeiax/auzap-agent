@@ -1,0 +1,10 @@
+agno
+openai
+fastapi
+uvicorn
+asyncpg
+psycopg2-binary
+redis
+python-dotenv
+pydantic
+ 

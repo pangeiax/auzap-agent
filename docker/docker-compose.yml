@@ -1,50 +1,78 @@
-version: "3.9"
-
 services:
 
   backend:
     build:
-      context: ../backend
+      context: ../backend/api-node
       dockerfile: Dockerfile
-    container_name: ai-backend
+    container_name: petshop-backend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
-      - ../backend:/app
-      - /app/node_modules
+      - ../backend/api-node/src:/app/src
+      - ../backend/api-node/prisma:/app/prisma
+      - ../backend/api-node/.env:/app/.env
+      - baileys_sessions:/app/sessions
     environment:
       - NODE_ENV=development
+    env_file:
+      - ../backend/api-node/.env
     depends_on:
       - redis
+    networks:
+      - petshop-network
+
+  ai-service:
+    build:
+      context: ../backend/ai-service
+      dockerfile: Dockerfile
+    container_name: petshop-ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend/ai-service:/app
+    env_file:
+      - ../backend/ai-service/.env
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    depends_on:
+      - redis
+    networks:
+      - petshop-network
 
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    container_name: ai-frontend
+    container_name: petshop-frontend
+    restart: unless-stopped
     ports:
       - "5173:5173"
     volumes:
-      - ../frontend:/app
-      - /app/node_modules
+      - ../frontend/src:/app/src
+      - ../frontend/.env:/app/.env
     environment:
       - NODE_ENV=development
+    networks:
+      - petshop-network
 
-  evolution:
-    image: atendai/evolution-api
-    container_name: evolution-api
-    ports:
-      - "8080:8080"
-    environment:
-      - AUTHENTICATION_API_KEY=123456
-      - DATABASE_PROVIDER=postgres
-      - DATABASE_CONNECTION_URI=postgresql://postgres:agent-igorj%40@db.ehjyowendprmvfwzsfau.supabase.co:5432/postgres?sslmode=require
-      
   redis:
-    image: redis:7
-    container_name: ai-redis
+    image: redis:7-alpine
+    container_name: petshop-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
-
+    volumes:
+      - redis_data:/data
+    networks:
+      - petshop-network
 volumes:
-  evolution_data:
+  redis_data:
+  baileys_sessions:
+
+networks:
+  petshop-network:
+    driver: bridge
+    name: petshop-network

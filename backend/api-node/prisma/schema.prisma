@@ -1,0 +1,275 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  // eslint-disable-next-line no-console
+  url       = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CORE — MULTI-TENANT (genérico, qualquer nicho)
+// ═══════════════════════════════════════════════════════════════
+
+model SaasCompany {
+  id        Int       @id @default(autoincrement())
+  name      String    @db.VarChar(200)
+  slug      String    @unique @db.VarChar(100)
+  plan      String?   @default("free") @db.VarChar(50)
+  isActive  Boolean?  @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  users         SaasUser[]
+  petshop       SaasPetshop?
+  clients       Client[]
+  sessions      WhatsappSession[]
+  conversations AgentConversation[]
+  messages      AgentMessage[]
+
+  // Petshop-specific
+  petshopServices    PetshopService[]
+  petshopSchedules   PetshopSchedule[]
+  petshopAppointments PetshopAppointment[]
+
+  @@map("saas_companies")
+}
+
+model SaasUser {
+  id             Int       @id @default(autoincrement())
+  companyId      Int       @map("company_id")
+  email          String    @unique @db.VarChar(255)
+  name           String    @db.VarChar(255)
+  hashedPassword String    @map("hashed_password") @db.VarChar(255)
+  role           String?   @default("staff") @db.VarChar(50)
+  isActive       Boolean?  @default(true) @map("is_active")
+  isSuperuser    Boolean?  @default(false) @map("is_superuser")
+  lastLogin      DateTime? @map("last_login") @db.Timestamptz(6)
+  createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId], map: "idx_users_company")
+  @@map("saas_users")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PERFIL DO NICHO (1:1 com company)
+// ═══════════════════════════════════════════════════════════════
+
+model SaasPetshop {
+  id                     Int       @id @default(autoincrement())
+  companyId              Int       @unique @map("company_id")
+  address                String?   @db.VarChar(500)
+  cep                    String?   @db.VarChar(10)
+  phone                  String    @db.VarChar(20)
+  latitude               Float?
+  longitude              Float?
+  ownerPhone             String?   @map("owner_phone") @db.VarChar(20)
+  emergencyContact       String?   @map("emergency_contact") @db.VarChar(20)
+  assistantName          String?   @map("assistant_name") @db.VarChar(50)
+  features               Json?     @default("{}")
+  businessHours          Json?     @default("{}") @map("business_hours")
+  defaultCapacityPerHour Int?      @default(3) @map("default_capacity_per_hour")
+  customCapacityHours    Json?     @map("custom_capacity_hours")
+  isActive               Boolean?  @default(true) @map("is_active")
+  createdAt              DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId], map: "idx_petshops_company")
+  @@map("saas_petshops")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENTES E WHATSAPP
+// ═══════════════════════════════════════════════════════════════
+
+model Client {
+  id                     String    @id @default(uuid()) @db.Uuid
+  companyId              Int       @map("company_id")
+  sessionId              String?   @map("session_id") @db.VarChar(256)
+  phone                  String    @db.VarChar(20)
+  name                   String?   @db.VarChar(255)
+  companyName            String?   @map("company") @db.VarChar(255)
+  email                  String?   @db.VarChar(255)
+  marketingConsent       Boolean?  @default(false) @map("marketing_consent")
+  source                 String?   @db.VarChar(100)
+  conversationStage      String?   @map("conversation_stage") @db.VarChar(50)
+  specialtyIdentified    String?   @map("specialty_identified") @db.VarChar(100)
+  professionalPreference String?   @map("professional_preference") @db.VarChar(100)
+  urgency                String?   @db.VarChar(20)
+  kanbanColumn           String?   @map("kanban_column") @db.VarChar(50)
+  notes                  String?
+  aiPaused               Boolean?  @default(false) @map("ai_paused")
+  aiPausedAt             DateTime? @map("ai_paused_at") @db.Timestamptz(6)
+  aiPauseReason          String?   @map("ai_pause_reason")
+  isActive               Boolean?  @default(true) @map("is_active")
+  createdAt              DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+  lastMessageAt          DateTime? @map("last_message_at") @db.Timestamptz(6)
+
+  saasCompany   SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversations AgentConversation[]
+  pets          PetshopPet[]
+  appointments  PetshopAppointment[]
+
+  @@unique([companyId, phone])
+  @@index([companyId], map: "idx_clients_company")
+  @@index([phone], map: "idx_clients_phone")
+  @@map("clients")
+}
+
+model WhatsappSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    Int       @unique @map("company_id")
+  instanceName String    @map("instance_name") @db.VarChar(100)
+  phoneNumber  String?   @map("phone_number") @db.VarChar(20)
+  status       String?   @default("disconnected") @db.VarChar(50)
+  qrCode       String?   @map("qr_code")
+  connectedAt  DateTime? @map("connected_at") @db.Timestamptz(6)
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  saasCompany SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId], map: "idx_sessions_company")
+  @@index([instanceName], map: "idx_sessions_instance")
+  @@map("whatsapp_sessions")
+}
+
+model AgentConversation {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      Int       @map("company_id")
+  clientId       String?   @map("client_id") @db.Uuid
+  whatsappNumber String?   @map("whatsapp_number") @db.VarChar(20)
+  startedAt      DateTime? @default(now()) @map("started_at") @db.Timestamptz(6)
+  lastMessageAt  DateTime? @map("last_message_at") @db.Timestamptz(6)
+
+  saasCompany SaasCompany    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client      Client?        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  messages    AgentMessage[]
+
+  @@index([companyId], map: "idx_conversations_company")
+  @@index([clientId], map: "idx_conversations_client")
+  @@map("agent_conversations")
+}
+
+model AgentMessage {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @map("conversation_id") @db.Uuid
+  companyId      Int       @map("company_id")
+  role           String    @db.VarChar(20)
+  content        String
+  createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  saasCompany  SaasCompany       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversation AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([companyId], map: "idx_messages_company")
+  @@index([conversationId], map: "idx_messages_conversation")
+  @@map("agent_messages")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PETSHOP — TABELAS ESPECÍFICAS DO NICHO
+// ═══════════════════════════════════════════════════════════════
+
+model PetshopService {
+  id          Int       @id @default(autoincrement())
+  companyId   Int       @map("company_id")
+  name        String    @db.VarChar(100)
+  description String?
+  durationMin Int       @default(60) @map("duration_min")
+  price       Decimal?  @db.Decimal(10, 2)
+  priceBySize Json?     @map("price_by_size")
+  // Se NULL → preço único (price). Se preenchido → { small, medium, large }
+  durationMultiplierLarge Decimal? @map("duration_multiplier_large") @db.Decimal(3, 1)
+  // Se NULL → sem multiplicador. Ex: 2.0 → porte grande ocupa o dobro do slot
+  isActive    Boolean?  @default(true) @map("is_active")
+  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  saasCompany  SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  appointments PetshopAppointment[]
+
+  @@index([companyId], map: "idx_services_company")
+  @@map("petshop_services")
+}
+
+model PetshopPet {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId Int       @map("company_id")
+  clientId  String    @map("client_id") @db.Uuid
+  name      String    @db.VarChar(100)
+  species   String?   @db.VarChar(50)
+  breed     String?   @db.VarChar(100)
+  birthDate DateTime? @map("birth_date") @db.Date
+  weightKg  Decimal?  @map("weight_kg") @db.Decimal(5, 2)
+  gender    String?   @db.VarChar(10)
+  size      String?   @db.VarChar(10)   // small | medium | large
+  notes     String?
+  isActive  Boolean?  @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  client       Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  appointments PetshopAppointment[]
+
+  @@index([companyId], map: "idx_pets_company")
+  @@index([clientId], map: "idx_pets_client")
+  @@map("petshop_pets")
+}
+
+model PetshopSchedule {
+  id        Int       @id @default(autoincrement())
+  companyId Int       @map("company_id")
+  weekday   Int       @db.SmallInt               // 0=Dom, 1=Seg ... 6=Sab
+  startTime DateTime  @map("start_time") @db.Time
+  endTime   DateTime  @map("end_time") @db.Time
+  capacity  Int       @default(1)
+  isActive  Boolean?  @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  saasCompany  SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  appointments PetshopAppointment[]
+
+  @@unique([companyId, weekday, startTime])
+  @@index([companyId], map: "idx_schedules_company")
+  @@map("petshop_schedules")
+}
+
+model PetshopAppointment {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     Int       @map("company_id")
+  clientId      String    @map("client_id") @db.Uuid
+  petId         String    @map("pet_id") @db.Uuid
+  serviceId     Int       @map("service_id")
+  scheduleId    Int       @map("schedule_id")
+  scheduledDate DateTime  @map("scheduled_date") @db.Date
+  status        String    @default("pending") @db.VarChar(30)
+  // pending | confirmed | in_progress | completed | cancelled | no_show
+  notes         String?
+  priceCharged  Decimal?  @map("price_charged") @db.Decimal(10, 2)
+  cancelledAt   DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason  String?   @map("cancel_reason")
+  createdAt     DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  saasCompany SaasCompany     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client      Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pet         PetshopPet      @relation(fields: [petId], references: [id], onDelete: Cascade)
+  service     PetshopService  @relation(fields: [serviceId], references: [id])
+  schedule    PetshopSchedule @relation(fields: [scheduleId], references: [id])
+
+  @@index([companyId], map: "idx_appointments_company")
+  @@index([clientId],  map: "idx_appointments_client")
+  @@index([petId],     map: "idx_appointments_pet")
+  @@index([scheduledDate], map: "idx_appointments_date")
+  @@index([status],    map: "idx_appointments_status")
+  @@map("petshop_appointments")
+}
