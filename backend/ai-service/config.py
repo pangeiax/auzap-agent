@@ -13,7 +13,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 
 # Database Configuration
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL_AGENT")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable not set")
