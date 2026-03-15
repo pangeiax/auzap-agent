@@ -5,7 +5,6 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  // eslint-disable-next-line no-console
   url       = env("DATABASE_URL")
 }
 

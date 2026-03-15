@@ -1,6 +1,7 @@
 import json
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
+from config import OPENAI_MODEL
 from prompts.router_prompt import build_router_prompt
 from agents.team.onboarding_agent import build_onboarding_agent
 from agents.team.booking_agent import build_booking_agent
@@ -35,7 +36,7 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     # ── 1. Router ────────────────────────────────
     router = Agent(
         name="Router",
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id=OPENAI_MODEL),
         instructions=build_router_prompt(context),
     )
 

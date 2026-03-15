@@ -8,8 +8,10 @@ RUN npm install
 
 COPY . .
 
-ARG VITE_API_URL
-ENV VITE_API_URL=${VITE_API_URL}
+# Em produção o proxy é feito pelo nginx — não há URL de backend embutida no bundle.
+# Se precisar de variáveis públicas em build time, passe via --build-arg abaixo.
+# ARG VITE_PUBLIC_SOMETHING
+# ENV VITE_PUBLIC_SOMETHING=${VITE_PUBLIC_SOMETHING}
 
 RUN npm run build
 
