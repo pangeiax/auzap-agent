@@ -24,7 +24,9 @@ export function verifyToken(req: Request, res: Response, next: NextFunction) {
 
   const token = authHeader.split(' ')[1]
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || 'secret') as JwtPayload
+    const secret: string = String(process.env.JWT_SECRET || 'secret')
+    // @ts-expect-error - jwt.verify type inference issue
+    const payload = jwt.verify(token, secret) as unknown as JwtPayload
     req.user = payload
     next()
   } catch {

@@ -11,12 +11,12 @@ services:
     volumes:
       - ../backend/api-node/src:/app/src
       - ../backend/api-node/prisma:/app/prisma
-      - ../backend/api-node/.env:/app/.env
+      - ../.env:/app/.env
       - baileys_sessions:/app/sessions
     environment:
       - NODE_ENV=development
     env_file:
-      - ../backend/api-node/.env
+      - ../.env
     depends_on:
       - redis
     networks:
@@ -33,7 +33,7 @@ services:
     volumes:
       - ../backend/ai-service:/app
     env_file:
-      - ../backend/ai-service/.env
+      - ../.env
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -55,8 +55,6 @@ services:
       - /app/node_modules         # anonymous volume: preserva node_modules do container
     environment:
       - NODE_ENV=development
-      # VITE_BACKEND_URL é usado APENAS pelo processo Vite (proxy server-side).
-      # O browser NUNCA vê esse valor — ele só fala com localhost:5173/api/...
       - VITE_BACKEND_URL=http://backend:3000
     depends_on:
       - backend

@@ -1,5 +1,7 @@
 # Produção — Docker Compose
-# Uso: docker compose -f docker/docker-compose.prod.yml up -d --build
+# Uso:
+#   Local:  docker compose -f docker/docker-compose.prod.yml up -d --build
+#   AWS:    ./scripts/pull-ssm-env.sh && docker compose -f docker/docker-compose.prod.yml up -d --build
 
 services:
 
@@ -14,7 +16,7 @@ services:
     environment:
       - NODE_ENV=production
     env_file:
-      - ../backend/api-node/.env
+      - ../.env
     volumes:
       - baileys_sessions:/app/sessions
     depends_on:
@@ -25,13 +27,13 @@ services:
   ai-service:
     build:
       context: ../backend/ai-service
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     container_name: petshop-ai-service
     restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
-      - ../backend/ai-service/.env
+      - ../.env
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -44,8 +46,6 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile.prod
-      args:
-        - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
     container_name: petshop-frontend
     restart: unless-stopped
     ports:

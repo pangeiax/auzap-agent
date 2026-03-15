@@ -4,6 +4,8 @@
     "module": "nodenext",
     "target": "esnext",
     "types": [],
+    "outDir": "./dist",
+    "rootDir": "./src",
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
@@ -18,5 +20,6 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true,
-  }
+  },
+  "exclude": ["node_modules", "*.config.ts"]
 }
