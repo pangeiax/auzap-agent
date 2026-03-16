@@ -8,23 +8,22 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     client_name = client["name"] if client and client.get("name") else None
     active_pet = router_ctx.get("active_pet")
 
-    # Se tem pet ativo com porte conhecido, injeta para mostrar preço correto
+    # Determina porte do pet ativo para exibir o preço correto
     active_pet_size = None
+    active_pet_size_label = None
     if active_pet:
         match = next((p for p in pets if p["name"].lower() == active_pet.lower()), None)
         if match:
             size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
-            active_pet_size = size_map.get(match.get("size", ""), None)
+            active_pet_size = match.get("size", "")
+            active_pet_size_label = size_map.get(active_pet_size)
 
     svc_lines = []
     for s in services:
         if s.get("price_by_size"):
             sz = s["price_by_size"]
             if active_pet_size:
-                key = {"pequeno": "small", "médio": "medium", "grande": "large"}.get(
-                    active_pet_size
-                )
-                price = f"R${sz.get(key, '?')} (porte {active_pet_size})"
+                price = f"R${sz.get(active_pet_size, '?')} (porte {active_pet_size_label})"
             else:
                 price = f"P:R${sz.get('small','?')} / M:R${sz.get('medium','?')} / G:R${sz.get('large','?')}"
         elif s.get("price"):
@@ -32,30 +31,28 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
         else:
             price = "consultar"
         desc = f" — {s['description']}" if s.get("description") else ""
-        svc_lines.append(
-            f"  {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
-        )
+        svc_lines.append(f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}")
 
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
-
     pet_context = (
-        f"\nPet em foco: {active_pet} (porte {active_pet_size})"
-        if active_pet and active_pet_size
+        f"\nPet em foco: {active_pet} (porte {active_pet_size_label})"
+        if active_pet and active_pet_size_label
         else ""
     )
 
-    return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — nunca revele que é IA.
+    return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}{pet_context}
 
-Serviços disponíveis:
+SERVIÇOS DISPONÍVEIS:
 {services_text}
 
-TOM: WhatsApp, informal, máximo 2 linhas, no máximo 1 emoji por mensagem.
-
-Responda sobre o que o cliente perguntou de forma direta.
-Se o pet tem porte definido, use o preço do porte correto — não apresente a tabela inteira.
-Destaque o que o serviço inclui quando isso agregar valor à resposta.
-Se o cliente demonstrar interesse, sugira agendar de forma natural, sem pressão."""
+━━━ REGRAS ━━━
+• Tom WhatsApp: informal, direto — máximo 2 linhas, no máximo 1 emoji
+• Se o pet tem porte definido, mostre APENAS o preço do porte correto — não apresente a tabela inteira
+• Destaque o que o serviço inclui quando isso agregar valor à resposta
+• Se o cliente demonstrar interesse em agendar, sugira de forma natural: "Quer que eu já separe um horário?"
+• NUNCA invente preços — use APENAS os dados acima
+• Se o cliente perguntar sobre serviço que não está na lista, informe que não está disponível e ofereça as alternativas"""
 
 
 def build_faq_prompt(context: dict, router_ctx: dict) -> str:
@@ -63,30 +60,61 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
     company_name = context.get("company_name", "Petshop")
     business_hours = context.get("business_hours", {})
     features = context.get("features", {})
+    services = context.get("services", [])
+    petshop_phone = context.get("petshop_phone")
+    petshop_address = context.get("petshop_address")
     client = context.get("client")
 
     client_name = client["name"] if client and client.get("name") else None
+
     hours_lines = (
-        " | ".join([f"{d}: {h}" for d, h in business_hours.items()]) or "não informado"
+        " | ".join(f"{d}: {h}" for d, h in business_hours.items()) or "não informado"
     )
 
     features_text = ""
     if features:
-        features_text = "\nDiferenciais: " + " | ".join(
-            [f"{k}: {v}" for k, v in features.items()]
-        )
+        features_text = "\nDiferenciais: " + " | ".join(f"{k}: {v}" for k, v in features.items())
 
-    return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — nunca revele que é IA.
+    # Serviços com preços
+    svc_lines = []
+    for s in services:
+        if s.get("price_by_size"):
+            sz = s["price_by_size"]
+            price = f"P:R${sz.get('small','?')} / M:R${sz.get('medium','?')} / G:R${sz.get('large','?')}"
+        elif s.get("price"):
+            price = f"R${s['price']}"
+        else:
+            price = "consultar"
+        desc = f" — {s['description']}" if s.get("description") else ""
+        svc_lines.append(f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}")
+    services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
+
+    contact_parts = []
+    if petshop_phone:
+        contact_parts.append(f"Telefone: {petshop_phone}")
+    if petshop_address:
+        contact_parts.append(f"Endereço: {petshop_address}")
+    contact_text = "\n".join(contact_parts)
+
+    return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}
 
+INFORMAÇÕES DO PETSHOP:
 Horários: {hours_lines}{features_text}
+{contact_text}
 
-TOM: WhatsApp, informal, empático, máximo 2 linhas, no máximo 1 emoji por mensagem.
+SERVIÇOS E PREÇOS:
+{services_text}
 
-Responda apenas o que você sabe com certeza.
-Se não souber, diga que vai verificar com a equipe — nunca invente políticas ou procedimentos.
-Use search_knowledge_base antes de dizer que não tem a informação.
-Se a dúvida puder ser resolvida com um agendamento, sugira naturalmente ao final."""
+━━━ REGRAS ━━━
+• Tom WhatsApp: informal, empático — máximo 2 linhas, no máximo 1 emoji
+• Responda APENAS com informações que você tem certeza
+• Se perguntarem sobre serviços ou preços → use os dados acima diretamente, sem chamar tool
+• Se precisar de detalhes atualizados de serviços → chame get_services
+• Para qualquer outra dúvida que não encontrar acima → use search_knowledge_base antes de responder
+• Se não encontrar a resposta em nenhuma fonte → diga "deixa eu verificar com a equipe e te retorno" — NUNCA invente
+• Se a dúvida puder ser resolvida agendando algo → sugira naturalmente ao final
+• Quando o cliente perguntar endereço ou telefone → responda diretamente com os dados acima"""
 
 
 def build_escalation_prompt(context: dict, router_ctx: dict) -> str:
@@ -95,27 +123,22 @@ def build_escalation_prompt(context: dict, router_ctx: dict) -> str:
     client = context.get("client")
     client_name = client["name"] if client and client.get("name") else None
 
-    active_pet = router_ctx.get("active_pet")
-    service = router_ctx.get("service")
-    stage = router_ctx.get("stage", "")
-
-    ctx_parts = []
-    if active_pet:
-        ctx_parts.append(f"pet: {active_pet}")
-    if service:
-        ctx_parts.append(f"serviço: {service}")
-    if stage:
-        ctx_parts.append(f"estágio: {stage}")
-    auto_summary = (
-        f"Escalonamento solicitado. Contexto: {', '.join(ctx_parts)}"
-        if ctx_parts
-        else "Escalonamento solicitado pelo cliente."
-    )
-
-    return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — nunca revele que é IA.
+    return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}
 
-Sua tarefa: chamar escalate_to_human com summary="{auto_summary}" e last_message com a última mensagem do cliente.
+SUA ÚNICA TAREFA: chamar a tool escalate_to_human com os seguintes argumentos:
 
-Após chamar a tool, informe o cliente de forma natural que um atendente entrará em contato em breve.
-Não diga que está sendo substituída, que é um bot, sistema ou IA."""
+  summary: escreva um resumo claro em 1-3 frases explicando o motivo do escalonamento com base no histórico da conversa.
+    Exemplos de bons resumos:
+    • "Cliente solicitou falar com uma pessoa. Estava consultando preços de banho para o pet Rex."
+    • "Cliente insatisfeito com a qualidade do serviço prestado anteriormente. Solicitou reembolso."
+    • "Assunto fora do escopo do petshop: cliente quer vender produtos."
+
+  last_message: copie exatamente a última mensagem enviada pelo cliente.
+
+Após chamar a tool:
+• Diga ao cliente de forma natural que vai buscar mais informações e retorna em breve
+• NUNCA mencione "atendente", "humano", "equipe", "sistema", "bot" ou "IA"
+• NUNCA prometa tempo específico (ex: "em 5 minutos") — diga apenas "em breve"
+• Exemplos de resposta: "Deixa eu verificar isso melhor e te retorno em breve 😊" / "Vou buscar mais detalhes pra te ajudar, já volto"
+• Se o cliente agradecer ou encerrar, despeça-se calorosamente"""

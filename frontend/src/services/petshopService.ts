@@ -3,25 +3,21 @@ import type { Petshop, PetshopCreate, PetshopUpdate } from '@/types'
 
 export const petshopService = {
   async createPetshop(data: PetshopCreate): Promise<Petshop> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.post<Petshop>('/petshops', data)
     return response.data
   },
 
   async listPetshops(params?: { skip?: number; limit?: number; is_active?: boolean }): Promise<Petshop[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Petshop[]>('/petshops', { params })
     return response.data
   },
 
   async getPetshop(petshopId: number): Promise<Petshop> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Petshop>(`/petshops/${petshopId}`)
     return response.data
   },
 
   async updatePetshop(petshopId: number, data: PetshopUpdate): Promise<Petshop> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.patch<Petshop>(`/petshops/${petshopId}`, data)
     return response.data
   },

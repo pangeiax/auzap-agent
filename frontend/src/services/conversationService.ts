@@ -12,7 +12,6 @@ export const conversationService = {
   async listConversations(
     filters?: ConversationFilters
   ): Promise<Conversation[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Conversation[]>('/conversations', {
       params: filters,
     })
@@ -25,7 +24,6 @@ export const conversationService = {
       offset?: number
     }
   ): Promise<ConversationDetail> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<ConversationDetail>(
       `/conversations/${conversationId}`,
       { params }
@@ -36,7 +34,6 @@ export const conversationService = {
     conversationId: string,
     params?: { limit?: number; offset?: number }
   ): Promise<any[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<any[]>(
       `/conversations/${conversationId}/messages`,
       { params }
@@ -47,7 +44,6 @@ export const conversationService = {
     conversationId: string,
     messageData: SendMessageRequest
   ): Promise<ChatMessage> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.post<ChatMessage>(
       `/conversations/${conversationId}/message`,
       messageData
@@ -55,7 +51,6 @@ export const conversationService = {
     return response.data
   },
   async getAnalysis(conversationId: string): Promise<ConversationAnalysis> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<ConversationAnalysis>(
       `/conversations/${conversationId}/analysis`
     )
@@ -66,7 +61,6 @@ export const conversationService = {
     pause: boolean,
     reason?: string
   ): Promise<{ success: boolean; ai_paused: boolean }> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.put(`/conversations/${conversationId}/toggle-ai`, {
       ai_paused: pause,
       ai_pause_reason: reason,
@@ -91,11 +85,19 @@ export const conversationService = {
     }>
     total: number
   }> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get(
       `/clients/${clientId}/conversations`,
       { params }
     )
+    return response.data
+  },
+  async updateStage(
+    conversationId: string,
+    kanban_column: string
+  ): Promise<{ success: boolean; kanban_column: string }> {
+    const response = await api.put(`/conversations/${conversationId}/stage`, {
+      kanban_column,
+    })
     return response.data
   },
   async searchMessages(
@@ -105,7 +107,6 @@ export const conversationService = {
       limit?: number
     }
   ): Promise<ChatMessage[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<ChatMessage[]>('/conversations/search', {
       params: { q: query, ...params },
     })

@@ -1,0 +1,25 @@
+import { Router } from 'express'
+import { verifyToken } from '../../middleware/authMiddleware'
+import {
+  listAppointments,
+  getAppointment,
+  scheduleAppointment,
+  updateAppointment,
+  cancelAppointment,
+  confirmAppointment,
+  rescheduleAppointment,
+} from './appointmentController'
+
+const router = Router()
+
+router.use(verifyToken)
+
+router.get('/', listAppointments)
+router.post('/schedule', scheduleAppointment)
+router.get('/:id', getAppointment)
+router.put('/:id', updateAppointment)
+router.delete('/:id', cancelAppointment)
+router.post('/:id/confirm', confirmAppointment)
+router.post('/:id/reschedule', rescheduleAppointment)
+
+export default router

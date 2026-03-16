@@ -5,6 +5,7 @@ import { PipelineCard } from "@/components/molecules/PipelineCard";
 import { ConversationsPipelineHeader } from "@/components/molecules/ConversationsPipelineHeader";
 import { EmptyState } from "@/components/molecules/EmptyState";
 import { useConversations } from "@/hooks";
+import { conversationService } from "@/services";
 import type { Conversation } from "@/types";
 import {
   type PipelineCard as PipelineCardType,
@@ -21,6 +22,21 @@ const VALID_STAGES = new Set<string>([
   "completed",
 ]);
 
+// Maps DB conversationStage values to pipeline columns
+const DB_STAGE_MAP: Record<string, PipelineStage> = {
+  initial: "welcome",
+  WELCOME: "welcome",
+  onboarding: "situation",
+  PET_REGISTRATION: "situation",
+  pet_registered: "problem",
+  SERVICE_SELECTION: "problem",
+  booking: "scheduling",
+  SCHEDULING: "scheduling",
+  AWAITING_CONFIRMATION: "scheduling",
+  completed: "completed",
+  COMPLETED: "completed",
+};
+
 function toInitials(name: string): string {
   const parts = name.trim().split(" ").filter(Boolean);
   if (parts.length === 0) return "??";
@@ -28,13 +44,24 @@ function toInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+function resolveStage(conv: Conversation): PipelineStage {
+  // Prefer explicit kanban_column set by drag-and-drop
+  if (conv.kanban_column && VALID_STAGES.has(conv.kanban_column)) {
+    return conv.kanban_column as PipelineStage;
+  }
+  // Fall back to mapping from DB conversationStage
+  if (conv.stage) {
+    const mapped = DB_STAGE_MAP[conv.stage];
+    if (mapped) return mapped;
+    if (VALID_STAGES.has(conv.stage)) return conv.stage as PipelineStage;
+  }
+  return "welcome";
+}
+
 function mapConversationToCard(conv: Conversation): PipelineCardType {
   const id = conv.id ?? conv.conversation_id ?? conv.client_id;
   const name = conv.client_name ?? "Cliente";
-  const stage: PipelineStage =
-    conv.stage && VALID_STAGES.has(conv.stage)
-      ? (conv.stage as PipelineStage)
-      : "welcome";
+  const stage = resolveStage(conv);
   const time = new Date(conv.last_message_at).toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -133,6 +160,10 @@ export function PipelineBoard() {
     );
     setDraggedCard(null);
     setDragOverColumn(null);
+    // Persist the stage change
+    conversationService.updateStage(cardId, targetStage).catch((err) =>
+      console.error("[Pipeline] Failed to persist stage:", err),
+    );
   };
 
   const handleAddCard = (stage: PipelineStage) => {

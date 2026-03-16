@@ -1,4 +1,5 @@
 import json
+import logging
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from config import OPENAI_MODEL
@@ -8,6 +9,8 @@ from agents.team.booking_agent import build_booking_agent
 from agents.team.faq_agent import build_faq_agent
 from agents.team.sales_agent import build_sales_agent
 from agents.team.escalation_agent import build_escalation_agent
+
+logger = logging.getLogger("ai-service.router")
 
 VALID_AGENTS = {
     "onboarding_agent",
@@ -23,6 +26,7 @@ DEFAULT_ROUTER_CTX = {
     "active_pet": None,
     "service": None,
     "date_mentioned": None,
+    "selected_time": None,
     "awaiting_confirmation": False,
 }
 
@@ -47,11 +51,22 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     router_ctx = _parse_router_response(router_response.content)
 
     agent_name = router_ctx.get("agent", "onboarding_agent")
+    logger.info(
+        "Router decidiu → agent=%s | stage=%s | active_pet=%s | service=%s | date=%s | awaiting_confirmation=%s",
+        agent_name,
+        router_ctx.get("stage"),
+        router_ctx.get("active_pet"),
+        router_ctx.get("service"),
+        router_ctx.get("date_mentioned"),
+        router_ctx.get("awaiting_confirmation"),
+    )
 
     # ── 2. Especialista ───────────────────────────
+    logger.info("Invocando especialista → %s", agent_name)
     specialist = _build_specialist(agent_name, context, router_ctx)
     specialist_input = _build_specialist_input(message, history, router_ctx)
     specialist_response = specialist.run(specialist_input)
+    logger.info("Especialista %s concluiu", agent_name)
 
     return {
         "reply": specialist_response.content.strip(),
@@ -66,9 +81,11 @@ def _parse_router_response(content: str) -> dict:
         clean = content.strip().strip("```json").strip("```").strip()
         parsed = json.loads(clean)
         if parsed.get("agent") not in VALID_AGENTS:
+            logger.warning("Router retornou agente inválido=%r — usando faq_agent", parsed.get("agent"))
             parsed["agent"] = "faq_agent"
         return {**DEFAULT_ROUTER_CTX, **parsed}
     except Exception:
+        logger.warning("Falha ao parsear JSON do router — usando DEFAULT_ROUTER_CTX. content=%.200r", content)
         return DEFAULT_ROUTER_CTX.copy()
 
 
@@ -103,6 +120,8 @@ def _build_specialist_input(message: str, history: list, router_ctx: dict) -> st
         ctx_summary.append(f"Serviço: {router_ctx['service']}")
     if router_ctx.get("date_mentioned"):
         ctx_summary.append(f"Data mencionada: {router_ctx['date_mentioned']}")
+    if router_ctx.get("selected_time"):
+        ctx_summary.append(f"Horário selecionado: {router_ctx['selected_time']}")
     if router_ctx.get("awaiting_confirmation"):
         ctx_summary.append("Status: aguardando confirmação do cliente")
 

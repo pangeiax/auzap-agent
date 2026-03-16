@@ -1,6 +1,6 @@
 import { Request, Response } from 'express'
 import QRCode from 'qrcode'
-import { startBaileysSession, disconnectSession } from '../../services/baileysService'
+import { startBaileysSession, disconnectSession, sendTextMessage } from '../../services/baileysService'
 import { prisma } from '../../lib/prisma'
 
 // ─────────────────────────────────────────
@@ -175,6 +175,25 @@ export async function reconnectMyWhatsApp(req: Request, res: Response) {
 
   await startBaileysSession(String(companyId))
   return res.json({ success: true })
+}
+
+// POST /whatsapp/send-message
+export async function sendMessage(req: Request, res: Response) {
+  const companyId = req.user!.companyId
+  const { to, message } = req.body
+
+  if (!to || !message) {
+    return res.status(400).json({ error: 'to and message are required' })
+  }
+
+  try {
+    const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`
+    await sendTextMessage(String(companyId), jid, message)
+    return res.json({ success: true })
+  } catch (err) {
+    console.error('[sendMessage] Error:', err)
+    return res.status(500).json({ error: 'Failed to send message. Check WhatsApp connection.' })
+  }
 }
 
 // GET /whatsapp/health

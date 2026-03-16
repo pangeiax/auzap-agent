@@ -35,11 +35,13 @@ function mapApiConversation(conv: Conversation): MockConversation {
     name: conv.client_name || "Cliente",
     phone: conv.client_phone || "",
     pets: "",
-    lastMessage: `${conv.message_count} mensagens`,
-    time: new Date(conv.last_message_at).toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    lastMessage: `${conv.message_count ?? 0} mensagens`,
+    time: conv.last_message_at
+      ? new Date(conv.last_message_at).toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "",
     unreadCount: 0,
     isAiPaused: conv.ai_paused ?? conv.is_ai_paused ?? false,
     isOnline: false,
@@ -47,12 +49,11 @@ function mapApiConversation(conv: Conversation): MockConversation {
 }
 
 function mapApiMessage(msg: any): MockMessage {
-  const isIncoming = msg.direction === "incoming";
-  const content = isIncoming ? msg.user_message || "" : msg.bot_message || "";
+  const isIncoming = msg.role === "user";
   return {
     id: msg.id,
     variant: isIncoming ? "received" : "sent",
-    message: content,
+    message: msg.content || "",
     time: new Date(msg.created_at).toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
@@ -313,24 +314,21 @@ function ChatPageContent() {
     }
   }, [fetchConversations]);
 
-  const loadMessages = useCallback(
-    async (conversationId: string) => {
-      try {
-        setLoadingMessages(true);
-        const messages = await conversationService.getMessages(conversationId);
-        setMessagesMap((prev) => ({
-          ...prev,
-          [conversationId]: messages
-            .filter((m: any) => m.user_message || m.bot_message)
-            .map(mapApiMessage),
-        }));
-      } catch {
-      } finally {
-        setLoadingMessages(false);
-      }
-    },
-    [],
-  );
+  const loadMessages = useCallback(async (conversationId: string) => {
+    try {
+      setLoadingMessages(true);
+      const messages = await conversationService.getMessages(conversationId);
+      setMessagesMap((prev) => ({
+        ...prev,
+        [conversationId]: messages
+          .filter((m: any) => m.content)
+          .map(mapApiMessage),
+      }));
+    } catch {
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadConversations();
@@ -377,13 +375,15 @@ function ChatPageContent() {
       ),
     );
 
-    if (useRealApi && selectedConversation.phone) {
+    if (selectedConversation.phone) {
       try {
         await whatsappService.sendMessage({
           to: selectedConversation.phone,
           message,
         });
-      } catch {}
+      } catch (err) {
+        console.error("[Chat] Failed to send via WhatsApp:", err);
+      }
     }
 
     if (isAiActive && !useRealApi) {

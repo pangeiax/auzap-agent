@@ -13,6 +13,7 @@ async def load_context(company_id: int, client_phone: str) -> dict:
                 c.plan,
                 p.assistant_name,
                 p.phone         AS petshop_phone,
+                p.address       AS petshop_address,
                 p.business_hours,
                 p.default_capacity_per_hour,
                 p.features
@@ -65,6 +66,7 @@ async def load_context(company_id: int, client_phone: str) -> dict:
             "company_name": company["company_name"],
             "assistant_name": company["assistant_name"] or "Assistente",
             "petshop_phone": company["petshop_phone"],
+            "petshop_address": company["petshop_address"],
             "business_hours": company["business_hours"] or {},
             "default_capacity_per_hour": company["default_capacity_per_hour"],
             "features": company["features"] or {},

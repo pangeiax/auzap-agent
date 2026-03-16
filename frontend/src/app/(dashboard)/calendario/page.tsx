@@ -384,6 +384,8 @@ export default function CalendarioPage() {
 
       const appointment = await appointmentService.scheduleAppointment({
         client_id: formData.clientId,
+        pet_id: formData.petId,
+        service_id: formData.serviceId,
         scheduled_at: scheduledAt,
         payment_method: 'manual',
         origin_channel: 'dashboard',
@@ -398,7 +400,7 @@ export default function CalendarioPage() {
         id: appointment.id,
         petName: selectedPet?.name || 'Pet',
         petInitials: getInitials(selectedPet?.name || 'Pet'),
-        type: selectedService?.specialty || 'Serviço',
+        type: selectedService?.name || 'Serviço',
         time: formData.time,
         date: dateISO,
         status: normalizeStatus(formData.status),
@@ -661,8 +663,8 @@ export default function CalendarioPage() {
               label="Serviço"
               placeholder="Selecione o serviço"
               options={services.map((s) => ({
-                value: s.id,
-                label: s.specialty ?? s.service_type ?? '',
+                value: String(s.id),
+                label: s.name ?? '',
               }))}
               value={formData.serviceId}
               onChange={(e) => handleFormChange('serviceId', e.target.value)}

@@ -18,6 +18,7 @@ export interface Conversation {
   last_message_at: string
   message_count: number
   stage?: string
+  kanban_column?: string
   specialty_detected?: string
   ai_paused?: boolean
   is_ai_paused?: boolean

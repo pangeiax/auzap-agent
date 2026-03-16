@@ -9,6 +9,7 @@ interface AgentRequest {
 interface AgentResponse {
   reply: string
   agent_used: string
+  stage?: string
 }
 
 export async function runAgent(

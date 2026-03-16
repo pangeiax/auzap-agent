@@ -9,6 +9,10 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  Plus,
+  Edit2,
+  Trash2,
+  Clock,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import {
@@ -28,7 +32,7 @@ import {
   maskCurrency,
   unmaskCurrency,
 } from "@/lib/masks";
-import { useAddressByCep, useBusinessHours, useToast } from "@/hooks";
+import { useAddressByCep, useToast } from "@/hooks";
 import {
   petshopService,
   serviceService,
@@ -38,7 +42,6 @@ import {
 import { useAuthContext } from "@/contexts/AuthContext";
 import type { Petshop } from "@/types";
 import type { Service } from "@/types";
-import type { BusinessHours } from "@/hooks/useBusinessHours";
 
 function SettingsProfileSidebar({
   petshop,
@@ -46,15 +49,17 @@ function SettingsProfileSidebar({
   error,
   onNovoServico,
   showNovoServico,
+  onLogout,
 }: {
   petshop: Petshop | null;
   loading?: boolean;
   error?: string | null;
   onNovoServico?: () => void;
   showNovoServico: boolean;
+  onLogout: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-4 rounded-lg sm:flex-row sm:items-start">
         <img
           width={200}
@@ -73,25 +78,52 @@ function SettingsProfileSidebar({
           ) : (
             <>
               <p className="mt-3 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-                {petshop?.name ?? "Estabelecimento"}
+                {petshop?.company?.name ??
+                  petshop?.assistantName ??
+                  "Estabelecimento"}
               </p>
               <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-                {petshop?.phone || petshop?.owner_phone || "—"}
+                {petshop?.phone || petshop?.ownerPhone || "—"}
               </p>
             </>
           )}
         </div>
       </div>
+
       {showNovoServico && onNovoServico && (
         <Button
           size="sm"
-          className="mt-2 flex w-full items-center gap-2 bg-[#0e1629] text-white hover:opacity-90"
+          className="flex w-full items-center gap-2 bg-[#0e1629] text-white hover:opacity-90"
           onClick={onNovoServico}
         >
           <Crown className="h-4 w-4" />
           Novo serviço
         </Button>
       )}
+
+      <button
+        type="button"
+        onClick={onLogout}
+        className="flex w-full items-center gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/40"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.67"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0"
+        >
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
+        </svg>
+        Sair da conta
+      </button>
     </div>
   );
 }
@@ -109,6 +141,47 @@ function ServicosContent({
   onEditService: (service: Service) => void;
   onRefresh: () => void;
 }) {
+  const toast = useToast();
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+
+  const handleConfirmDelete = async () => {
+    if (!serviceToDelete) return;
+    setDeleting(true);
+    try {
+      await serviceService.deleteService(serviceToDelete.id);
+      toast.success(
+        "Serviço deletado!",
+        `"${serviceToDelete.name}" foi removido.`,
+      );
+      setDeleteModalOpen(false);
+      setServiceToDelete(null);
+      onRefresh();
+    } catch {
+      toast.error("Erro", "Não foi possível deletar o serviço.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleToggle = async (s: Service) => {
+    setTogglingId(s.id);
+    try {
+      await serviceService.updateService(s.id, { is_active: !s.isActive });
+      toast.success(
+        "Status atualizado!",
+        s.isActive ? "Serviço desativado." : "Serviço ativado.",
+      );
+      onRefresh();
+    } catch {
+      toast.error("Erro", "Não foi possível alterar o status.");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-[#727B8E] dark:text-[#8a94a6]">
@@ -126,54 +199,122 @@ function ServicosContent({
     );
   }
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {services.map((s) => (
-        <div
-          key={s.id}
-          className="flex flex-col gap-2 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 relative"
-        >
-          <h3 className="text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-            {s.specialty || s.service_type}
-          </h3>
-          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-            {s.description || "Sem descrição"}
-          </p>
-          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-            {s.duration_minutes} min • R$ {Number(s.price).toFixed(2)}
-          </p>
-          <span className="absolute right-3 inline-flex w-[47px] h-[19px] px-3 py-1 flex-col justify-center items-center gap-2.5 rounded-full border border-[#3CD057]/36 bg-[#D4F3D6] text-[8px] font-medium text-[#3CD057]">
-            {s.is_active ? "ATIVO" : "INATIVO"}
-          </span>
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {services.map((s) => (
+          <div
+            key={s.id}
+            className="flex flex-col gap-2 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 relative"
+          >
+            <h3 className="text-base font-semibold text-[#434A57] dark:text-[#f5f9fc] pr-14">
+              {s.name}
+            </h3>
+            <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+              {s.description || "Sem descrição"}
+            </p>
+            <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+              {s.durationMin} min
+              {s.price ? ` • R$ ${Number(s.price).toFixed(2)}` : ""}
+              {s.priceBySize
+                ? ` • P: R$${s.priceBySize.small ?? "-"} M: R$${s.priceBySize.medium ?? "-"} G: R$${s.priceBySize.large ?? "-"}`
+                : ""}
+            </p>
+            <span
+              className={`absolute top-3 right-3 inline-flex px-2 py-1 rounded-full text-[8px] font-medium border ${
+                s.isActive
+                  ? "border-[#3CD057]/36 bg-[#D4F3D6] text-[#3CD057]"
+                  : "border-gray-200 bg-gray-100 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400"
+              }`}
+            >
+              {s.isActive ? "ATIVO" : "INATIVO"}
+            </span>
 
-          <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-1"
+                onClick={() => onEditService(s)}
+              >
+                <Edit2 className="h-3 w-3" />
+                Editar
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-1"
+                disabled={togglingId === s.id}
+                onClick={() => handleToggle(s)}
+              >
+                {togglingId === s.id ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Clock className="h-3 w-3" />
+                )}
+                {s.isActive ? "Desativar" : "Ativar"}
+              </Button>
+              <button
+                type="button"
+                onClick={() => {
+                  setServiceToDelete(s);
+                  setDeleteModalOpen(true);
+                }}
+                className="rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                aria-label="Deletar"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setServiceToDelete(null);
+        }}
+        title="Confirmar exclusão"
+        className="max-w-[400px]"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+            Tem certeza que deseja deletar o serviço{" "}
+            <span className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+              &quot;{serviceToDelete?.name}&quot;
+            </span>
+            ? Esta ação não pode ser desfeita.
+          </p>
+          <div className="flex justify-end gap-2">
             <Button
               variant="outline"
-              size="sm"
-              className="flex items-center gap-1"
-              onClick={() => onEditService(s)}
+              onClick={() => {
+                setDeleteModalOpen(false);
+                setServiceToDelete(null);
+              }}
+              disabled={deleting}
             >
-              <Crown className="h-3 w-3" />
-              Editar
+              Cancelar
             </Button>
             <Button
-              variant="outline"
-              size="sm"
-              className="flex items-center gap-1"
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
             >
-              <Crown className="h-3 w-3" />
-              Desativar
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Deletando...
+                </>
+              ) : (
+                "Sim, deletar"
+              )}
             </Button>
-            <button
-              type="button"
-              className="rounded p-1 text-[#727B8E] hover:bg-[#F4F6F9] dark:text-[#8a94a6] dark:hover:bg-[#212225]"
-              aria-label="Configurações"
-            >
-              <SettingsIcon className="h-4 w-4" />
-            </button>
           </div>
         </div>
-      ))}
-    </div>
+      </Modal>
+    </>
   );
 }
 
@@ -191,9 +332,6 @@ function EmpresaContent({
     cep?: string;
     owner_phone?: string;
     emergency_contact?: string;
-    hotel_capacity?: number;
-    hotel_daily_rate?: number;
-    creche_daily_rate?: number;
   }) => Promise<void>;
 }) {
   const [nome, setNome] = useState("");
@@ -201,9 +339,6 @@ function EmpresaContent({
   const [ownerPhone, setOwnerPhone] = useState("");
   const [emergencyContact, setEmergencyContact] = useState("");
   const [saving, setSaving] = useState(false);
-  const [hotelCapacity, setHotelCapacity] = useState(8);
-  const [hotelDailyRate, setHotelDailyRate] = useState("");
-  const [crecheDailyRate, setCrecheDailyRate] = useState("");
   const {
     address,
     setField,
@@ -216,19 +351,21 @@ function EmpresaContent({
 
   useEffect(() => {
     if (!petshop) return;
-    setNome(petshop.name);
-    setTelefone(petshop.phone);
-    setOwnerPhone(petshop.owner_phone);
-    setEmergencyContact(petshop.emergency_contact);
-    setHotelCapacity(petshop.hotel_capacity ?? 8);
-    if (petshop.hotel_daily_rate) {
-      setHotelDailyRate(maskCurrency(String(petshop.hotel_daily_rate * 100)));
-    }
-    if (petshop.creche_daily_rate) {
-      setCrecheDailyRate(maskCurrency(String(petshop.creche_daily_rate * 100)));
-    }
+    setNome(petshop.company?.name || "");
+    setTelefone(petshop.phone || "");
+    // Unmask stored phone to local display format: "5511963482461" → "(11) 96348-2461"
+    const normalizePhone = (raw: string) => {
+      const digits = raw.replace(/\D/g, "");
+      const local =
+        digits.length === 13 && digits.startsWith("55")
+          ? digits.slice(2)
+          : digits;
+      return maskPhone(local);
+    };
+    setOwnerPhone(normalizePhone(petshop.ownerPhone || ""));
+    setEmergencyContact(normalizePhone(petshop.emergencyContact || ""));
     setAddress({
-      cep: petshop.cep,
+      cep: petshop.cep || "",
       rua: petshop.address || "",
       numero: "",
       complemento: "",
@@ -240,17 +377,20 @@ function EmpresaContent({
 
   const handleSubmit = async () => {
     setSaving(true);
+    // Unmask phone to "5511963482461" format before saving
+    const toE164 = (masked: string) => {
+      const digits = masked.replace(/\D/g, "");
+      if (!digits) return undefined;
+      return digits.startsWith("55") ? digits : "55" + digits;
+    };
     try {
       await onSave({
-        name: nome,
+        name: nome || undefined,
         phone: telefone,
         address: address.rua || undefined,
         cep: address.cep || undefined,
-        owner_phone: ownerPhone,
-        emergency_contact: emergencyContact,
-        hotel_capacity: hotelCapacity,
-        hotel_daily_rate: unmaskCurrency(hotelDailyRate),
-        creche_daily_rate: unmaskCurrency(crecheDailyRate),
+        owner_phone: toE164(ownerPhone),
+        emergency_contact: toE164(emergencyContact),
       });
     } finally {
       setSaving(false);
@@ -366,52 +506,6 @@ function EmpresaContent({
         </div>
       </section>
 
-      <section>
-        <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-          Hotel / Creche
-        </h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Input
-            label="Limite de Capacidade (pets)"
-            type="number"
-            placeholder="8"
-            value={hotelCapacity}
-            onChange={(e) => {
-              const value = e.target.value === '' ? '' : parseInt(e.target.value);
-              setHotelCapacity(value as number);
-            }}
-            onBlur={(e) => {
-              const value = e.target.value === '' ? 1 : parseInt(e.target.value);
-              const validValue = value <= 0 ? 1 : value;
-              if (validValue !== hotelCapacity) {
-                setHotelCapacity(validValue);
-              }
-            }}
-          />
-          <Input
-            label="Diária Hotel (R$)"
-            placeholder="0,00"
-            value={hotelDailyRate}
-            onChange={(e) => {
-              const masked = maskCurrency(e.target.value);
-              setHotelDailyRate(masked);
-            }}
-          />
-          <Input
-            label="Diária Creche (R$)"
-            placeholder="0,00"
-            value={crecheDailyRate}
-            onChange={(e) => {
-              const masked = maskCurrency(e.target.value);
-              setCrecheDailyRate(masked);
-            }}
-          />
-        </div>
-        <p className="mt-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-          Número máximo de pets que podem estar hospedados simultaneamente
-        </p>
-      </section>
-
       <div className="flex justify-end gap-3">
         <Button type="button" variant="outline" disabled={saving}>
           Cancelar
@@ -435,7 +529,7 @@ function WhatsAppContent({
   status,
   loading,
 }: {
-  status: { status: string; phone?: string; error_message?: string } | null;
+  status: { status: string; phone?: string; last_connected?: string; error_message?: string } | null;
   loading?: boolean;
 }) {
   const toast = useToast();
@@ -444,6 +538,7 @@ function WhatsAppContent({
   >("disconnected");
   const [qrCode, setQrCode] = useState("");
   const [connectedPhone, setConnectedPhone] = useState("");
+  const [lastConnected, setLastConnected] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const statusCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -470,10 +565,13 @@ function WhatsAppContent({
       if (data.status === "connected") {
         setConnectionStatus("connected");
         setConnectedPhone(data.phone || "WhatsApp Conectado");
+        setLastConnected((data as any).last_connected ?? null);
         setQrCode("");
         if (statusCheckIntervalRef.current) {
           clearInterval(statusCheckIntervalRef.current);
         }
+      } else {
+        setLastConnected((data as any).last_connected ?? null);
       }
     } catch (error) {
       console.error("Erro ao verificar status:", error);
@@ -586,7 +684,9 @@ function WhatsAppContent({
                       WhatsApp Desconectado
                     </p>
                     <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
-                      Conecte seu WhatsApp para começar
+                      {lastConnected
+                        ? `Última conexão: ${new Date(lastConnected).toLocaleString("pt-BR")}`
+                        : "Conecte seu WhatsApp para começar"}
                     </p>
                   </div>
                 </>
@@ -853,141 +953,26 @@ function PagamentoContent({
   );
 }
 
-function HorariosContent() {
+function HorariosContent({
+  petshop,
+  loading,
+  onSave,
+}: {
+  petshop: Petshop | null;
+  loading?: boolean;
+  onSave: (data: {
+    business_hours: Record<
+      string,
+      { open: string; close: string } | { closed: boolean }
+    >;
+    default_capacity_per_hour?: number;
+    custom_capacity_hours?: any;
+  }) => Promise<void>;
+}) {
   const toast = useToast();
-  const {
-    businessHours,
-    defaultCapacity,
-    customCapacities,
-    hourlyCapacities,
-    loading,
-    saving,
-    updateDaySchedule,
-    toggleDay,
-    updateDefaultCapacity,
-    addCustomCapacity,
-    removeCustomCapacity,
-    addHourlyCapacity,
-    removeHourlyCapacity,
-    saveBusinessHours,
-  } = useBusinessHours();
+  const [saving, setSaving] = useState(false);
 
-  const [customModalOpen, setCustomModalOpen] = useState(false);
-  const [customDate, setCustomDate] = useState("");
-  const [customCapacity, setCustomCapacity] = useState("");
-
-  const [hourlyModalOpen, setHourlyModalOpen] = useState(false);
-  const [selectedDay, setSelectedDay] = useState<keyof BusinessHours>("monday");
-  const [selectedHour, setSelectedHour] = useState("");
-  const [hourCapacity, setHourCapacity] = useState("");
-
-  const handleOpenCustomModal = () => {
-    setCustomModalOpen(true);
-    setCustomDate("");
-    setCustomCapacity("");
-  };
-
-  const handleCloseCustomModal = () => {
-    setCustomModalOpen(false);
-    setCustomDate("");
-    setCustomCapacity("");
-  };
-
-  const handleAddCustomCapacity = () => {
-    if (!customDate || !customCapacity) {
-      toast.warning(
-        "Preencha todos os campos",
-        "Selecione a data e defina a capacidade.",
-      );
-      return;
-    }
-
-    const capacity = parseInt(customCapacity);
-    if (capacity < 1) {
-      toast.warning(
-        "Capacidade inválida",
-        "A capacidade deve ser maior que zero.",
-      );
-      return;
-    }
-
-    addCustomCapacity(customDate, capacity);
-    handleCloseCustomModal();
-    toast.success(
-      "Dia adicionado!",
-      `Capacidade customizada para ${customDate} foi configurada.`,
-    );
-  };
-
-  const handleRemoveCustomCapacity = (date: string) => {
-    removeCustomCapacity(date);
-    toast.info("Dia removido", "A capacidade customizada foi removida.");
-  };
-
-  const handleOpenHourlyModal = () => {
-    setHourlyModalOpen(true);
-    setSelectedDay("monday");
-    setSelectedHour("");
-    setHourCapacity("");
-  };
-
-  const handleCloseHourlyModal = () => {
-    setHourlyModalOpen(false);
-    setSelectedDay("monday");
-    setSelectedHour("");
-    setHourCapacity("");
-  };
-
-  const handleAddHourlyCapacity = () => {
-    if (!selectedHour || !hourCapacity) {
-      toast.warning(
-        "Preencha todos os campos",
-        "Selecione o dia, hora e defina a capacidade.",
-      );
-      return;
-    }
-
-    const capacity = parseInt(hourCapacity);
-    if (capacity < 1) {
-      toast.warning(
-        "Capacidade inválida",
-        "A capacidade deve ser maior que zero.",
-      );
-      return;
-    }
-
-    addHourlyCapacity(selectedDay, selectedHour, capacity);
-    handleCloseHourlyModal();
-    toast.success(
-      "Hora adicionada!",
-      `Capacidade customizada para ${selectedHour} foi configurada.`,
-    );
-  };
-
-  const handleRemoveHourlyCapacity = (
-    day: keyof BusinessHours,
-    hour: string,
-  ) => {
-    removeHourlyCapacity(day, hour);
-    toast.info("Hora removida", "A capacidade customizada foi removida.");
-  };
-
-  const handleSave = async () => {
-    const result = await saveBusinessHours();
-    if (result.success) {
-      toast.success(
-        "Horários salvos!",
-        "As configurações de horário foram atualizadas.",
-      );
-    } else {
-      toast.error(
-        "Erro ao salvar",
-        "Não foi possível salvar os horários. Tente novamente.",
-      );
-    }
-  };
-
-  const weekDays: { key: keyof typeof businessHours; label: string }[] = [
+  const DIAS: { key: string; label: string }[] = [
     { key: "monday", label: "Segunda-feira" },
     { key: "tuesday", label: "Terça-feira" },
     { key: "wednesday", label: "Quarta-feira" },
@@ -996,6 +981,200 @@ function HorariosContent() {
     { key: "saturday", label: "Sábado" },
     { key: "sunday", label: "Domingo" },
   ];
+
+  const [hours, setHours] = useState<
+    Record<string, { enabled: boolean; open: string; close: string }>
+  >(() => {
+    const defaults = Object.fromEntries(
+      DIAS.map(({ key }) => [
+        key,
+        {
+          enabled: [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+          ].includes(key),
+          open: "09:00",
+          close: "18:00",
+        },
+      ]),
+    );
+    if (petshop?.businessHours) {
+      Object.entries(petshop.businessHours).forEach(([key, val]) => {
+        if (val?.open && val?.close) {
+          defaults[key] = { enabled: true, open: val.open, close: val.close };
+        } else if (val?.closed) {
+          defaults[key] = { ...defaults[key], enabled: false };
+        }
+      });
+    }
+    return defaults;
+  });
+
+  const [defaultCapacity, setDefaultCapacity] = useState(
+    petshop?.defaultCapacityPerHour ?? 8,
+  );
+
+  // Custom capacity hours state
+  const [customCapacities, setCustomCapacities] = useState<
+    { date: string; capacity: number }[]
+  >([]);
+  const [hourlyCapacities, setHourlyCapacities] = useState<
+    { day: string; hour: string; capacity: number }[]
+  >([]);
+  const [customModalOpen, setCustomModalOpen] = useState(false);
+  const [customDate, setCustomDate] = useState("");
+  const [customCap, setCustomCap] = useState("");
+  const [hourlyModalOpen, setHourlyModalOpen] = useState(false);
+  const [hourlyDay, setHourlyDay] = useState("monday");
+  const [hourlyHour, setHourlyHour] = useState("");
+  const [hourlyCap, setHourlyCap] = useState("");
+
+  useEffect(() => {
+    if (!petshop) return;
+    const initial = Object.fromEntries(
+      DIAS.map(({ key }) => [
+        key,
+        {
+          enabled: [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+          ].includes(key),
+          open: "09:00",
+          close: "18:00",
+        },
+      ]),
+    );
+    if (petshop.businessHours) {
+      Object.entries(petshop.businessHours).forEach(([key, val]) => {
+        if (val?.open && val?.close) {
+          initial[key] = { enabled: true, open: val.open, close: val.close };
+        } else if (val?.closed) {
+          initial[key] = { ...initial[key], enabled: false };
+        }
+      });
+    }
+    setHours(initial);
+    setDefaultCapacity(petshop.defaultCapacityPerHour ?? 8);
+
+    // Load custom capacity hours
+    const custom = petshop.customCapacityHours as {
+      dates?: Record<string, number>;
+      hourly?: Record<string, Record<string, number>>;
+    } | null;
+    if (custom?.dates) {
+      setCustomCapacities(
+        Object.entries(custom.dates).map(([date, capacity]) => ({
+          date,
+          capacity: capacity as number,
+        })),
+      );
+    } else {
+      setCustomCapacities([]);
+    }
+    if (custom?.hourly) {
+      const hourly: { day: string; hour: string; capacity: number }[] = [];
+      for (const [day, hours] of Object.entries(custom.hourly)) {
+        for (const [hour, capacity] of Object.entries(
+          hours as Record<string, number>,
+        )) {
+          hourly.push({ day, hour, capacity });
+        }
+      }
+      setHourlyCapacities(hourly);
+    } else {
+      setHourlyCapacities([]);
+    }
+  }, [petshop]);
+
+  const handleToggle = (key: string) => {
+    setHours((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], enabled: !prev[key].enabled },
+    }));
+  };
+
+  const handleTimeChange = (
+    key: string,
+    field: "open" | "close",
+    value: string,
+  ) => {
+    setHours((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+  };
+
+  const handleAddCustomCapacity = () => {
+    if (!customDate || !customCap) return;
+    const cap = parseInt(customCap);
+    if (cap < 1) return;
+    setCustomCapacities((prev) => {
+      const without = prev.filter((c) => c.date !== customDate);
+      return [...without, { date: customDate, capacity: cap }];
+    });
+    setCustomModalOpen(false);
+    setCustomDate("");
+    setCustomCap("");
+  };
+
+  const handleAddHourlyCapacity = () => {
+    if (!hourlyHour || !hourlyCap) return;
+    const cap = parseInt(hourlyCap);
+    if (cap < 1) return;
+    setHourlyCapacities((prev) => {
+      const without = prev.filter(
+        (h) => !(h.day === hourlyDay && h.hour === hourlyHour),
+      );
+      return [...without, { day: hourlyDay, hour: hourlyHour, capacity: cap }];
+    });
+    setHourlyModalOpen(false);
+    setHourlyDay("monday");
+    setHourlyHour("");
+    setHourlyCap("");
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const business_hours: Record<
+        string,
+        { open: string; close: string } | { closed: boolean }
+      > = {};
+      Object.entries(hours).forEach(([key, val]) => {
+        if (val.enabled) {
+          business_hours[key] = { open: val.open, close: val.close };
+        } else {
+          business_hours[key] = { closed: true };
+        }
+      });
+      const custom_capacity_hours = {
+        dates: Object.fromEntries(
+          customCapacities.map((c) => [c.date, c.capacity]),
+        ),
+        hourly: hourlyCapacities.reduce<Record<string, Record<string, number>>>(
+          (acc, h) => {
+            if (!acc[h.day]) acc[h.day] = {};
+            acc[h.day][h.hour] = h.capacity;
+            return acc;
+          },
+          {},
+        ),
+      };
+      await onSave({
+        business_hours,
+        default_capacity_per_hour: defaultCapacity,
+        custom_capacity_hours,
+      });
+      toast.success("Horários salvos!", "As configurações foram atualizadas.");
+    } catch {
+      toast.error("Erro ao salvar", "Não foi possível salvar os horários.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -1012,12 +1191,8 @@ function HorariosContent() {
         <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
           Horário de Funcionamento
         </h3>
-        <p className="mb-4 text-sm text-[#727B8E] dark:text-[#8a94a6]">
-          Define quantos serviços podem ser agendados simultaneamente em cada
-          hora
-        </p>
         <div className="space-y-3">
-          {weekDays.map(({ key, label }) => (
+          {DIAS.map(({ key, label }) => (
             <div
               key={key}
               className="flex flex-col gap-3 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4"
@@ -1025,71 +1200,38 @@ function HorariosContent() {
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"
-                  checked={businessHours[key].enabled}
-                  onChange={() => toggleDay(key)}
+                  checked={hours[key]?.enabled ?? false}
+                  onChange={() => handleToggle(key)}
                   className="h-4 w-4 rounded border-[#727B8E]/30 text-[#1E62EC] focus:ring-2 focus:ring-[#1E62EC]/20"
                 />
                 <span className="flex-1 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
                   {label}
                 </span>
-                {!businessHours[key].enabled && (
+                {!hours[key]?.enabled && (
                   <span className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
                     Fechado
                   </span>
                 )}
               </div>
-              {businessHours[key].enabled && (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Input
-                      label="Abertura"
-                      type="time"
-                      value={businessHours[key].start}
-                      onChange={(e) =>
-                        updateDaySchedule(key, { start: e.target.value })
-                      }
-                    />
-                    <Input
-                      label="Fechamento"
-                      type="time"
-                      value={businessHours[key].end}
-                      onChange={(e) =>
-                        updateDaySchedule(key, { end: e.target.value })
-                      }
-                    />
-                  </div>
-                  {hourlyCapacities.filter((h) => h.day === key).length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      <p className="text-xs font-medium text-[#434A57] dark:text-[#f5f9fc]">
-                        Capacidades por hora:
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {hourlyCapacities
-                          .filter((h) => h.day === key)
-                          .map((h) => (
-                            <div
-                              key={h.hour}
-                              className="inline-flex items-center gap-2 rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 px-2 py-1"
-                            >
-                              <span className="text-xs font-medium text-[#1E62EC]">
-                                {h.hour} • {h.capacity} serviços
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleRemoveHourlyCapacity(key, h.hour)
-                                }
-                                className="text-[#1E62EC] hover:text-red-600 transition-colors"
-                                aria-label="Remover"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-                </>
+              {hours[key]?.enabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="Abertura"
+                    type="time"
+                    value={hours[key].open}
+                    onChange={(e) =>
+                      handleTimeChange(key, "open", e.target.value)
+                    }
+                  />
+                  <Input
+                    label="Fechamento"
+                    type="time"
+                    value={hours[key].close}
+                    onChange={(e) =>
+                      handleTimeChange(key, "close", e.target.value)
+                    }
+                  />
+                </div>
               )}
             </div>
           ))}
@@ -1098,34 +1240,19 @@ function HorariosContent() {
 
       <section>
         <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-          Capacidade de Serviços por Hora
+          Capacidade Padrão por Hora
         </h3>
-        <p className="mb-4 text-sm text-[#727B8E] dark:text-[#8a94a6]">
-          Define quantos serviços podem ser agendados simultaneamente em cada
-          hora
-        </p>
         <div className="max-w-xs">
           <Input
             type="number"
-            placeholder="10"
+            label="Atendimentos simultâneos"
+            placeholder="8"
             value={defaultCapacity}
-            className="w-fit"
-            label="Capacidade Padrão por Hora"
-            onChange={(e) => {
-              const value = e.target.value === '' ? '' : parseInt(e.target.value);
-              updateDefaultCapacity(value as number);
-            }}
-            onBlur={(e) => {
-              const value = e.target.value === '' ? 1 : parseInt(e.target.value);
-              const validValue = value <= 0 ? 1 : value;
-              if (validValue !== defaultCapacity) {
-                updateDefaultCapacity(validValue);
-              }
-            }}
+            onChange={(e) => setDefaultCapacity(parseInt(e.target.value) || 1)}
+            min="1"
           />
           <p className="mt-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-            💡 Dica: A capacidade padrão será aplicada automaticamente a todos
-            os horários
+            Número máximo de agendamentos por hora
           </p>
         </div>
       </section>
@@ -1141,14 +1268,23 @@ function HorariosContent() {
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={handleOpenCustomModal}
+            onClick={() => {
+              setCustomDate("");
+              setCustomCap("");
+              setCustomModalOpen(true);
+            }}
             className="flex items-center gap-2 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-4 py-2 text-sm text-[#727B8E] dark:text-[#8a94a6] hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-colors"
           >
             + Adicionar Dia Específico
           </button>
           <button
             type="button"
-            onClick={handleOpenHourlyModal}
+            onClick={() => {
+              setHourlyDay("monday");
+              setHourlyHour("");
+              setHourlyCap("");
+              setHourlyModalOpen(true);
+            }}
             className="flex items-center gap-2 rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 dark:bg-[#1E62EC]/20 px-4 py-2 text-sm text-[#1E62EC] hover:bg-[#1E62EC]/20 dark:hover:bg-[#1E62EC]/30 transition-colors"
           >
             + Adicionar Hora do Dia da Semana
@@ -1161,16 +1297,9 @@ function HorariosContent() {
                 key={cap.date}
                 className="flex items-center justify-between rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] px-4 py-3"
               >
-                <div className="flex-1">
+                <div>
                   <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-                    {new Date(cap.date + "T00:00:00").toLocaleDateString(
-                      "pt-BR",
-                      {
-                        day: "2-digit",
-                        month: "long",
-                        year: "numeric",
-                      },
-                    )}
+                    {cap.date}
                   </span>
                   <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
                     {cap.capacity} serviços por hora
@@ -1178,9 +1307,12 @@ function HorariosContent() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleRemoveCustomCapacity(cap.date)}
-                  className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 transition-colors"
-                  aria-label="Remover"
+                  onClick={() =>
+                    setCustomCapacities((prev) =>
+                      prev.filter((c) => c.date !== cap.date),
+                    )
+                  }
+                  className="text-red-500 hover:text-red-700 transition-colors"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1188,16 +1320,84 @@ function HorariosContent() {
             ))}
           </div>
         )}
+        {hourlyCapacities.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <p className="text-xs font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              Capacidades por hora:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {hourlyCapacities.map((h) => (
+                <div
+                  key={`${h.day}-${h.hour}`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 px-2 py-1"
+                >
+                  <span className="text-xs font-medium text-[#1E62EC]">
+                    {h.day} {h.hour} • {h.capacity} serviços
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setHourlyCapacities((prev) =>
+                        prev.filter(
+                          (x) => !(x.day === h.day && x.hour === h.hour),
+                        ),
+                      )
+                    }
+                    className="text-[#1E62EC] hover:text-red-600 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <div className="flex justify-end gap-3">
-        <Button type="button" variant="outline" disabled={saving}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={saving}
+          onClick={() => {
+            if (!petshop) return;
+            const initial = Object.fromEntries(
+              DIAS.map(({ key }) => [
+                key,
+                {
+                  enabled: [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                  ].includes(key),
+                  open: "09:00",
+                  close: "18:00",
+                },
+              ]),
+            );
+            if (petshop.businessHours) {
+              Object.entries(petshop.businessHours).forEach(([key, val]) => {
+                if (val?.open && val?.close)
+                  initial[key] = {
+                    enabled: true,
+                    open: val.open,
+                    close: val.close,
+                  };
+                else if (val?.closed)
+                  initial[key] = { ...initial[key], enabled: false };
+              });
+            }
+            setHours(initial);
+          }}
+        >
           Cancelar
         </Button>
         <Button type="button" onClick={handleSave} disabled={saving}>
           {saving ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
               Salvando...
             </>
           ) : (
@@ -1206,20 +1406,14 @@ function HorariosContent() {
         </Button>
       </div>
 
+      {/* Modal - Adicionar Dia Específico */}
       <Modal
         isOpen={customModalOpen}
-        onClose={handleCloseCustomModal}
-        title="Adicionar Dia Customizado"
-        onSubmit={handleAddCustomCapacity}
-        submitText="Adicionar"
-        cancelText="Cancelar"
+        onClose={() => setCustomModalOpen(false)}
+        title="Adicionar Dia Específico"
         className="max-w-[400px]"
       >
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-            Configure uma capacidade diferente para um dia específico.
-          </p>
-
           <Input
             label="Data"
             type="date"
@@ -1227,86 +1421,66 @@ function HorariosContent() {
             onChange={(e) => setCustomDate(e.target.value)}
             min={new Date().toISOString().split("T")[0]}
           />
-
           <Input
             label="Capacidade (serviços/hora)"
             type="number"
             placeholder="10"
-            value={customCapacity}
-            onChange={(e) => setCustomCapacity(e.target.value)}
-            min={1}
+            value={customCap}
+            onChange={(e) => setCustomCap(e.target.value)}
+            min="1"
           />
-
-          <div className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] p-3">
-            <p className="text-xs font-medium text-[#434A57] dark:text-[#f5f9fc]">
-              💡 Exemplo de uso
-            </p>
-            <p className="mt-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-              Reduza a capacidade em feriados ou aumente em dias de alta
-              demanda.
-            </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCustomModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleAddCustomCapacity}>Adicionar</Button>
           </div>
         </div>
       </Modal>
 
+      {/* Modal - Adicionar Capacidade por Hora */}
       <Modal
         isOpen={hourlyModalOpen}
-        onClose={handleCloseHourlyModal}
+        onClose={() => setHourlyModalOpen(false)}
         title="Adicionar Capacidade por Hora"
-        onSubmit={handleAddHourlyCapacity}
-        submitText="Adicionar"
-        cancelText="Cancelar"
         className="max-w-[400px]"
       >
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-            Configure uma capacidade diferente para um horário específico de um
-            dia da semana.
-          </p>
-
           <div>
-            <label className="mb-2 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-              Dia da Semana
+            <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              Dia da semana
             </label>
             <select
-              value={selectedDay}
-              onChange={(e) =>
-                setSelectedDay(e.target.value as keyof BusinessHours)
-              }
-              className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none focus:ring-2 focus:ring-[#1E62EC]/20"
+              value={hourlyDay}
+              onChange={(e) => setHourlyDay(e.target.value)}
+              className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
             >
-              {weekDays.map(({ key, label }) => (
+              {DIAS.map(({ key, label }) => (
                 <option key={key} value={key}>
                   {label}
                 </option>
               ))}
             </select>
           </div>
-
           <Input
-            label="Horário"
+            label="Hora"
             type="time"
-            value={selectedHour}
-            onChange={(e) => setSelectedHour(e.target.value)}
+            value={hourlyHour}
+            onChange={(e) => setHourlyHour(e.target.value)}
           />
-
           <Input
             label="Capacidade (serviços/hora)"
             type="number"
             placeholder="10"
-            value={hourCapacity}
-            onChange={(e) => setHourCapacity(e.target.value)}
-            min={1}
+            value={hourlyCap}
+            onChange={(e) => setHourlyCap(e.target.value)}
+            min="1"
           />
-
-          <div className="rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 dark:bg-[#1E62EC]/20 p-3">
-            <p className="text-xs font-medium text-[#1E62EC]">
-              💡 Exemplo de uso
-            </p>
-            <p className="mt-1 text-xs text-[#1E62EC]/80">
-              Reduza a capacidade no horário de almoço (12:00-14:00) ou aumente
-              aos sábados de manhã (09:00-12:00).
-            </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setHourlyModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleAddHourlyCapacity}>Adicionar</Button>
           </div>
         </div>
       </Modal>
@@ -1511,7 +1685,7 @@ function IAPlaygroundContent() {
 }
 
 export default function ConfiguracoesPage() {
-  const { user } = useAuthContext();
+  const { user, logout } = useAuthContext();
   const petshopId = user?.petshop_id ?? 0;
   const toast = useToast();
 
@@ -1523,6 +1697,7 @@ export default function ConfiguracoesPage() {
   const [whatsappStatus, setWhatsappStatus] = useState<{
     status: string;
     phone?: string;
+    last_connected?: string;
     error_message?: string;
   } | null>(null);
   const [paymentStats, setPaymentStats] = useState<{
@@ -1536,6 +1711,16 @@ export default function ConfiguracoesPage() {
   const [loadingPayment, setLoadingPayment] = useState(true);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [editingData, setEditingData] = useState({
+    name: "",
+    duration_minutes: 30,
+    price: "",
+    description: "",
+    price_varies_by_size: false,
+    price_small: "",
+    price_medium: "",
+    price_large: "",
+  });
 
   const [newServiceModalOpen, setNewServiceModalOpen] = useState(false);
   const [newServiceData, setNewServiceData] = useState({
@@ -1587,9 +1772,7 @@ export default function ConfiguracoesPage() {
   const fetchServices = useCallback(async () => {
     try {
       setLoadingServices(true);
-      const list = await serviceService.listServices(
-        petshopId ? { petshop_id: petshopId } : undefined,
-      );
+      const list = await serviceService.listServices(undefined);
       setServices(list);
     } catch (error) {
       console.error("Erro ao carregar serviços:", error);
@@ -1614,7 +1797,8 @@ export default function ConfiguracoesPage() {
         setWhatsappStatus({
           status: data.status,
           phone: data.phone,
-          error_message: data.error_message,
+          last_connected: (data as any).last_connected,
+          error_message: (data as any).error_message,
         });
       } catch {
         setWhatsappStatus(null);
@@ -1651,13 +1835,14 @@ export default function ConfiguracoesPage() {
       cep?: string;
       owner_phone?: string;
       emergency_contact?: string;
-      hotel_capacity?: number;
-      hotel_daily_rate?: number;
-      creche_daily_rate?: number;
     }) => {
       if (!petshopId) return;
       try {
-        await petshopService.updatePetshop(petshopId, data);
+        const { name: company_name, ...petshopData } = data;
+        await petshopService.updatePetshop(petshopId, {
+          ...petshopData,
+          ...(company_name ? { company_name } : {}),
+        } as Parameters<typeof petshopService.updatePetshop>[1]);
         await fetchPetshop();
         toast.success(
           "Configurações salvas!",
@@ -1674,6 +1859,31 @@ export default function ConfiguracoesPage() {
     [petshopId, fetchPetshop, toast],
   );
 
+  const handleSaveHorarios = useCallback(
+    async (data: {
+      business_hours: Record<
+        string,
+        { open: string; close: string } | { closed: boolean }
+      >;
+      default_capacity_per_hour?: number;
+      custom_capacity_hours?: any;
+    }) => {
+      if (!petshopId) return;
+      try {
+        await petshopService.updatePetshop(petshopId, data);
+        await fetchPetshop();
+        toast.success(
+          "Horários salvos!",
+          "As configurações foram atualizadas.",
+        );
+      } catch (error) {
+        console.error("Erro ao salvar horários:", error);
+        toast.error("Erro ao salvar", "Não foi possível salvar os horários.");
+      }
+    },
+    [petshopId, fetchPetshop, toast],
+  );
+
   const handleEditService = (service: Service) => {
     setSelectedService(service);
     setEditModalOpen(true);
@@ -1682,6 +1892,83 @@ export default function ConfiguracoesPage() {
   const handleCloseEditModal = () => {
     setEditModalOpen(false);
     setSelectedService(null);
+    setEditingData({
+      name: "",
+      duration_minutes: 30,
+      price: "",
+      description: "",
+      price_varies_by_size: false,
+      price_small: "",
+      price_medium: "",
+      price_large: "",
+    });
+  };
+
+  useEffect(() => {
+    if (selectedService) {
+      const hasSize = !!(
+        selectedService.priceBySize &&
+        (selectedService.priceBySize.small ||
+          selectedService.priceBySize.medium ||
+          selectedService.priceBySize.large)
+      );
+      setEditingData({
+        name: selectedService.name,
+        duration_minutes: selectedService.durationMin || 30,
+        price: selectedService.price?.toString() || "",
+        description: selectedService.description || "",
+        price_varies_by_size: hasSize,
+        price_small: selectedService.priceBySize?.small?.toString() || "",
+        price_medium: selectedService.priceBySize?.medium?.toString() || "",
+        price_large: selectedService.priceBySize?.large?.toString() || "",
+      });
+    }
+  }, [selectedService]);
+
+  const handleEditingDataChange = (
+    field: string,
+    value: string | number | boolean,
+  ) => {
+    setEditingData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleUpdateService = async () => {
+    if (!selectedService || !editingData.name.trim()) {
+      toast.warning("Erro", "Nome do serviço é obrigatório.");
+      return;
+    }
+
+    try {
+      await serviceService.updateService(selectedService.id, {
+        name: editingData.name,
+        duration_min: editingData.duration_minutes,
+        price: editingData.price_varies_by_size
+          ? null
+          : editingData.price
+            ? parseFloat(editingData.price)
+            : undefined,
+        description: editingData.description || undefined,
+        price_by_size: editingData.price_varies_by_size
+          ? {
+              small: editingData.price_small
+                ? parseFloat(editingData.price_small)
+                : undefined,
+              medium: editingData.price_medium
+                ? parseFloat(editingData.price_medium)
+                : undefined,
+              large: editingData.price_large
+                ? parseFloat(editingData.price_large)
+                : undefined,
+            }
+          : null,
+      });
+      toast.success("Sucesso!", "Serviço atualizado com sucesso.");
+      handleCloseEditModal();
+      await fetchServices();
+    } catch (error) {
+      console.error("Erro ao atualizar:", error);
+      toast.error("Erro", "Não foi possível atualizar o serviço.");
+    }
   };
 
   const handleOpenNewServiceModal = () => {
@@ -1750,7 +2037,7 @@ export default function ConfiguracoesPage() {
   }, [activeTab]);
 
   const handleCreateService = async () => {
-    if (!petshopId || !newServiceData.specialty) {
+    if (!newServiceData.specialty) {
       toast.warning(
         "Preencha os campos obrigatórios",
         "O nome do serviço é obrigatório.",
@@ -1761,13 +2048,19 @@ export default function ConfiguracoesPage() {
     setCreatingService(true);
     try {
       await serviceService.createService({
-        petshop_id: petshopId,
-        specialty: newServiceData.specialty,
-        service_type: newServiceData.service_type || newServiceData.specialty,
-        duration_minutes: newServiceData.duration_minutes,
-        price: newServiceData.price,
-        description: newServiceData.description,
-        is_active: true,
+        name: newServiceData.specialty,
+        duration_min: newServiceData.duration_minutes,
+        price: newServiceData.price_varies_by_size
+          ? undefined
+          : newServiceData.price || undefined,
+        description: newServiceData.description || undefined,
+        price_by_size: newServiceData.price_varies_by_size
+          ? {
+              small: newServiceData.price_small || undefined,
+              medium: newServiceData.price_medium || undefined,
+              large: newServiceData.price_large || undefined,
+            }
+          : undefined,
       });
       handleCloseNewServiceModal();
       await fetchServices();
@@ -1807,7 +2100,13 @@ export default function ConfiguracoesPage() {
           />
         );
       case "horarios":
-        return <HorariosContent />;
+        return (
+          <HorariosContent
+            petshop={petshop}
+            loading={loadingPetshop}
+            onSave={handleSaveHorarios}
+          />
+        );
       case "whatsapp":
         return (
           <WhatsAppContent status={whatsappStatus} loading={loadingWhatsapp} />
@@ -1844,6 +2143,7 @@ export default function ConfiguracoesPage() {
                 error={petshopError}
                 showNovoServico={activeTab === "servicos"}
                 onNovoServico={handleOpenNewServiceModal}
+                onLogout={logout}
               />
             </div>
 
@@ -1865,22 +2165,126 @@ export default function ConfiguracoesPage() {
         isOpen={editModalOpen}
         onClose={handleCloseEditModal}
         title="Editar serviço"
-        onSubmit={handleCloseEditModal}
+        onSubmit={handleUpdateService}
         submitText="Salvar"
         cancelText="Cancelar"
         className="max-w-[480px]"
       >
         <div className="flex flex-col gap-4">
-          <Input label="Nome do serviço" placeholder="Lorem ipsum" />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Duração (minutos)" type="number" placeholder="00" />
-            <Input label="Preço (R$)" placeholder="Lorem ipsum" />
+          <Input
+            label="Nome do serviço"
+            placeholder="Ex: Banho, Tosa, etc."
+            value={editingData.name}
+            onChange={(e) => handleEditingDataChange("name", e.target.value)}
+          />
+          <Input
+            label="Duração (minutos)"
+            type="number"
+            value={editingData.duration_minutes}
+            onChange={(e) =>
+              handleEditingDataChange(
+                "duration_minutes",
+                parseInt(e.target.value) || 0,
+              )
+            }
+            min="15"
+            step="15"
+          />
+
+          <div className="flex items-center justify-between rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] px-4 py-3">
+            <div className="flex-1">
+              <label
+                htmlFor="edit_price_varies_by_size"
+                className="cursor-pointer text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                Preço varia por porte?
+              </label>
+              <p className="text-xs font-normal text-[#727B8E]">
+                Defina preços diferentes para P, M e G
+              </p>
+            </div>
+            <label
+              htmlFor="edit_price_varies_by_size"
+              className="relative inline-flex cursor-pointer items-center"
+            >
+              <input
+                type="checkbox"
+                id="edit_price_varies_by_size"
+                checked={editingData.price_varies_by_size}
+                onChange={(e) =>
+                  handleEditingDataChange(
+                    "price_varies_by_size",
+                    e.target.checked,
+                  )
+                }
+                className="peer sr-only"
+              />
+              <div className="peer h-6 w-11 rounded-full bg-[#727B8E]/30 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[#1E62EC] peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#1E62EC]/20"></div>
+            </label>
           </div>
+
+          {!editingData.price_varies_by_size && (
+            <Input
+              label="Preço (R$)"
+              type="number"
+              value={editingData.price}
+              onChange={(e) => handleEditingDataChange("price", e.target.value)}
+              placeholder="0.00"
+              step="0.01"
+              min="0"
+            />
+          )}
+
+          {editingData.price_varies_by_size && (
+            <div className="grid grid-cols-3 gap-3">
+              <Input
+                label="Pequeno (P)"
+                type="number"
+                placeholder="0.00"
+                value={editingData.price_small}
+                onChange={(e) =>
+                  handleEditingDataChange("price_small", e.target.value)
+                }
+                step="0.01"
+                min="0"
+              />
+              <Input
+                label="Médio (M)"
+                type="number"
+                placeholder="0.00"
+                value={editingData.price_medium}
+                onChange={(e) =>
+                  handleEditingDataChange("price_medium", e.target.value)
+                }
+                step="0.01"
+                min="0"
+              />
+              <Input
+                label="Grande (G)"
+                type="number"
+                placeholder="0.00"
+                value={editingData.price_large}
+                onChange={(e) =>
+                  handleEditingDataChange("price_large", e.target.value)
+                }
+                step="0.01"
+                min="0"
+              />
+            </div>
+          )}
+
           <div>
             <label className="mb-2 block text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-              Observações
+              Descrição
             </label>
-            <TextArea placeholder="Lorem ipsum" rows={4} />
+            <TextArea
+              placeholder="Descrição do serviço..."
+              value={editingData.description}
+              onChange={(e) =>
+                handleEditingDataChange("description", e.target.value)
+              }
+              rows={4}
+            />
           </div>
         </div>
       </Modal>

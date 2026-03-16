@@ -15,6 +15,10 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL_AGENT")
 
+# Internal service URLs
+API_NODE_URL = os.getenv("API_NODE_URL", "http://localhost:3000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable not set")
 

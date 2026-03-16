@@ -1,49 +1,47 @@
 export interface Service {
-  id: string
-  petshop_id: number
-  professional_id?: string
-  specialty: string
-  service_type: string
-  price: number
-  duration_minutes: number
+  id: number
+  companyId: number
+  name: string
   description?: string
-  applicable_species?: string[]
-  applicable_sizes?: string[]
-  is_active: boolean
-  booking_enabled: boolean
-  created_at: string
+  durationMin: number
+  price?: number | null
+  priceBySize?: {
+    small?: number
+    medium?: number
+    large?: number
+  } | null
+  durationMultiplierLarge?: number | null
+  isActive?: boolean
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface ServiceCreate {
-  petshop_id: number
-  professional_id?: string
-  specialty: string
-  service_type: string
-  price: number
-  duration_minutes: number
+  name: string
   description?: string
-  applicable_species?: string[]
-  applicable_sizes?: string[]
-  is_active?: boolean
+  duration_min?: number
+  price?: number | string
+  price_by_size?: {
+    small?: number
+    medium?: number
+    large?: number
+  }
+  duration_multiplier_large?: number | string
 }
 
 export interface ServiceUpdate {
-  specialty?: string
-  service_type?: string
-  price?: number
-  duration_minutes?: number
+  name?: string
   description?: string
-  applicable_species?: string[]
-  applicable_sizes?: string[]
+  duration_min?: number
+  price?: number | string | null
+  price_by_size?: {
+    small?: number
+    medium?: number
+    large?: number
+  } | null
   is_active?: boolean
-  booking_enabled?: boolean
 }
 
 export interface ServiceFilters {
-  petshop_id?: number
-  specialty?: string
-  service_type?: string
-  professional_id?: string
   is_active?: boolean
-  booking_enabled?: boolean
 }

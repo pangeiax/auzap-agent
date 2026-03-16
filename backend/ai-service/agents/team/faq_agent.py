@@ -3,12 +3,18 @@ from agno.models.openai import OpenAIChat
 from config import OPENAI_MODEL
 from prompts.sales_prompt import build_faq_prompt
 from tools.faq_tools import search_knowledge_base
+from tools.booking_tools import build_booking_tools
 
 
 def build_faq_agent(context: dict, router_ctx: dict) -> Agent:
+    company_id = context["company_id"]
+    client_id = (context.get("client") or {}).get("id", "")
+
+    get_services = build_booking_tools(company_id, client_id)[0]
+
     return Agent(
         name="FAQ Agent",
         model=OpenAIChat(id=OPENAI_MODEL),
         instructions=build_faq_prompt(context, router_ctx),
-        tools=[search_knowledge_base],
+        tools=[search_knowledge_base, get_services],
     )

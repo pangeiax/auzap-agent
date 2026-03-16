@@ -21,3 +21,5 @@ export * from './usePayment'
 export * from './useNotifications'
 export * from './useBusinessHours'
 export * from './useToast'
+export * from './useSettings'
+

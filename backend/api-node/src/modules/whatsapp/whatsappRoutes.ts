@@ -8,6 +8,7 @@ import {
   logoutMyWhatsApp,
   reconnectMyWhatsApp,
   healthCheck,
+  sendMessage,
 } from './whatsappController'
 import { verifyToken } from '../../middleware/authMiddleware'
 
@@ -24,5 +25,6 @@ router.get('/qr', verifyToken, getQRCode)
 router.post('/logout', verifyToken, logoutMyWhatsApp)
 router.post('/reconnect', verifyToken, reconnectMyWhatsApp)
 router.get('/health', verifyToken, healthCheck)
+router.post('/send-message', verifyToken, sendMessage)
 
 export default router

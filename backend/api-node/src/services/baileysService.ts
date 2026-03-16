@@ -117,6 +117,33 @@ export async function sendTextMessage(
 }
 
 // ─────────────────────────────────────────
+// Inicia indicador "digitando..." no WhatsApp
+// ─────────────────────────────────────────
+export async function sendTyping(companyIdStr: string, jid: string): Promise<void> {
+  const socket = activeSockets.get(companyIdStr)
+  if (!socket) return
+  try {
+    await socket.presenceSubscribe(jid)
+    await socket.sendPresenceUpdate('composing', jid)
+  } catch {
+    // Não crítico — não bloqueia o fluxo principal
+  }
+}
+
+// ─────────────────────────────────────────
+// Remove indicador "digitando..."
+// ─────────────────────────────────────────
+export async function clearTyping(companyIdStr: string, jid: string): Promise<void> {
+  const socket = activeSockets.get(companyIdStr)
+  if (!socket) return
+  try {
+    await socket.sendPresenceUpdate('available', jid)
+  } catch {
+    // Não crítico
+  }
+}
+
+// ─────────────────────────────────────────
 // Retorna socket ativo
 // ─────────────────────────────────────────
 export function getSocket(companyIdStr: string) {

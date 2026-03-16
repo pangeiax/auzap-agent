@@ -19,13 +19,11 @@ export const clientService = {
     limit?: number
     offset?: number
   }): Promise<Client[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Client[]>('/clients', { params })
     return response.data
   },
 
   async searchClients(query: string, limit = 10): Promise<Client[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Client[]>('/clients/search', {
       params: { q: query, limit },
     })
@@ -33,13 +31,11 @@ export const clientService = {
   },
 
   async getClientDetails(clientId: string): Promise<ClientDetails> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<ClientDetails>(`/clients/${clientId}`)
     return response.data
   },
 
   async createClient(clientData: ClientCreate): Promise<Client> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.post<Client>('/clients', clientData)
     return response.data
   },
@@ -48,7 +44,6 @@ export const clientService = {
     clientId: string,
     updates: ClientUpdate
   ): Promise<Client> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.put<Client>(
       `/clients/${clientId}`,
       updates
@@ -72,7 +67,6 @@ export const clientService = {
     }>
     total: number
   }> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get(
       `/clients/${clientId}/conversations`,
       { params: { limit, offset } }
@@ -84,7 +78,6 @@ export const clientService = {
     clientId: string,
     petshopId?: number
   ): Promise<Pet[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Pet[]>(`/clients/${clientId}/pets`, {
       params: petshopId ? { petshop_id: petshopId } : {},
     })
@@ -92,7 +85,6 @@ export const clientService = {
   },
 
   async getClientContext(clientId: string): Promise<ClientContext> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<ClientContext>(
       `/clients/${clientId}/context`
     )
@@ -107,7 +99,6 @@ export const clientService = {
       activity_type?: string
     }
   ): Promise<ActivityResponse[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<ActivityResponse[]>(
       `/clients/${clientId}/activities`,
       { params }
@@ -116,11 +107,9 @@ export const clientService = {
   },
 
   async importClients(file: File): Promise<ImportResponse> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const formData = new FormData()
     formData.append('file', file)
 
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.post<ImportResponse>(
       '/clients/import',
       formData,

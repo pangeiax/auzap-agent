@@ -49,35 +49,28 @@ export const petService = {
     limit?: number
     offset?: number
   }): Promise<Pet[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Pet[]>('/pets', { params })
     return response.data
   },
   async getPet(petId: string): Promise<Pet> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Pet>(`/pets/${petId}`)
     return response.data
   },
   async createPet(petData: PetCreate): Promise<Pet> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const { petshop_id, ...body } = petData
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.post<Pet>('/pets', body, {
       params: { petshop_id },
     })
     return response.data
   },
   async updatePet(petId: string, updates: PetUpdate): Promise<Pet> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.put<Pet>(`/pets/${petId}`, updates)
     return response.data
   },
   async deletePet(petId: string): Promise<void> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     await api.delete(`/pets/${petId}`)
   },
   async getClientPets(clientId: string, petshopId?: number): Promise<Pet[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get<Pet[]>(`/clients/${clientId}/pets`, {
       params: petshopId ? { petshop_id: petshopId } : {},
     })
