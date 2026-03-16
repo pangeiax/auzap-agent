@@ -79,7 +79,7 @@ export async function listAppointments(req: Request, res: Response) {
 export async function getAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { id } = req.params
+    const id = req.params.id!
 
     const appointment = await prisma.petshopAppointment.findUnique({
       where: { id },
@@ -188,7 +188,7 @@ export async function scheduleAppointment(req: Request, res: Response) {
 export async function updateAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { id } = req.params
+    const id = req.params.id!
     const { status, notes, scheduled_at, schedule_id } = req.body
 
     const existing = await prisma.petshopAppointment.findUnique({ where: { id } })
@@ -220,7 +220,7 @@ export async function updateAppointment(req: Request, res: Response) {
 export async function cancelAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { id } = req.params
+    const id = req.params.id!
     const { cancel_reason } = req.body
 
     const existing = await prisma.petshopAppointment.findUnique({ where: { id } })
@@ -250,7 +250,7 @@ export async function cancelAppointment(req: Request, res: Response) {
 export async function confirmAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { id } = req.params
+    const id = req.params.id!
 
     const existing = await prisma.petshopAppointment.findUnique({ where: { id } })
     if (!existing || existing.companyId !== companyId) {
@@ -274,7 +274,7 @@ export async function confirmAppointment(req: Request, res: Response) {
 export async function rescheduleAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { id } = req.params
+    const id = req.params.id!
     const { new_scheduled_at, new_schedule_id } = req.body
 
     if (!new_scheduled_at) {

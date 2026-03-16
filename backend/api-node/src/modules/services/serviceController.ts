@@ -29,7 +29,7 @@ export async function listServices(req: Request, res: Response) {
 export async function getService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { serviceId } = req.params
+    const serviceId = req.params.serviceId!
 
     const service = await prisma.petshopService.findUnique({
       where: { id: parseInt(serviceId) },
@@ -63,9 +63,9 @@ export async function createService(req: Request, res: Response) {
         name,
         description,
         durationMin: duration_min || 60,
-        price: price ? parseFloat(price) : undefined,
+        price: price ? parseFloat(price) : null,
         priceBySize: price_by_size,
-        durationMultiplierLarge: duration_multiplier_large ? parseFloat(duration_multiplier_large) : undefined,
+        durationMultiplierLarge: duration_multiplier_large ? parseFloat(duration_multiplier_large) : null,
         isActive: true,
       },
     })
@@ -81,7 +81,7 @@ export async function createService(req: Request, res: Response) {
 export async function updateService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { serviceId } = req.params
+    const serviceId = req.params.serviceId!
     const { name, description, duration_min, price, price_by_size, is_active } = req.body
 
     const existing = await prisma.petshopService.findUnique({
@@ -98,8 +98,8 @@ export async function updateService(req: Request, res: Response) {
         name,
         description,
         durationMin: duration_min,
-        price: price !== undefined ? (price !== null && price !== '' ? parseFloat(String(price)) : null) : undefined,
-        priceBySize: price_by_size !== undefined ? price_by_size : undefined,
+        ...(price !== undefined ? { price: price !== null && price !== '' ? parseFloat(String(price)) : null } : {}),
+        ...(price_by_size !== undefined ? { priceBySize: price_by_size } : {}),
         isActive: is_active,
       },
     })
@@ -115,7 +115,7 @@ export async function updateService(req: Request, res: Response) {
 export async function deleteService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { serviceId } = req.params
+    const serviceId = req.params.serviceId!
 
     const existing = await prisma.petshopService.findUnique({
       where: { id: parseInt(serviceId) },
