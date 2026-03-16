@@ -38,7 +38,7 @@ export async function listPets(req: Request, res: Response) {
 export async function getPet(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { petId } = req.params
+    const petId = req.params.petId!
 
     const pet = await prisma.petshopPet.findUnique({
       where: { id: petId },
@@ -84,12 +84,12 @@ export async function createPet(req: Request, res: Response) {
     const pet = await prisma.petshopPet.create({
       data: {
         companyId,
-        clientId: client_id,
+        clientId: client_id as string,
         name,
         species,
         breed,
         size,
-        notes: medical_info ? JSON.stringify(medical_info) : undefined,
+        notes: medical_info ? JSON.stringify(medical_info) : null,
       },
     })
 
@@ -104,7 +104,7 @@ export async function createPet(req: Request, res: Response) {
 export async function updatePet(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { petId } = req.params
+    const petId = req.params.petId!
     const updateData = req.body
 
     const existing = await prisma.petshopPet.findUnique({
@@ -131,7 +131,7 @@ export async function updatePet(req: Request, res: Response) {
 export async function deletePet(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { petId } = req.params
+    const petId = req.params.petId!
 
     const existing = await prisma.petshopPet.findUnique({
       where: { id: petId },
@@ -156,7 +156,7 @@ export async function deletePet(req: Request, res: Response) {
 export async function getClientPets(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { clientId } = req.params
+    const clientId = req.params.clientId!
 
     // Verify client exists
     const client = await prisma.client.findUnique({

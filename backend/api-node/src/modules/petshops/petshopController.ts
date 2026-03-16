@@ -30,12 +30,12 @@ async function syncBusinessHoursToSchedules(
     // Support both string ("09:00-18:00") and object ({ open, close }) formats
     let openH: number, closeH: number
     if (typeof entry === 'string' && entry.includes('-')) {
-      const [openStr, closeStr] = entry.split('-')
-      openH = parseInt(openStr.split(':')[0], 10)
-      closeH = parseInt(closeStr.split(':')[0], 10)
+      const [openStr, closeStr] = entry.split('-') as [string, string]
+      openH = parseInt(openStr.split(':')[0]!, 10)
+      closeH = parseInt(closeStr.split(':')[0]!, 10)
     } else if (entry && typeof entry === 'object' && 'open' in entry && 'close' in entry) {
-      openH = parseInt(String(entry.open).split(':')[0], 10)
-      closeH = parseInt(String(entry.close).split(':')[0], 10)
+      openH = parseInt(String(entry.open).split(':')[0]!, 10)
+      closeH = parseInt(String(entry.close).split(':')[0]!, 10)
     } else {
       continue // Day closed or invalid
     }

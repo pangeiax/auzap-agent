@@ -49,7 +49,7 @@ export async function listConversations(req: Request, res: Response) {
 export async function getConversation(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { conversationId } = req.params
+    const conversationId = req.params.conversationId!
     const { limit = 50, offset = 0 } = req.query
 
     const conversation = await prisma.agentConversation.findUnique({
@@ -79,7 +79,7 @@ export async function getConversation(req: Request, res: Response) {
 export async function getMessages(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { conversationId } = req.params
+    const conversationId = req.params.conversationId!
     const { limit = 50, offset = 0 } = req.query
 
     const conversation = await prisma.agentConversation.findUnique({
@@ -108,7 +108,7 @@ export async function getMessages(req: Request, res: Response) {
 export async function sendMessage(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { conversationId } = req.params
+    const conversationId = req.params.conversationId!
     const { role, content } = req.body
 
     if (!role || !content) {
@@ -149,7 +149,7 @@ export async function sendMessage(req: Request, res: Response) {
 export async function getAnalysis(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { conversationId } = req.params
+    const conversationId = req.params.conversationId!
 
     const conversation = await prisma.agentConversation.findUnique({
       where: { id: conversationId },
@@ -189,7 +189,7 @@ export async function getAnalysis(req: Request, res: Response) {
 export async function toggleAI(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { conversationId } = req.params
+    const conversationId = req.params.conversationId!
     const { ai_paused, ai_pause_reason } = req.body
 
     const conversation = await prisma.agentConversation.findUnique({
@@ -245,7 +245,7 @@ export async function toggleAI(req: Request, res: Response) {
 export async function updateConversationStage(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { conversationId } = req.params
+    const conversationId = req.params.conversationId!
     const { kanban_column } = req.body
 
     if (!kanban_column) {

@@ -12,7 +12,7 @@ function getBrasiliaStartOfDay(date: Date): Date {
 
 function getBrasiliaDate(date: Date): string {
   const brasiliaTime = new Date(date.getTime() + BRASILIA_OFFSET_MS)
-  return brasiliaTime.toISOString().split('T')[0]
+  return brasiliaTime.toISOString().split('T')[0]!
 }
 
 function getPeriodStart(period: string): Date {
@@ -114,7 +114,7 @@ export async function getRevenueChart(req: Request, res: Response) {
         const d = new Date(appt.scheduledDate.getTime() + BRASILIA_OFFSET_MS)
         const day = d.getUTCDay()
         const weekStart = new Date(d.getTime() - day * 24 * 60 * 60 * 1000)
-        key = weekStart.toISOString().split('T')[0]
+        key = weekStart.toISOString().split('T')[0]!
       } else {
         // month
         const d = new Date(appt.scheduledDate.getTime() + BRASILIA_OFFSET_MS)
@@ -124,8 +124,8 @@ export async function getRevenueChart(req: Request, res: Response) {
       if (!grouped[key]) {
         grouped[key] = { revenue: 0, appointments: 0 }
       }
-      grouped[key].revenue += appt.priceCharged ? Number(appt.priceCharged) : 0
-      grouped[key].appointments += 1
+      grouped[key]!.revenue += appt.priceCharged ? Number(appt.priceCharged) : 0
+      grouped[key]!.appointments += 1
     }
 
     const result = Object.entries(grouped)
@@ -270,16 +270,16 @@ export async function getVisitsChart(req: Request, res: Response) {
         grouped[key] = { visits: 0, new_clients: 0, returning_clients: 0 }
       }
 
-      grouped[key].visits += 1
+      grouped[key]!.visits += 1
 
       const clientId: string | undefined = conversationClientMap[msg.conversationId]
       if (clientId != null) {
         const clientDate = clientCreatedAtMap[clientId]
         const msgDate = group_by === 'hour' ? key.split('T')[0] : key
         if (clientDate === msgDate) {
-          grouped[key].new_clients += 1
+          grouped[key]!.new_clients += 1
         } else {
-          grouped[key].returning_clients += 1
+          grouped[key]!.returning_clients += 1
         }
       }
     }
