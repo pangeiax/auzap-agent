@@ -11,7 +11,7 @@ def build_onboarding_agent(context: dict, router_ctx: dict) -> Agent:
 
     return Agent(
         name="Onboarding Agent",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id="gpt-4o"),
         instructions=build_onboarding_prompt(context, router_ctx),
         tools=build_client_tools(company_id, client_id),
     )
