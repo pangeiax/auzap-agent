@@ -32,14 +32,15 @@ def build_client_tools(company_id: int, client_id: str) -> list:
     def create_pet(name: str, species: str, breed: str, size: str) -> dict:
         """
         Cadastra um novo pet para o cliente.
-        OBRIGATÓRIO: todos os 4 campos devem ter sido informados EXPLICITAMENTE pelo cliente.
-        NÃO chame esta tool com valores assumidos ou padrão.
+        TODOS os 4 campos são OBRIGATÓRIOS — incluindo o porte.
+        O porte DEVE ter sido perguntado e informado EXPLICITAMENTE pelo cliente.
+        NUNCA deduza o porte pela raça — sempre pergunte antes de chamar esta tool.
 
         Args:
             name: Nome do pet (apelido dado pelo dono)
             species: Espécie — 'cachorro' ou 'gato'
             breed: Raça (ou 'SRD' apenas se o cliente disse que não sabe)
-            size: Porte — OBRIGATÓRIO: 'pequeno', 'médio' ou 'grande' (informado explicitamente pelo cliente)
+            size: Porte — 'pequeno', 'médio' ou 'grande' (DEVE ter sido PERGUNTADO ao cliente)
         """
         missing = []
         if not name or not name.strip():
@@ -55,14 +56,17 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             return {
                 "success": False,
                 "missing_fields": missing,
-                "message": f"Faltam dados obrigatórios: {', '.join(missing)}. Não é possível cadastrar sem eles.",
+                "message": f"Faltam dados obrigatórios: {', '.join(missing)}. Pergunte ao cliente antes de cadastrar.",
             }
 
         species_norm = species.lower().strip()
         size_norm = size.lower().strip()
 
         if species_norm not in ("cachorro", "gato"):
-            return {"success": False, "message": "Espécie inválida. Use 'cachorro' ou 'gato'."}
+            return {
+                "success": False,
+                "message": "Espécie inválida. Use 'cachorro' ou 'gato'.",
+            }
 
         size_map = {
             "pequeno": "small",
@@ -78,7 +82,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             return {
                 "success": False,
                 "missing_fields": ["porte (pequeno, médio ou grande)"],
-                "message": "Porte não informado ou inválido. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
             }
 
         with get_connection() as conn:
@@ -92,7 +96,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                 (company_id, client_id, name),
             )
             if cur.fetchone():
-                return {"success": False, "message": f"Já existe um pet chamado {name} cadastrado."}
+                return {
+                    "success": False,
+                    "message": f"Já existe um pet chamado {name} cadastrado.",
+                }
 
             cur.execute(
                 """
@@ -104,7 +111,87 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             )
             pet_id = cur.fetchone()["id"]
 
-        return {"success": True, "pet_id": str(pet_id), "message": f"{name} cadastrado com sucesso!"}
+        return {
+            "success": True,
+            "pet_id": str(pet_id),
+            "message": f"{name} cadastrado com sucesso!",
+        }
+
+    def set_pet_size(pet_name: str, size: str) -> dict:
+        """
+        Confirma e registra o porte do pet informado pelo cliente.
+        Use esta tool SEMPRE que o cliente informar o porte — tanto para pets já cadastrados quanto para pets ainda não cadastrados.
+
+        - Se o pet já existe no banco → atualiza o porte
+        - Se o pet ainda não foi cadastrado → retorna o porte confirmado para uso em create_pet e nos preços
+
+        O porte confirmado por esta tool define o preço dos serviços.
+        NUNCA deduza o porte pela raça — sempre pergunte ao cliente primeiro.
+
+        Args:
+            pet_name: Nome do pet (pode ser um pet já cadastrado ou o nome informado pelo cliente)
+            size: Porte informado pelo cliente — 'pequeno', 'médio' ou 'grande'
+        """
+        if not size or not size.strip():
+            return {
+                "success": False,
+                "message": "Porte não informado. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+            }
+
+        size_map = {
+            "pequeno": "small",
+            "médio": "medium",
+            "medio": "medium",
+            "grande": "large",
+            "small": "small",
+            "medium": "medium",
+            "large": "large",
+        }
+        size_db = size_map.get(size.lower().strip())
+        if not size_db:
+            return {
+                "success": False,
+                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+            }
+
+        size_label = {"small": "pequeno", "medium": "médio", "large": "grande"}.get(
+            size_db, size
+        )
+
+        # Tenta atualizar se o pet já existe no banco
+        updated = None
+        if pet_name and pet_name.strip():
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE petshop_pets
+                    SET size = %s
+                    WHERE company_id = %s AND client_id = %s
+                      AND LOWER(name) = LOWER(%s) AND is_active = TRUE
+                    RETURNING id, name
+                """,
+                    (size_db, company_id, client_id, pet_name),
+                )
+                updated = cur.fetchone()
+
+        if updated:
+            return {
+                "success": True,
+                "pet_updated": True,
+                "size": size_db,
+                "size_label": size_label,
+                "message": f"Porte de {updated['name']} confirmado como {size_label}!",
+            }
+        else:
+            # Pet ainda não cadastrado — retorna porte confirmado para uso posterior
+            return {
+                "success": True,
+                "pet_updated": False,
+                "size": size_db,
+                "size_label": size_label,
+                "message": f"Porte confirmado: {size_label}. Use este porte ao cadastrar o pet e para calcular preços.",
+            }
 
     VALID_STAGES = {"initial", "onboarding", "pet_registered", "booking", "completed"}
 
@@ -120,13 +207,17 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             return {"success": False, "message": "conversation_stage é obrigatório."}
 
         if conversation_stage not in VALID_STAGES:
-            logger.warning("advance_stage chamado com estágio inválido=%r", conversation_stage)
+            logger.warning(
+                "advance_stage chamado com estágio inválido=%r", conversation_stage
+            )
             return {
                 "success": False,
                 "message": f"Estágio inválido: '{conversation_stage}'. Valores permitidos: {', '.join(sorted(VALID_STAGES))}.",
             }
 
-        logger.info("advance_stage | client_id=%s | stage=%s", client_id, conversation_stage)
+        logger.info(
+            "advance_stage | client_id=%s | stage=%s", client_id, conversation_stage
+        )
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -173,4 +264,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             rows = cur.fetchall()
         return [dict(r) for r in rows]
 
-    return [get_client_pets, create_pet, advance_stage, get_upcoming_appointments]
+    return [
+        get_client_pets,
+        create_pet,
+        set_pet_size,
+        advance_stage,
+        get_upcoming_appointments,
+    ]

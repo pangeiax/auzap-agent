@@ -3,8 +3,8 @@ from datetime import date as _date, timedelta as _timedelta
 
 def build_router_prompt(context: dict) -> str:
     services = ", ".join(s["name"] for s in context.get("services", []))
-    today_display = context.get("today", "")          # DD/MM/YYYY — exibição
-    today_iso_str = context.get("today_iso", "")      # YYYY-MM-DD — parse interno
+    today_display = context.get("today", "")  # DD/MM/YYYY — exibição
+    today_iso_str = context.get("today_iso", "")  # YYYY-MM-DD — parse interno
     today_weekday = context.get("today_weekday", "")
 
     try:
@@ -17,7 +17,9 @@ def build_router_prompt(context: dict) -> str:
     # Mapeia próximos 7 dias em PT para o LLM não precisar calcular
     _PT = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
     next_day_list = [(today + _timedelta(days=i)) for i in range(1, 8)]
-    next_days = "\n".join(f"  {_PT[d.weekday()]}: {d.isoformat()}" for d in next_day_list)
+    next_days = "\n".join(
+        f"  {_PT[d.weekday()]}: {d.isoformat()}" for d in next_day_list
+    )
 
     # Data da próxima sexta para usar no exemplo
     next_friday = next(d for d in next_day_list if d.weekday() == 4)  # 4 = sexta-feira
@@ -45,11 +47,19 @@ booking_agent → qualquer intenção de agendar, remarcar ou cancelar
 sales_agent → perguntas sobre preço, valor ou o que inclui um serviço
   Gatilhos: "quanto custa", "qual o valor", "o que inclui", "tabela de preços"
 
-faq_agent → dúvidas gerais sobre o petshop (endereço, funcionamento, vacinas, documentos, políticas)
-  Gatilhos: "onde fica", "qual o telefone", "como funciona", "aceita", "precisa de"
+faq_agent → dúvidas gerais sobre o petshop (endereço, funcionamento, vacinas, documentos, políticas) E perguntas sobre serviços que NÃO existem na lista
+  Gatilhos: "onde fica", "qual o telefone", "como funciona", "aceita", "precisa de", "vocês fazem X?", "tem delivery?", "buscam?", qualquer pergunta sobre serviço/produto não listado acima
 
-escalation_agent → pedido explícito de humano OU insatisfação grave OU assunto totalmente fora do escopo
-  Gatilhos: "falar com atendente", "quero falar com uma pessoa", "indignado", tópico sem relação com petshop
+escalation_agent → Use quando:
+  1. Cliente pede EXPLICITAMENTE para falar com humano/atendente
+     Gatilhos: "falar com atendente", "quero falar com uma pessoa", "chama alguém", "quero um humano"
+  2. Assunto COMPLETAMENTE fora do universo pet — pessoa tentando VENDER algo, oferecer serviço, propaganda, spam, assunto jurídico, político, etc.
+     Gatilhos: "tenho uma proposta", "ofereço serviços de", "parceria comercial", "vendo", "compra de", assuntos não relacionados a pets
+  ⚠️ NÃO use escalation_agent para:
+    - Serviços do petshop que não existem na lista (ex: buscar pet, delivery, hospedagem) → use faq_agent
+    - Perguntas que a assistente não sabe responder sobre o petshop → use faq_agent
+    - Cliente confuso ou repetindo pergunta → use faq_agent
+    - Cliente reclamando do atendimento sem pedir humano → use faq_agent
 
 REGRA: se a intenção misturar preço + agendamento → use booking_agent (mais completo)
 
@@ -99,7 +109,17 @@ Analise TODO o histórico para extrair o contexto acumulado:
 "onde fica o petshop?" →
 {{"agent":"faq_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
 
+"vocês buscam o pet em casa?" / "tem delivery?" / "fazem hospedagem?" →
+{{"agent":"faq_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
+
 "quero falar com um atendente" →
 {{"agent":"escalation_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
+
+"tenho uma proposta comercial pra vocês" / "ofereço serviços de marketing" / "vendo ração no atacado" →
+{{"agent":"escalation_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
+
+━━━ REGRA DE MENSAGENS FRAGMENTADAS ━━━
+• Se a mensagem contiver múltiplas linhas ou parecer ser duas mensagens juntas, interprete-as como um ÚNICO contexto
+• Considere todo o conteúdo junto antes de classificar
 
 Responda SOMENTE com JSON válido. Sem markdown. Sem texto adicional."""

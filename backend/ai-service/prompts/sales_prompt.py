@@ -8,30 +8,50 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     client_name = client["name"] if client and client.get("name") else None
     active_pet = router_ctx.get("active_pet")
 
+    # Auto-resolve: se o cliente tem apenas 1 pet, usa ele automaticamente
+    if not active_pet and len(pets) == 1:
+        active_pet = pets[0]["name"]
+
     # Determina porte do pet ativo para exibir o preço correto
     active_pet_size = None
     active_pet_size_label = None
+    pet_missing_size = False
     if active_pet:
         match = next((p for p in pets if p["name"].lower() == active_pet.lower()), None)
         if match:
             size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
             active_pet_size = match.get("size", "")
             active_pet_size_label = size_map.get(active_pet_size)
+            if not active_pet_size:
+                pet_missing_size = True
+    elif pets:
+        # Múltiplos pets sem active_pet definido
+        for p in pets:
+            if not p.get("size"):
+                pet_missing_size = True
+                break
+    else:
+        # Nenhum pet cadastrado — porte desconhecido
+        pet_missing_size = True
 
     svc_lines = []
     for s in services:
         if s.get("price_by_size"):
             sz = s["price_by_size"]
             if active_pet_size:
-                price = f"R${sz.get(active_pet_size, '?')} (porte {active_pet_size_label})"
+                price = (
+                    f"R${sz.get(active_pet_size, '?')} (porte {active_pet_size_label})"
+                )
             else:
-                price = f"P:R${sz.get('small','?')} / M:R${sz.get('medium','?')} / G:R${sz.get('large','?')}"
+                price = "preço conforme porte"
         elif s.get("price"):
             price = f"R${s['price']}"
         else:
             price = "consultar"
         desc = f" — {s['description']}" if s.get("description") else ""
-        svc_lines.append(f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}")
+        svc_lines.append(
+            f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
+        )
 
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
     pet_context = (
@@ -40,15 +60,33 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
         else ""
     )
 
+    # Regra de porte obrigatório
+    size_rule = ""
+    if pet_missing_size:
+        size_rule = """\n⚠️ PORTE NÃO INFORMADO — REGRA OBRIGATÓRIA:
+O porte do pet ainda não é conhecido. O preço dos serviços DEPENDE do porte.
+Você DEVE seguir esta sequência ANTES de mostrar qualquer preço:
+1. Liste os serviços disponíveis SEM valores (apenas nomes e descrições)
+2. Pergunte ao cliente: "Qual o porte do pet? Pequeno, médio ou grande?"
+3. Após o cliente responder, chame set_pet_size para confirmar o porte
+4. Só ENTÃO informe os preços filtrados pelo porte confirmado
+
+NUNCA mostre preços de todos os portes (P/M/G) — isso confunde o cliente.
+NUNCA pule a pergunta do porte e vá direto aos preços.
+O porte confirmado via set_pet_size define o preço. Use o campo size_label da resposta."""
+
     return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}{pet_context}
 
 SERVIÇOS DISPONÍVEIS:
-{services_text}
+{services_text}{size_rule}
 
 ━━━ REGRAS ━━━
 • Tom WhatsApp: informal, direto — máximo 2 linhas, no máximo 1 emoji
-• Se o pet tem porte definido, mostre APENAS o preço do porte correto — não apresente a tabela inteira
+• Se o pet tem porte definido, mostre APENAS o preço do porte correto — NUNCA apresente a tabela P/M/G
+• Se o porte NÃO é conhecido, liste os serviços SEM preços e PERGUNTE o porte ANTES de qualquer valor
+• Após o cliente informar o porte, chame set_pet_size e só então mostre o preço filtrado
+• NUNCA liste preços de múltiplos portes — sempre filtre pelo porte do pet
 • Destaque o que o serviço inclui quando isso agregar valor à resposta
 • Se o cliente demonstrar interesse em agendar, sugira de forma natural: "Quer que eu já separe um horário?"
 • NUNCA invente preços — use APENAS os dados acima
@@ -61,11 +99,31 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
     business_hours = context.get("business_hours", {})
     features = context.get("features", {})
     services = context.get("services", [])
+    pets = context.get("pets", [])
     petshop_phone = context.get("petshop_phone")
     petshop_address = context.get("petshop_address")
     client = context.get("client")
 
     client_name = client["name"] if client and client.get("name") else None
+
+    # Auto-resolve: se o cliente tem apenas 1 pet, usa ele para preço por porte
+    auto_pet = None
+    auto_pet_size = None
+    auto_pet_size_label = None
+    if len(pets) == 1:
+        auto_pet = pets[0]
+        size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
+        auto_pet_size = auto_pet.get("size", "")
+        auto_pet_size_label = size_map.get(auto_pet_size)
+
+    # Detecta se algum pet não tem porte (ou se não tem pet nenhum)
+    pet_missing_size = False
+    if auto_pet and not auto_pet_size:
+        pet_missing_size = True
+    elif not auto_pet and pets:
+        pet_missing_size = any(not p.get("size") for p in pets)
+    elif not pets:
+        pet_missing_size = True
 
     hours_lines = (
         " | ".join(f"{d}: {h}" for d, h in business_hours.items()) or "não informado"
@@ -73,20 +131,27 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
 
     features_text = ""
     if features:
-        features_text = "\nDiferenciais: " + " | ".join(f"{k}: {v}" for k, v in features.items())
+        features_text = "\nDiferenciais: " + " | ".join(
+            f"{k}: {v}" for k, v in features.items()
+        )
 
-    # Serviços com preços
+    # Serviços com preços — usa porte do pet único se disponível
     svc_lines = []
     for s in services:
         if s.get("price_by_size"):
             sz = s["price_by_size"]
-            price = f"P:R${sz.get('small','?')} / M:R${sz.get('medium','?')} / G:R${sz.get('large','?')}"
+            if auto_pet_size:
+                price = f"R${sz.get(auto_pet_size, '?')} (porte {auto_pet_size_label})"
+            else:
+                price = "preço conforme porte"
         elif s.get("price"):
             price = f"R${s['price']}"
         else:
             price = "consultar"
         desc = f" — {s['description']}" if s.get("description") else ""
-        svc_lines.append(f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}")
+        svc_lines.append(
+            f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
+        )
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
 
     contact_parts = []
@@ -96,6 +161,20 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
         contact_parts.append(f"Endereço: {petshop_address}")
     contact_text = "\n".join(contact_parts)
 
+    # Regra de porte obrigatório
+    size_rule = ""
+    if pet_missing_size:
+        pets_no_size = [p["name"] for p in pets if not p.get("size")]
+        label = f" ({', '.join(pets_no_size)})" if pets_no_size else ""
+        size_rule = f"""\n⚠️ PORTE NÃO INFORMADO{label} — REGRA OBRIGATÓRIA:
+O preço dos serviços DEPENDE do porte do pet.
+Você DEVE seguir esta sequência ANTES de mostrar qualquer preço:
+1. Liste os serviços disponíveis SEM valores (apenas nomes e descrições)
+2. Pergunte ao cliente: "Qual o porte do pet? Pequeno, médio ou grande?"
+3. Após o cliente responder, chame set_pet_size para confirmar o porte
+4. Só ENTÃO informe os preços filtrados pelo porte confirmado
+NUNCA mostre preços de todos os portes (P/M/G). Sempre filtre pelo porte."""
+
     return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}
 
@@ -104,7 +183,7 @@ Horários: {hours_lines}{features_text}
 {contact_text}
 
 SERVIÇOS E PREÇOS:
-{services_text}
+{services_text}{size_rule}
 
 ━━━ REGRAS ━━━
 • Tom WhatsApp: informal, empático — máximo 2 linhas, no máximo 1 emoji
@@ -112,7 +191,8 @@ SERVIÇOS E PREÇOS:
 • Se perguntarem sobre serviços ou preços → use os dados acima diretamente, sem chamar tool
 • Se precisar de detalhes atualizados de serviços → chame get_services
 • Para qualquer outra dúvida que não encontrar acima → use search_knowledge_base antes de responder
-• Se não encontrar a resposta em nenhuma fonte → diga "deixa eu verificar com a equipe e te retorno" — NUNCA invente
+• Se o cliente perguntar sobre serviço ou produto que NÃO está na lista → informe que no momento não oferece esse serviço e apresente as alternativas disponíveis
+• Se não encontrar a resposta em nenhuma fonte → diga que não tem essa informação no momento e ofereça ajudar com outra coisa — NUNCA invente
 • Se a dúvida puder ser resolvida agendando algo → sugira naturalmente ao final
 • Quando o cliente perguntar endereço ou telefone → responda diretamente com os dados acima"""
 

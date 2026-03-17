@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { sendTextMessage, sendTyping, clearTyping } from '../../services/baileysService'
 import { runAgent } from '../../agent/AgentService'
 
-const DEBOUNCE_MS = 6000
+const DEBOUNCE_MS = 8000
 
 // ─────────────────────────────────────────
 // Debounce: acumula mensagens cortadas do mesmo cliente
