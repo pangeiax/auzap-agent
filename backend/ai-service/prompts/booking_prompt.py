@@ -62,15 +62,21 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     if pet_count == 0:
         pet_rule = "⚠️ Cliente sem pets cadastrados. Oriente-o a cadastrar um pet antes de prosseguir com o agendamento."
     elif pet_count == 1:
-        pet_rule = f"Cliente tem apenas {pets[0]['name']} (id={pets[0]['id']}). Assuma que o serviço é para ele sem perguntar."
+        pet_rule = f"Cliente tem apenas {pets[0]['name']} (id={pets[0]['id']}). Assuma que o serviço é para ele sem perguntar. Se o cliente mencionar OUTRO nome de pet que NÃO seja {pets[0]['name']}, esse pet NÃO existe — inicie o cadastro."
     else:
         nomes = ", ".join(p["name"] for p in pets)
-        pet_rule = f"Cliente tem {pet_count} pets ({nomes}). Pergunte para qual deles é o serviço antes de continuar."
+        pet_rule = f"Cliente tem {pet_count} pets cadastrados: {nomes}. Se o cliente mencionar um nome que NÃO está nesta lista, esse pet NÃO existe — inicie o cadastro."
 
     # Estado atual
+    size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
     estado = []
     if active_pet:
-        estado.append(f"Pet em foco: {active_pet}")
+        if active_pet_size:
+            estado.append(
+                f"Pet em foco: {active_pet} (porte {size_map.get(active_pet_size, active_pet_size)})"
+            )
+        else:
+            estado.append(f"Pet em foco: {active_pet} (porte NÃO definido)")
     if service:
         estado.append(f"Serviço em discussão: {service}")
     if date_hint:
@@ -108,9 +114,16 @@ PASSO 1 — SERVIÇO
 
 PASSO 2 — PET
 • Siga a regra do pet acima
-• ANTES de continuar, verifique se o pet tem espécie e porte preenchidos (chame get_client_pets)
-• Se o pet estiver SEM PORTE (size vazio ou null): PARE o fluxo. Pergunte ao cliente o porte (pequeno, médio ou grande), chame set_pet_size para confirmar, e SÓ continue após o porte estar confirmado.
-• O porte confirmado via set_pet_size define o preço do serviço — use o campo size_label da resposta
+• ⚠️ REGRA CRÍTICA: Compare o nome do pet mencionado pelo cliente com a lista de PETS DO CLIENTE acima.
+  Se o nome NÃO está na lista → o pet NÃO existe no sistema. Informe ao cliente que esse pet ainda não está cadastrado e inicie o cadastro:
+  1. Pergunte o porte (pequeno, médio ou grande) PRIMEIRO
+  2. Após o porte, analise o que o cliente JÁ informou no histórico (nome, espécie, raça). Pergunte APENAS os campos que ainda faltam — NUNCA repita uma pergunta cujo dado já foi mencionado.
+     Exemplo: se o cliente disse "o Liam" → nome já é conhecido. Se disse "meu pastor alemão" → espécie (cachorro) e raça (Pastor Alemão) já são conhecidos.
+  3. Chame create_pet com os 4 campos (nome, espécie, raça, porte)
+  4. Só após o cadastro, retome o agendamento
+  NUNCA prossiga com agendamento para um pet que não está na lista de pets cadastrados.
+• Se o pet JÁ tem porte definido no contexto (ex: "porte small", "porte medium", "porte large") → use direto. NÃO chame set_pet_size — o porte já é conhecido.
+• Se o pet estiver SEM PORTE (size vazio ou null): PARE o fluxo. Pergunte o porte (pequeno, médio ou grande), chame set_pet_size para confirmar, e SÓ continue após confirmação.
 • Se o pet estiver sem espécie: informe o cliente que precisa completar o cadastro
 • NÃO prossiga para data/horário com pet sem porte definido
 • Com pet completo e porte conhecido, mostre o preço correto para aquele porte

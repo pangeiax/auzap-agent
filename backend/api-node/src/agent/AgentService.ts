@@ -4,6 +4,7 @@ interface AgentRequest {
   company_id: number
   client_phone: string
   message: string
+  image_base64?: string
 }
 
 interface AgentResponse {
@@ -15,12 +16,14 @@ interface AgentResponse {
 export async function runAgent(
   companyId: number,
   clientPhone: string,
-  message: string
+  message: string,
+  imageBase64?: string
 ): Promise<AgentResponse> {
   const body: AgentRequest = {
     company_id: companyId,
     client_phone: clientPhone,
     message,
+    ...(imageBase64 ? { image_base64: imageBase64 } : {}),
   }
 
   const response = await fetch(`${AI_SERVICE_URL}/run`, {

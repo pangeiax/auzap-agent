@@ -1,9 +1,11 @@
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
 load_dotenv()
 
@@ -20,6 +22,8 @@ logger = logging.getLogger("ai-service")
 
 app = FastAPI(title="Petshop AI Service")
 
+_openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 # ─────────────────────────────────────────
 # Schema da requisição
@@ -28,6 +32,7 @@ class AgentRequest(BaseModel):
     company_id: int
     client_phone: str
     message: str
+    image_base64: Optional[str] = None
 
 
 class AgentResponse(BaseModel):
@@ -42,15 +47,54 @@ class ReactivateRequest(BaseModel):
 
 
 # ─────────────────────────────────────────
+# Descreve imagem via GPT-4o-mini vision
+# ─────────────────────────────────────────
+async def describe_image(image_base64: str, caption: str = "") -> str:
+    prompt = (
+        "Descreva o conteúdo desta imagem em detalhes. "
+        "Se houver texto, transcreva-o integralmente. "
+        "Responda em português."
+    )
+    if caption:
+        prompt += f"\n\nO usuário também enviou a seguinte legenda: '{caption}'"
+
+    try:
+        response = await _openai_client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}",
+                                "detail": "low",
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+            max_tokens=500,
+        )
+        return response.choices[0].message.content or "Imagem recebida, mas não foi possível descrever o conteúdo."
+    except Exception as e:
+        logger.error("Erro ao descrever imagem via vision: %s", e)
+        return "Imagem recebida, mas não foi possível descrever o conteúdo."
+
+
+# ─────────────────────────────────────────
 # POST /run
 # Recebe mensagem do api-node e retorna resposta do agente
 # ─────────────────────────────────────────
 @app.post("/run", response_model=AgentResponse)
 async def run_agent(req: AgentRequest):
     logger.info(
-        "Requisição recebida | company_id=%s | phone=%s | message=%.80r",
+        "Requisição recebida | company_id=%s | phone=%s | has_image=%s | message=%.80r",
         req.company_id,
         req.client_phone,
+        bool(req.image_base64),
         req.message,
     )
     try:
@@ -61,19 +105,29 @@ async def run_agent(req: AgentRequest):
         _BRASILIA = timezone(timedelta(hours=-3))
         _PT_WEEKDAYS = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
         _today_brt = datetime.now(_BRASILIA).date()
-        context["today"] = _today_brt.strftime("%d/%m/%Y")          # formato BR para exibição
-        context["today_iso"] = _today_brt.isoformat()                # YYYY-MM-DD para cálculos internos
+        context["today"] = _today_brt.strftime("%d/%m/%Y")
+        context["today_iso"] = _today_brt.isoformat()
         context["today_weekday"] = _PT_WEEKDAYS[_today_brt.weekday()]
 
-        # 2. Carrega histórico do Redis
+        # 2. Se houver imagem, descreve via vision e monta mensagem enriquecida
+        message_for_agent = req.message
+        if req.image_base64:
+            logger.info("Descrevendo imagem via vision | company_id=%s | phone=%s", req.company_id, req.client_phone)
+            image_description = await describe_image(req.image_base64, req.message)
+            logger.info("Descrição da imagem: %.120r", image_description)
+            message_for_agent = f"[📷 O usuário enviou uma imagem. Descrição: {image_description}]"
+            if req.message:
+                message_for_agent += f"\n\nLegenda enviada pelo usuário: {req.message}"
+
+        # 3. Carrega histórico do Redis
         history = await get_history(req.company_id, req.client_phone)
 
-        # 3. Salva mensagem do usuário no histórico
-        await save_message(req.company_id, req.client_phone, "user", req.message)
+        # 4. Salva mensagem do usuário no histórico (versão enriquecida se houver imagem)
+        await save_message(req.company_id, req.client_phone, "user", message_for_agent)
 
-        # 4. Executa o router agent
+        # 5. Executa o router agent
         result = await run_router(
-            message=req.message,
+            message=message_for_agent,
             context=context,
             history=history,
         )
@@ -85,7 +139,7 @@ async def run_agent(req: AgentRequest):
             result["reply"],
         )
 
-        # 5. Salva resposta do agente no histórico
+        # 6. Salva resposta do agente no histórico
         await save_message(
             req.company_id, req.client_phone, "assistant", result["reply"]
         )
