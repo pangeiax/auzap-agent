@@ -111,6 +111,16 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             )
             pet_id = cur.fetchone()["id"]
 
+            if client_id:
+                cur.execute(
+                    """
+                    UPDATE clients
+                    SET conversation_stage = 'pet_registered', updated_at = NOW()
+                    WHERE id = %s AND company_id = %s
+                """,
+                    (client_id, company_id),
+                )
+
         return {
             "success": True,
             "pet_id": str(pet_id),

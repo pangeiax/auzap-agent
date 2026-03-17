@@ -78,7 +78,10 @@ async def describe_image(image_base64: str, caption: str = "") -> str:
             ],
             max_tokens=500,
         )
-        return response.choices[0].message.content or "Imagem recebida, mas não foi possível descrever o conteúdo."
+        return (
+            response.choices[0].message.content
+            or "Imagem recebida, mas não foi possível descrever o conteúdo."
+        )
     except Exception as e:
         logger.error("Erro ao descrever imagem via vision: %s", e)
         return "Imagem recebida, mas não foi possível descrever o conteúdo."
@@ -103,7 +106,15 @@ async def run_agent(req: AgentRequest):
 
         # Injeta data atual no fuso de Brasília (UTC-3)
         _BRASILIA = timezone(timedelta(hours=-3))
-        _PT_WEEKDAYS = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+        _PT_WEEKDAYS = [
+            "Segunda-feira",
+            "Terça-feira",
+            "Quarta-feira",
+            "Quinta-feira",
+            "Sexta-feira",
+            "Sábado",
+            "Domingo",
+        ]
         _today_brt = datetime.now(_BRASILIA).date()
         context["today"] = _today_brt.strftime("%d/%m/%Y")
         context["today_iso"] = _today_brt.isoformat()
@@ -112,10 +123,16 @@ async def run_agent(req: AgentRequest):
         # 2. Se houver imagem, descreve via vision e monta mensagem enriquecida
         message_for_agent = req.message
         if req.image_base64:
-            logger.info("Descrevendo imagem via vision | company_id=%s | phone=%s", req.company_id, req.client_phone)
+            logger.info(
+                "Descrevendo imagem via vision | company_id=%s | phone=%s",
+                req.company_id,
+                req.client_phone,
+            )
             image_description = await describe_image(req.image_base64, req.message)
             logger.info("Descrição da imagem: %.120r", image_description)
-            message_for_agent = f"[📷 O usuário enviou uma imagem. Descrição: {image_description}]"
+            message_for_agent = (
+                f"[📷 O usuário enviou uma imagem. Descrição: {image_description}]"
+            )
             if req.message:
                 message_for_agent += f"\n\nLegenda enviada pelo usuário: {req.message}"
 
@@ -151,8 +168,43 @@ async def run_agent(req: AgentRequest):
         )
 
     except Exception as e:
-        logger.exception("Erro ao processar mensagem | company_id=%s | phone=%s", req.company_id, req.client_phone)
+        logger.exception(
+            "Erro ao processar mensagem | company_id=%s | phone=%s",
+            req.company_id,
+            req.client_phone,
+        )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────
+# POST /history/pop
+# Remove as últimas N mensagens do Redis
+# Usado para descartar resposta invalidada pela concorrência
+# ─────────────────────────────────────────
+class PopMessagesRequest(BaseModel):
+    company_id: int
+    client_phone: str
+    count: int = 1
+
+
+@app.post("/history/pop")
+async def pop_from_history(req: PopMessagesRequest):
+    from memory.redis_memory import _redis_client, _key
+
+    r = _redis_client()
+    try:
+        key = _key(req.company_id, req.client_phone)
+        for _ in range(req.count):
+            await r.rpop(key)
+        logger.info(
+            "Removidas %d mensagem(ns) do Redis | company_id=%s | phone=%s",
+            req.count,
+            req.company_id,
+            req.client_phone,
+        )
+    finally:
+        await r.aclose()
+    return {"success": True}
 
 
 # ─────────────────────────────────────────

@@ -3,6 +3,8 @@ from datetime import date as _date, timedelta as _timedelta
 
 def build_router_prompt(context: dict) -> str:
     services = ", ".join(s["name"] for s in context.get("services", []))
+    client = context.get("client") or {}
+    client_stage = client.get("conversation_stage") or "desconhecido"
     today_display = context.get("today", "")  # DD/MM/YYYY — exibição
     today_iso_str = context.get("today_iso", "")  # YYYY-MM-DD — parse interno
     today_weekday = context.get("today_weekday", "")
@@ -29,6 +31,7 @@ Analise o HISTÓRICO COMPLETO + mensagem atual e retorne um JSON com os campos a
 
 ━━━ REFERÊNCIA DE DATAS ━━━
 Hoje: {today_display} ({today_weekday})
+Estágio atual no CRM: {client_stage}
 Próximos dias (use EXATAMENTE estas datas — NUNCA calcule você mesmo):
 {next_days}
 
@@ -63,13 +66,25 @@ escalation_agent → Use quando:
 
 REGRA: se a intenção misturar preço + agendamento → use booking_agent (mais completo)
 
+━━━ REGRA DE PÓS-CONCLUSÃO ━━━
+Se o histórico mostrar que a assistente JÁ concluiu com sucesso um cadastro de pet ou um agendamento, e a mensagem atual for só agradecimento/encerramento
+("obrigado", "show", "valeu", "perfeito", "blz", "top", "show obrigado") sem novo pedido:
+• NÃO trate como novo cadastro
+• NÃO trate como novo agendamento
+• NÃO marque awaiting_confirmation=true
+• Use stage="COMPLETED"
+• Se a última ação concluída foi um AGENDAMENTO → booking_agent
+• Se a última ação concluída foi um CADASTRO DE PET → onboarding_agent
+• Se o Estágio atual no CRM for "completed", isso é um sinal forte de que a ação principal já foi concluída
+• Se o Estágio atual no CRM for "pet_registered" e a mensagem for só agradecimento/encerramento, trate como pós-cadastro e use onboarding_agent com stage="COMPLETED"
+
 ━━━ ESTÁGIOS ━━━
 WELCOME             → primeira mensagem da conversa
 PET_REGISTRATION    → coletando dados do pet
 SERVICE_SELECTION   → serviço ainda não definido
 SCHEDULING          → serviço definido, coletando data/hora
 AWAITING_CONFIRMATION → resumo enviado, aguardando "sim" ou "não" do cliente
-COMPLETED           → agendamento criado com sucesso
+COMPLETED           → uma ação principal já foi concluída com sucesso (cadastro ou agendamento)
 
 ━━━ CAMPOS A EXTRAIR ━━━
 Analise TODO o histórico para extrair o contexto acumulado:
@@ -105,6 +120,12 @@ Analise TODO o histórico para extrair o contexto acumulado:
 
 [assistente enviou resumo "Confirma?", cliente responde "sim"] →
 {{"agent":"booking_agent","stage":"AWAITING_CONFIRMATION","active_pet":"Rex","service":"Banho","date_mentioned":"2026-03-20","selected_time":"09:00","awaiting_confirmation":true}}
+
+[assistente confirmou agendamento com sucesso, cliente responde "show, obrigado"] →
+{{"agent":"booking_agent","stage":"COMPLETED","active_pet":"Rex","service":"Banho","date_mentioned":"2026-03-20","selected_time":"09:00","awaiting_confirmation":false}}
+
+[assistente confirmou cadastro do pet com sucesso, cliente responde "valeu"] →
+{{"agent":"onboarding_agent","stage":"COMPLETED","active_pet":"Rex","service":null,"date_mentioned":null,"awaiting_confirmation":false}}
 
 "onde fica o petshop?" →
 {{"agent":"faq_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}

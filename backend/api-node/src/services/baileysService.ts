@@ -21,6 +21,20 @@ import { handleIncomingMessage } from '../modules/webhook/messageHandle'
 // companyId (string) → socket do Baileys
 // ─────────────────────────────────────────
 const activeSockets = new Map<string, ReturnType<typeof makeWASocket>>()
+const typingIntervals = new Map<string, ReturnType<typeof setInterval>>()
+
+function getTypingKey(companyIdStr: string, jid: string): string {
+  return `${companyIdStr}:${jid}`
+}
+
+function clearTypingIntervalsForCompany(companyIdStr: string): void {
+  for (const [key, interval] of typingIntervals.entries()) {
+    if (key.startsWith(`${companyIdStr}:`)) {
+      clearInterval(interval)
+      typingIntervals.delete(key)
+    }
+  }
+}
 
 // ─────────────────────────────────────────
 // Inicia sessão Baileys para uma company
@@ -69,6 +83,7 @@ export async function startBaileysSession(
 
       console.log(`[Baileys][company:${companyIdStr}] Desconectado. Reconectar: ${shouldReconnect}`)
       await upsertSession(companyId, 'disconnected')
+      clearTypingIntervalsForCompany(companyIdStr)
 
       if (shouldReconnect) {
         setTimeout(() => startBaileysSession(companyIdStr), 3000)
@@ -144,9 +159,23 @@ export async function sendTextMessage(
 export async function sendTyping(companyIdStr: string, jid: string): Promise<void> {
   const socket = activeSockets.get(companyIdStr)
   if (!socket) return
+
+  const typingKey = getTypingKey(companyIdStr, jid)
+  if (typingIntervals.has(typingKey)) return
+
   try {
     await socket.presenceSubscribe(jid)
     await socket.sendPresenceUpdate('composing', jid)
+
+    const interval = setInterval(() => {
+      const activeSocket = activeSockets.get(companyIdStr)
+      if (!activeSocket) return
+      activeSocket.sendPresenceUpdate('composing', jid).catch(() => {
+        // Não crítico
+      })
+    }, 4000)
+
+    typingIntervals.set(typingKey, interval)
   } catch {
     // Não crítico — não bloqueia o fluxo principal
   }
@@ -156,6 +185,13 @@ export async function sendTyping(companyIdStr: string, jid: string): Promise<voi
 // Remove indicador "digitando..."
 // ─────────────────────────────────────────
 export async function clearTyping(companyIdStr: string, jid: string): Promise<void> {
+  const typingKey = getTypingKey(companyIdStr, jid)
+  const interval = typingIntervals.get(typingKey)
+  if (interval) {
+    clearInterval(interval)
+    typingIntervals.delete(typingKey)
+  }
+
   const socket = activeSockets.get(companyIdStr)
   if (!socket) return
   try {
@@ -176,6 +212,7 @@ export function getSocket(companyIdStr: string) {
 // Desconecta sessão
 // ─────────────────────────────────────────
 export async function disconnectSession(companyIdStr: string): Promise<void> {
+  clearTypingIntervalsForCompany(companyIdStr)
   const socket = activeSockets.get(companyIdStr)
   if (socket) {
     await socket.logout()
