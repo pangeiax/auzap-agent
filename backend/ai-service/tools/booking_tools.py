@@ -44,11 +44,17 @@ def build_booking_tools(company_id: int, client_id) -> list:
         try:
             parsed_date = date.fromisoformat(target_date)
         except ValueError:
-            return {"available": False, "message": "Data inválida. Use o formato YYYY-MM-DD."}
+            return {
+                "available": False,
+                "message": "Data inválida. Use o formato YYYY-MM-DD.",
+            }
 
         today = date.today()
         if parsed_date < today:
-            return {"available": False, "message": "Não é possível agendar em datas passadas."}
+            return {
+                "available": False,
+                "message": "Não é possível agendar em datas passadas.",
+            }
         if parsed_date > today + timedelta(days=60):
             return {
                 "available": False,
@@ -160,14 +166,22 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
         # Garante que client_id é válido antes de qualquer query
         if not client_id:
-            logger.error("create_appointment: client_id vazio — cliente não encontrado no contexto")
-            return {"success": False, "message": "Cliente não identificado. Não é possível criar o agendamento."}
+            logger.error(
+                "create_appointment: client_id vazio — cliente não encontrado no contexto"
+            )
+            return {
+                "success": False,
+                "message": "Cliente não identificado. Não é possível criar o agendamento.",
+            }
 
         # Valida formato da data antes de qualquer query
         try:
             date.fromisoformat(scheduled_date)
         except (ValueError, TypeError):
-            return {"success": False, "message": "scheduled_date inválida. Use o formato YYYY-MM-DD."}
+            return {
+                "success": False,
+                "message": "scheduled_date inválida. Use o formato YYYY-MM-DD.",
+            }
 
         # pet_id é UUID (string) — NÃO converter para int
         # service_id e schedule_id são integer no banco
@@ -175,20 +189,40 @@ def build_booking_tools(company_id: int, client_id) -> list:
             service_id = int(service_id)
             schedule_id = int(schedule_id)
         except (ValueError, TypeError):
-            return {"success": False, "message": "service_id e schedule_id devem ser números inteiros válidos."}
+            return {
+                "success": False,
+                "message": "service_id e schedule_id devem ser números inteiros válidos.",
+            }
 
         logger.info(
             "create_appointment | client_id=%s | pet_id=%s | service_id=%s | schedule_id=%s | date=%s",
-            client_id, pet_id, service_id, schedule_id, scheduled_date,
+            client_id,
+            pet_id,
+            service_id,
+            schedule_id,
+            scheduled_date,
         )
         try:
-            result = _do_create_appointment(company_id, client_id, pet_id, service_id, schedule_id, scheduled_date, notes)
+            result = _do_create_appointment(
+                company_id,
+                client_id,
+                pet_id,
+                service_id,
+                schedule_id,
+                scheduled_date,
+                notes,
+            )
             logger.info("create_appointment resultado: %s", result)
             return result
         except Exception as exc:
             logger.exception(
                 "create_appointment falhou | client_id=%s | pet_id=%s | service_id=%s | schedule_id=%s | date=%s | erro=%s",
-                client_id, pet_id, service_id, schedule_id, scheduled_date, exc,
+                client_id,
+                pet_id,
+                service_id,
+                schedule_id,
+                scheduled_date,
+                exc,
             )
             return {
                 "success": False,
@@ -196,7 +230,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "debug": str(exc),
             }
 
-    def _do_create_appointment(company_id, client_id, pet_id, service_id, schedule_id, scheduled_date, notes):
+    def _do_create_appointment(
+        company_id, client_id, pet_id, service_id, schedule_id, scheduled_date, notes
+    ):
         with get_connection() as conn:
             cur = conn.cursor()
 
@@ -254,7 +290,10 @@ def build_booking_tools(company_id: int, client_id) -> list:
             )
             row = cur.fetchone()
             if not row or row["vacancies"] <= 0:
-                return {"success": False, "message": "Horário não disponível. Por favor, escolha outro."}
+                return {
+                    "success": False,
+                    "message": "Horário não disponível. Por favor, escolha outro.",
+                }
 
             # Calcula preço cobrado: prioriza price_by_size se existir, fallback para price fixo
             price_charged = service_row["price"]
@@ -266,12 +305,16 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 elif pet_size:
                     logger.warning(
                         "Porte '%s' não encontrado em price_by_size=%s — usando price fixo",
-                        pet_size, price_by_size,
+                        pet_size,
+                        price_by_size,
                     )
 
             logger.info(
                 "price_charged calculado: %s (pet_size=%s, price_by_size=%s, price_fixo=%s)",
-                price_charged, pet_row.get("size"), price_by_size, service_row["price"],
+                price_charged,
+                pet_row.get("size"),
+                price_by_size,
+                service_row["price"],
             )
 
             cur.execute(
@@ -295,10 +338,19 @@ def build_booking_tools(company_id: int, client_id) -> list:
             )
             appointment_id = cur.fetchone()["id"]
 
+            cur.execute(
+                """
+                UPDATE clients
+                SET conversation_stage = 'completed', updated_at = NOW()
+                WHERE id = %s AND company_id = %s
+            """,
+                (client_id, company_id),
+            )
+
         return {
             "success": True,
             "appointment_id": str(appointment_id),
-            "message": "Agendamento confirmado com sucesso! 🐾",
+            "message": "Agendamento confirmado com sucesso!",
         }
 
     def cancel_appointment(appointment_id: str, reason: str = None) -> dict:
@@ -312,7 +364,12 @@ def build_booking_tools(company_id: int, client_id) -> list:
         if not appointment_id:
             return {"success": False, "message": "appointment_id é obrigatório."}
 
-        logger.info("cancel_appointment | client_id=%s | appointment_id=%s | reason=%r", client_id, appointment_id, reason)
+        logger.info(
+            "cancel_appointment | client_id=%s | appointment_id=%s | reason=%r",
+            client_id,
+            appointment_id,
+            reason,
+        )
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -328,7 +385,10 @@ def build_booking_tools(company_id: int, client_id) -> list:
             updated = cur.fetchone()
 
         if not updated:
-            return {"success": False, "message": "Agendamento não encontrado ou já finalizado."}
+            return {
+                "success": False,
+                "message": "Agendamento não encontrado ou já finalizado.",
+            }
         return {"success": True, "message": "Agendamento cancelado com sucesso."}
 
     return [get_services, get_available_times, create_appointment, cancel_appointment]

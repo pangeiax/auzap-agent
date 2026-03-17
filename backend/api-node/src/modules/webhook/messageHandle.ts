@@ -2,7 +2,7 @@
 import { proto, downloadMediaMessage } from '@whiskeysockets/baileys'
 import { prisma } from '../../lib/prisma'
 import { sendTextMessage, sendTyping, clearTyping } from '../../services/baileysService'
-import { runAgent } from '../../agent/AgentService'
+import { runAgent, popFromHistory } from '../../agent/AgentService'
 
 const DEBOUNCE_MS = 8000
 
@@ -29,6 +29,86 @@ interface PendingEntry {
 }
 
 const pendingMessages = new Map<string, PendingEntry>()
+
+// ─────────────────────────────────────────
+// Lock de processamento por cliente
+// Se chegar mensagem durante processamento da IA,
+// a resposta atual é descartada e tudo é reprocessado
+// ─────────────────────────────────────────
+const processingLock = new Map<string, boolean>()
+const invalidated = new Map<string, boolean>()
+
+interface QueuedMessage {
+  parts: string[]
+  jid: string
+  pushName: string | null
+  socket: any
+  imageBase64?: string
+}
+
+const queuedMessages = new Map<string, QueuedMessage>()
+
+const ROUTER_STAGE_TO_CRM_STAGE: Record<string, string> = {
+  WELCOME: 'initial',
+  PET_REGISTRATION: 'onboarding',
+  SERVICE_SELECTION: 'booking',
+  SCHEDULING: 'booking',
+  AWAITING_CONFIRMATION: 'booking',
+  COMPLETED: 'completed',
+}
+
+function normalizeRouterStage(stage?: string | null): string | null {
+  if (!stage) {
+    return null
+  }
+
+  return ROUTER_STAGE_TO_CRM_STAGE[stage] ?? null
+}
+
+async function persistConversationStage(
+  clientId: string,
+  previousStage: string | null | undefined,
+  normalizedRouterStage: string | null
+): Promise<string | null> {
+  const freshClient = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { conversationStage: true },
+  })
+
+  const freshStage = freshClient?.conversationStage ?? null
+
+  // If a tool updated the CRM stage during agent execution, that stage is authoritative.
+  if (freshStage && freshStage !== (previousStage ?? null)) {
+    return freshStage
+  }
+
+  if (!normalizedRouterStage || normalizedRouterStage === freshStage) {
+    return freshStage
+  }
+
+  const updatedClient = await prisma.client.update({
+    where: { id: clientId },
+    data: { conversationStage: normalizedRouterStage },
+    select: { conversationStage: true },
+  })
+
+  return updatedClient.conversationStage ?? null
+}
+
+async function waitForPendingDebounceFlush(
+  companyId: number,
+  phone: string,
+  key: string
+): Promise<void> {
+  if (!invalidated.get(key) || queuedMessages.has(key) || !pendingMessages.has(key)) {
+    return
+  }
+
+  console.log(`[Concurrency][company:${companyId}] Aguardando debounce pendente de ${phone} fechar antes de continuar.`)
+  while (pendingMessages.has(key) && !queuedMessages.has(key)) {
+    await new Promise(resolve => setTimeout(resolve, 150))
+  }
+}
 
 // ─────────────────────────────────────────
 // Transcreve áudio via OpenAI Whisper
@@ -95,7 +175,7 @@ function enqueueDebounce(
     console.log(
       `[Handler][company:${companyId}] Processando mensagem consolidada de ${phone} (${parts.length} parte(s)): ${fullMessage}`
     )
-    await processMessage(companyId, socket, jid, phone, pushName, fullMessage)
+    await enqueueProcessing(companyId, socket, jid, phone, pushName, fullMessage)
   }, DEBOUNCE_MS)
 
   pendingMessages.set(key, { timer, parts, jid, pushName })
@@ -112,18 +192,23 @@ export async function handleIncomingMessage(
   const jid = msg.key.remoteJid!
   const phone = jid.replace('@s.whatsapp.net', '').replace('@g.us', '')
   const pushName = msg.pushName || null
+  const key = `${companyId}:${phone}`
 
   const isAudio = !!(msg.message?.audioMessage || msg.message?.ptvMessage)
   const isImage = !!msg.message?.imageMessage
 
   // ── Áudio/voz: transcreve e enfileira como texto ──────────
   if (isAudio) {
+    if (processingLock.get(key)) {
+      invalidated.set(key, true)
+      console.log(`[Concurrency][company:${companyId}] ⚡ Áudio de ${phone} chegou durante processamento. Resposta atual será bloqueada.`)
+    }
     console.log(`[Handler][company:${companyId}] Áudio recebido de ${phone}, transcrevendo...`)
     const transcription = await transcribeAudio(socket, msg)
     if (!transcription) {
       await sendTextMessage(
         String(companyId), jid,
-        'Recebi seu áudio, mas não consegui transcrever. Pode escrever sua mensagem? 🐾'
+        'Recebi seu áudio, mas não consegui transcrever. Pode escrever sua mensagem?'
       )
       return
     }
@@ -134,17 +219,21 @@ export async function handleIncomingMessage(
 
   // ── Imagem: baixa e envia ao agente via vision ────────────
   if (isImage) {
+    if (processingLock.get(key)) {
+      invalidated.set(key, true)
+      console.log(`[Concurrency][company:${companyId}] ⚡ Imagem de ${phone} chegou durante processamento. Resposta atual será bloqueada.`)
+    }
     const caption = msg.message!.imageMessage!.caption || ''
     try {
       const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
       const imageBase64 = buffer.toString('base64')
       console.log(`[Handler][company:${companyId}] Imagem recebida de ${phone} (legenda: "${caption}")`)
-      await processMessage(companyId, socket, jid, phone, pushName, caption, imageBase64)
+      await enqueueProcessing(companyId, socket, jid, phone, pushName, caption, imageBase64)
     } catch (err) {
       console.error(`[Handler][company:${companyId}] Erro ao baixar imagem:`, err)
       await sendTextMessage(
         String(companyId), jid,
-        'Recebi sua imagem, mas não consegui processá-la. Pode descrever o que precisa em texto ou áudio? 🐾'
+        'Recebi sua imagem, mas não consegui processá-la. Pode descrever o que precisa em texto ou áudio?'
       )
     }
     return
@@ -157,6 +246,10 @@ export async function handleIncomingMessage(
     ''
 
   if (text) {
+    if (processingLock.get(key)) {
+      invalidated.set(key, true)
+      console.log(`[Concurrency][company:${companyId}] ⚡ Texto de ${phone} chegou durante processamento. Resposta atual será bloqueada. Texto: "${text.substring(0, 80)}"`)
+    }
     console.log(`[Handler][company:${companyId}] Mensagem de ${phone}: ${text}`)
     enqueueDebounce(companyId, socket, jid, phone, pushName, text)
     return
@@ -172,12 +265,107 @@ export async function handleIncomingMessage(
   console.log(`[Handler][company:${companyId}] Mídia não suportada de ${phone}: ${messageKeys.join(', ')}`)
   await sendTextMessage(
     String(companyId), jid,
-    'Não consegui compreender o conteúdo enviado. Pode escrever sua mensagem ou enviar um áudio? 🐾'
+    'Não consegui compreender o conteúdo enviado. Pode escrever sua mensagem ou enviar um áudio?'
   )
 }
 
 // ─────────────────────────────────────────
+// Enfileira processamento com lock por cliente
+// Se já está processando → salva msg do user no banco,
+// marca como invalidada, e a resposta atual será descartada.
+// Após descartar, a IA reprocessa com o histórico completo.
+// ─────────────────────────────────────────
+async function enqueueProcessing(
+  companyId: number,
+  socket: any,
+  jid: string,
+  phone: string,
+  pushName: string | null,
+  text: string,
+  imageBase64?: string
+): Promise<void> {
+  const key = `${companyId}:${phone}`
+
+  if (processingLock.get(key)) {
+    const existing = queuedMessages.get(key)
+    if (existing) {
+      existing.parts.push(text)
+      if (imageBase64) {
+        existing.imageBase64 = imageBase64
+      }
+      console.log(`[Concurrency][company:${companyId}] Batch acumulado para ${phone}. Total pendente: ${existing.parts.length}`)
+    } else {
+      console.log(`[Concurrency][company:${companyId}] Batch debounced de ${phone} caiu durante processamento. Acumulando para reprocesso.`)
+      queuedMessages.set(key, {
+        parts: [text],
+        jid,
+        pushName,
+        socket,
+        ...(imageBase64 ? { imageBase64 } : {}),
+      })
+      console.log(`[Concurrency][company:${companyId}] Primeiro batch pendente registrado para ${phone}`)
+    }
+
+    return
+  }
+
+  // Adquire lock e processa
+  processingLock.set(key, true)
+  console.log(`[Concurrency][company:${companyId}] Lock adquirido para ${phone}`)
+  await sendTyping(String(companyId), jid)
+  try {
+    try {
+      await processMessage(companyId, socket, jid, phone, pushName, text, imageBase64)
+    } catch (err) {
+      console.error(`[Handler][company:${companyId}] Erro ao processar mensagem de ${phone}:`, err)
+    }
+
+    if (invalidated.get(key)) {
+      console.log(`[Concurrency][company:${companyId}] Resposta em andamento para ${phone} foi invalidada por mensagem nova.`)
+    }
+
+    await waitForPendingDebounceFlush(companyId, phone, key)
+    invalidated.delete(key)
+
+    while (queuedMessages.has(key)) {
+      const queued = queuedMessages.get(key)!
+      queuedMessages.delete(key)
+      const queuedText = queued.parts.join('\n')
+
+      console.log(`[Concurrency][company:${companyId}] 🔄 Reprocessando ${phone} com ${queued.parts.length} batch(es) acumulado(s).`)
+
+      invalidated.delete(key)
+      try {
+        await processMessage(
+          companyId,
+          queued.socket,
+          queued.jid,
+          phone,
+          queued.pushName,
+          queuedText,
+          queued.imageBase64
+        )
+      } catch (err) {
+        console.error(`[Handler][company:${companyId}] Erro ao reprocessar mensagem de ${phone}:`, err)
+      }
+
+      await waitForPendingDebounceFlush(companyId, phone, key)
+
+      if (queuedMessages.has(key)) {
+        console.log(`[Concurrency][company:${companyId}] 🔄 Novos batches entraram para ${phone} durante o reprocessamento. Continuando drenagem...`)
+      }
+    }
+  } finally {
+    invalidated.delete(key)
+    console.log(`[Concurrency][company:${companyId}] Lock liberado para ${phone}`)
+    processingLock.delete(key)
+    await clearTyping(String(companyId), jid)
+  }
+}
+
+// ─────────────────────────────────────────
 // Processa a mensagem consolidada após o debounce
+// skipSave=true quando é reprocessamento (msg já salva no banco)
 // ─────────────────────────────────────────
 async function processMessage(
   companyId: number,
@@ -186,7 +374,8 @@ async function processMessage(
   phone: string,
   pushName: string | null,
   text: string,
-  imageBase64?: string
+  imageBase64?: string,
+  skipSave: boolean = false
 ): Promise<void> {
   // ── 1. Busca ou cria o cliente ───────────
   let client = await prisma.client.findUnique({
@@ -237,26 +426,37 @@ async function processMessage(
   }
 
   // ── 3. Salva mensagem do usuário ─────────
-  const savedContent = imageBase64
-    ? (text ? `[imagem] ${text}` : '[imagem]')
-    : text
+  if (!skipSave) {
+    const savedContent = imageBase64
+      ? (text ? `[imagem] ${text}` : '[imagem]')
+      : text
 
-  await prisma.agentMessage.create({
-    data: {
-      conversationId: conversation.id,
-      companyId,
-      role: 'user',
-      content: savedContent,
-    },
-  })
+    await prisma.agentMessage.create({
+      data: {
+        conversationId: conversation.id,
+        companyId,
+        role: 'user',
+        content: savedContent,
+      },
+    })
+  }
 
   // ── 4. Gera e envia resposta do agente ───
+  const key = `${companyId}:${phone}`
   if (!client.aiPaused) {
-    await sendTyping(String(companyId), jid)
+    const messageForAgent = text
+    const previousConversationStage = client.conversationStage ?? null
 
-    const agentResponse = await generateAgentReply(companyId, phone, text, imageBase64)
+    const agentResponse = await generateAgentReply(companyId, phone, messageForAgent, imageBase64)
 
-    await clearTyping(String(companyId), jid)
+    // Se chegou mensagem nova durante o processamento, descarta esta resposta
+    if (invalidated.get(key)) {
+      console.log(`[Concurrency][company:${companyId}] DESCARTANDO resposta para ${phone}: "${agentResponse?.reply?.substring(0, 80) ?? '(vazio)'}..."`)
+      // Remove do Redis apenas a resposta descartada (assistant)
+      // A msg do user(A) continua no Redis — e a msg(B) será salva pelo /run do reprocessamento
+      await popFromHistory(companyId, phone, 1)
+      return
+    }
 
     if (agentResponse) {
       await prisma.agentMessage.create({
@@ -268,16 +468,15 @@ async function processMessage(
         },
       })
 
-      if (agentResponse.stage) {
-        await prisma.client.update({
-          where: { id: client.id },
-          data: { conversationStage: agentResponse.stage },
-        })
-      }
+      const persistedStage = await persistConversationStage(
+        client.id,
+        previousConversationStage,
+        normalizeRouterStage(agentResponse.stage)
+      )
 
       await sendTextMessage(String(companyId), jid, agentResponse.reply)
       console.log(
-        `[Handler][company:${companyId}] Resposta enviada para ${phone} | agente: ${agentResponse.agent_used ?? 'n/a'} | estágio: ${agentResponse.stage ?? 'n/a'}`
+        `[Handler][company:${companyId}] Resposta enviada para ${phone} | agente: ${agentResponse.agent_used ?? 'n/a'} | estágio router: ${agentResponse.stage ?? 'n/a'} | estágio CRM: ${persistedStage ?? 'n/a'}`
       )
 
       if (agentResponse.agent_used === 'escalation_agent') {
@@ -354,7 +553,7 @@ async function generateAgentReply(
   } catch (err) {
     console.error(`[Handler][company:${companyId}] Erro ao chamar AgentService:`, err)
     return {
-      reply: 'Desculpe, estou com dificuldades técnicas no momento. Tente novamente em alguns instantes. 🐾',
+      reply: 'Desculpe, estou com dificuldades técnicas no momento. Tente novamente em alguns instantes.',
     }
   }
 }

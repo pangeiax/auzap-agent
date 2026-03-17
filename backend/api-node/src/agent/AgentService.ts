@@ -39,3 +39,15 @@ export async function runAgent(
 
   return response.json() as Promise<AgentResponse>
 }
+
+export async function popFromHistory(
+  companyId: number,
+  clientPhone: string,
+  count: number = 1
+): Promise<void> {
+  await fetch(`${AI_SERVICE_URL}/history/pop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company_id: companyId, client_phone: clientPhone, count }),
+  })
+}
