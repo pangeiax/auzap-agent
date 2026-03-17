@@ -102,7 +102,7 @@ export async function startBaileysSession(
 }
 
 // ─────────────────────────────────────────
-// Envia mensagem de texto
+// Envia mensagem de texto (com retry)
 // ─────────────────────────────────────────
 export async function sendTextMessage(
   companyIdStr: string,
@@ -113,7 +113,25 @@ export async function sendTextMessage(
   if (!socket) {
     throw new Error(`[Baileys] Nenhum socket ativo para company ${companyIdStr}`)
   }
-  await socket.sendMessage(jid, { text })
+
+  const MAX_RETRIES = 2
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await socket.sendMessage(jid, { text })
+      return
+    } catch (err: any) {
+      const isTimeout = err?.output?.statusCode === 408 || err?.message === 'Timed Out'
+      if (isTimeout && attempt < MAX_RETRIES) {
+        console.warn(
+          `[Baileys][company:${companyIdStr}] Timeout ao enviar mensagem (tentativa ${attempt}/${MAX_RETRIES}), retentando em 3s...`
+        )
+        await new Promise(r => setTimeout(r, 3000))
+        continue
+      }
+      console.error(`[Baileys][company:${companyIdStr}] Falha ao enviar mensagem após ${attempt} tentativa(s):`, err?.message)
+      throw err
+    }
+  }
 }
 
 // ─────────────────────────────────────────

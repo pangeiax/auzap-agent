@@ -10,11 +10,13 @@ def build_booking_agent(context: dict, router_ctx: dict) -> Agent:
     company_id = context["company_id"]
     client_id = (context.get("client") or {}).get("id", "")
 
-    tools = build_booking_tools(company_id, client_id) + build_client_tools(company_id, client_id)
+    tools = build_booking_tools(company_id, client_id) + build_client_tools(
+        company_id, client_id
+    )
 
     return Agent(
         name="Booking Agent",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id="gpt-4o"),
         instructions=build_booking_prompt(context, router_ctx),
         tools=tools,
     )
