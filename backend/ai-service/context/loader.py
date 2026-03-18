@@ -15,10 +15,9 @@ async def load_context(company_id: int, client_phone: str) -> dict:
                 p.phone         AS petshop_phone,
                 p.address       AS petshop_address,
                 p.business_hours,
-                p.default_capacity_per_hour,
                 p.features
             FROM saas_companies c
-            JOIN saas_petshops p ON p.company_id = c.id
+            JOIN petshop_profile p ON p.company_id = c.id
             WHERE c.id = %s AND c.is_active = TRUE
         """,
             (company_id,),
@@ -61,6 +60,41 @@ async def load_context(company_id: int, client_phone: str) -> dict:
             )
             pets = cur.fetchall()
 
+        # Especialidades ativas
+        cur.execute("""
+            SELECT id, name, description, color
+            FROM petshop_specialties
+            WHERE company_id = %s AND is_active = TRUE
+            ORDER BY name
+        """, (company_id,))
+        specialties = cur.fetchall()
+
+        # Configuração de hospedagem
+        cur.execute("""
+            SELECT hotel_enabled, hotel_daily_rate, hotel_checkin_time, hotel_checkout_time,
+                   daycare_enabled, daycare_daily_rate, daycare_checkin_time, daycare_checkout_time
+            FROM petshop_lodging_config
+            WHERE company_id = %s
+        """, (company_id,))
+        lodging_config = cur.fetchone()
+
+        # Converte datetime.time → "HH:MM" string para evitar erros de subscript
+        # em qualquer prompt que faça lodging_config.get("...time")[:5]
+        def _fmt_time(t) -> str | None:
+            if t is None:
+                return None
+            # psycopg2 retorna datetime.time; str() dá "HH:MM:SS"
+            return str(t)[:5]
+
+        lodging_dict: dict = {}
+        if lodging_config:
+            lodging_dict = dict(lodging_config)
+            for field in (
+                "hotel_checkin_time", "hotel_checkout_time",
+                "daycare_checkin_time", "daycare_checkout_time",
+            ):
+                lodging_dict[field] = _fmt_time(lodging_dict.get(field))
+
         return {
             "company_id": company["company_id"],
             "company_name": company["company_name"],
@@ -68,9 +102,10 @@ async def load_context(company_id: int, client_phone: str) -> dict:
             "petshop_phone": company["petshop_phone"],
             "petshop_address": company["petshop_address"],
             "business_hours": company["business_hours"] or {},
-            "default_capacity_per_hour": company["default_capacity_per_hour"],
             "features": company["features"] or {},
             "services": [dict(s) for s in services],
             "client": dict(client) if client else None,
             "pets": [dict(p) for p in pets],
+            "specialties": [dict(s) for s in specialties],
+            "lodging_config": lodging_dict,
         }

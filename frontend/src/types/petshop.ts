@@ -1,54 +1,17 @@
-export interface PetshopCreate {
-  company_id: number
+export interface Petshop {
+  id: number
+  companyId: number
   address?: string
   cep?: string
   phone: string
   latitude?: number
   longitude?: number
-  owner_phone?: string
-  emergency_contact?: string
-  assistant_name?: string
-  default_capacity_per_hour?: number
-  business_hours?: {
-    [key: string]: {
-      open?: string
-      close?: string
-      closed?: boolean
-    }
-  }
-  custom_capacity_hours?: PetshopCustomCapacityHours
-}
-
-export interface PetshopCustomCapacityHours {
-  hourly?: {
-    [weekday: string]: {
-      [hour: string]: number
-    }
-  }
-}
-
-export interface Petshop {
-  id: number
-  companyId: number
-  address?: string | null
-  cep?: string | null
-  phone: string
-  latitude?: number | null
-  longitude?: number | null
-  ownerPhone?: string | null
-  emergencyContact?: string | null
-  assistantName?: string | null
-  features?: any
-  businessHours?: {
-    [key: string]: {
-      open?: string
-      close?: string
-      closed?: boolean
-    }
-  } | null
-  defaultCapacityPerHour?: number | null
-  customCapacityHours?: PetshopCustomCapacityHours | null
-  isActive?: boolean | null
+  ownerPhone?: string
+  emergencyContact?: string
+  assistantName?: string
+  features?: Record<string, unknown>
+  businessHours?: Record<string, string | { open: string; close: string; closed?: boolean }>
+  isActive?: boolean
   createdAt?: string
   updatedAt?: string
   company?: {
@@ -57,8 +20,6 @@ export interface Petshop {
     slug: string
     plan?: string
     isActive?: boolean
-    createdAt?: string
-    updatedAt?: string
   }
 }
 
@@ -71,15 +32,38 @@ export interface PetshopUpdate {
   owner_phone?: string
   emergency_contact?: string
   assistant_name?: string
-  default_capacity_per_hour?: number
-  business_hours?: {
-    [key: string]: {
-      open?: string
-      close?: string
-      closed?: boolean
-    }
-  }
-  custom_capacity_hours?: PetshopCustomCapacityHours
+  business_hours?: Record<string, string | { open?: string; close?: string; closed?: boolean }>
   company_name?: string
   is_active?: boolean
+}
+
+export interface Specialty {
+  id: string
+  companyId: number
+  name: string
+  color?: string
+  description?: string
+  isActive: boolean
+  createdAt?: string
+}
+
+export interface CapacityRule {
+  id: string
+  specialtyId: string
+  companyId: number
+  dayOfWeek: number
+  slot_time: string
+  maxCapacity: number
+  isActive: boolean
+}
+
+export interface PetshopSlot {
+  id: string
+  companyId: number
+  specialtyId: string
+  slotDate: string
+  slot_time: string
+  maxCapacity: number
+  usedCapacity: number
+  vagas_restantes?: number
 }

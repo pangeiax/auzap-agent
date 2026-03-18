@@ -2,7 +2,13 @@ from datetime import date as _date, timedelta as _timedelta
 
 
 def build_router_prompt(context: dict) -> str:
-    services = ", ".join(s["name"] for s in context.get("services", []))
+    svc_names = [s["name"] for s in context.get("services", [])]
+    lodging_config = context.get("lodging_config", {})
+    if lodging_config.get("hotel_enabled"):
+        svc_names.append("Hotel para pets")
+    if lodging_config.get("daycare_enabled"):
+        svc_names.append("Creche diurna")
+    services = ", ".join(svc_names)
     client = context.get("client") or {}
     client_stage = client.get("conversation_stage") or "desconhecido"
     today_display = context.get("today", "")  # DD/MM/YYYY — exibição
@@ -44,8 +50,21 @@ Escolha o agente mais adequado com base na INTENÇÃO PRINCIPAL do cliente:
 onboarding_agent → primeira mensagem, saudação, cadastro de pet
   Gatilhos: "oi", "olá", "bom dia", querer cadastrar pet, cliente novo
 
-booking_agent → qualquer intenção de agendar, remarcar ou cancelar
+booking_agent → qualquer intenção de agendar, remarcar ou cancelar SERVIÇO (banho, tosa, consulta, etc)
   Gatilhos: "quero agendar", "marcar banho", "cancelar", perguntar sobre horário/disponibilidade, mencionar data
+
+lodging_agent → hospedagem (hotel ou creche para pets)
+  Gatilhos: "hospedagem", "hotel", "creche", "deixar o pet", "hospedar", "check-in", "check-out", "baia", "quero hospedar", mencionar período de dias para deixar o pet
+  specialty_type = "lodging"
+  lodging_type: "hotel" se mencionar hotel/hospedagem noturna, "daycare" se mencionar creche/diurno
+  Retorna também: checkin_mentioned (YYYY-MM-DD ou null) e checkout_mentioned (YYYY-MM-DD ou null)
+
+health_agent → dúvidas sobre saúde animal, vacinas, exames, emergências E agendamento de consultas veterinárias
+  Gatilhos: "vacina", "exame", "cirurgia", "doença", "remédio", "veterinário", "consulta", "quero marcar consulta",
+            qualquer serviço que pertença à especialidade Saúde ou Consultas
+  specialty_type = "health"
+  IMPORTANTE: o health_agent AGENDA consultas diretamente — NUNCA redireciona para humano quando há especialidade Consultas ativa
+  NUNCA rotear para booking_agent quando a intenção for saúde ou consulta veterinária
 
 sales_agent → perguntas sobre preço, valor ou o que inclui um serviço
   Gatilhos: "quanto custa", "qual o valor", "o que inclui", "tabela de preços"
@@ -93,6 +112,8 @@ Analise TODO o histórico para extrair o contexto acumulado:
 - date_mentioned: converta para YYYY-MM-DD usando a tabela acima (null se nenhuma data mencionada)
 - selected_time: horário específico escolhido pelo cliente em formato HH:MM (ex: "09:00") — null se não escolheu ainda
 - awaiting_confirmation: true SOMENTE SE o assistente enviou um resumo com "Confirma?" e o cliente ainda NÃO respondeu
+- specialty_type: "regular" para serviços comuns, "health" para saúde animal, "lodging" para hospedagem
+- lodging_type: null por padrão; "hotel" se mencionar hotel/hospedagem noturna, "daycare" se mencionar creche/diurno
 
 ━━━ REGRA DE DATAS ━━━
 • "amanhã" → use a data de amanhã da tabela acima
@@ -130,8 +151,17 @@ Analise TODO o histórico para extrair o contexto acumulado:
 "onde fica o petshop?" →
 {{"agent":"faq_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
 
-"vocês buscam o pet em casa?" / "tem delivery?" / "fazem hospedagem?" →
+"vocês buscam o pet em casa?" / "tem delivery?" →
 {{"agent":"faq_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
+
+"quero hospedar meu pet" / "tem hotel para pets?" / "posso deixar meu dog no hotel de sexta a domingo?" →
+{{"agent":"lodging_agent","stage":"SCHEDULING","specialty_type":"lodging","lodging_type":"hotel","active_pet":null,"service":"Hospedagem","checkin_mentioned":null,"checkout_mentioned":null,"awaiting_confirmation":false}}
+
+"quero marcar uma vacina para meu pet" →
+{{"agent":"health_agent","stage":"SERVICE_SELECTION","specialty_type":"health","lodging_type":null,"active_pet":null,"service":"Vacina","date_mentioned":null,"awaiting_confirmation":false}}
+
+"quero deixar meu pet na creche de segunda a sexta" →
+{{"agent":"lodging_agent","stage":"SCHEDULING","specialty_type":"lodging","lodging_type":"daycare","active_pet":null,"checkin_mentioned":null,"checkout_mentioned":null,"awaiting_confirmation":false}}
 
 "quero falar com um atendente" →
 {{"agent":"escalation_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}

@@ -3,6 +3,7 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     company_name = context.get("company_name", "Petshop")
     services = context.get("services", [])
     pets = context.get("pets", [])
+    lodging_config = context.get("lodging_config", {})
     client = context.get("client")
 
     client_name = client["name"] if client and client.get("name") else None
@@ -53,6 +54,23 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
             f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
         )
 
+    # Adiciona serviços de hospedagem se habilitados
+    if lodging_config.get("hotel_enabled"):
+        rate = lodging_config.get("hotel_daily_rate")
+        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
+        cin = (lodging_config.get("hotel_checkin_time") or "")[:5]
+        cout = (lodging_config.get("hotel_checkout_time") or "")[:5]
+        hours_str = f" (check-in {cin}, check-out {cout})" if cin and cout else ""
+        svc_lines.append(f"  • Hotel para pets: {rate_str}{hours_str} — hospedagem noturna com acompanhamento")
+
+    if lodging_config.get("daycare_enabled"):
+        rate = lodging_config.get("daycare_daily_rate")
+        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
+        cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
+        cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
+        hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
+        svc_lines.append(f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno enquanto você trabalha")
+
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
     pet_context = (
         f"\nPet em foco: {active_pet} (porte {active_pet_size_label})"
@@ -102,6 +120,7 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
     features = context.get("features", {})
     services = context.get("services", [])
     pets = context.get("pets", [])
+    lodging_config = context.get("lodging_config", {})
     petshop_phone = context.get("petshop_phone")
     petshop_address = context.get("petshop_address")
     client = context.get("client")
@@ -154,6 +173,23 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
         svc_lines.append(
             f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
         )
+    # Adiciona hospedagem na listagem de serviços/preços do FAQ
+    if lodging_config.get("hotel_enabled"):
+        rate = lodging_config.get("hotel_daily_rate")
+        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
+        cin = (lodging_config.get("hotel_checkin_time") or "")[:5]
+        cout = (lodging_config.get("hotel_checkout_time") or "")[:5]
+        hours_str = f" (check-in {cin}, check-out {cout})" if cin and cout else ""
+        svc_lines.append(f"  • Hotel para pets: {rate_str}{hours_str} — hospedagem noturna")
+
+    if lodging_config.get("daycare_enabled"):
+        rate = lodging_config.get("daycare_daily_rate")
+        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
+        cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
+        cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
+        hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
+        svc_lines.append(f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno")
+
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
 
     contact_parts = []

@@ -36,12 +36,34 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         O porte DEVE ter sido perguntado e informado EXPLICITAMENTE pelo cliente.
         NUNCA deduza o porte pela raça — sempre pergunte antes de chamar esta tool.
 
+        ATENÇÃO — RAÇA NÃO É NOME:
+        Raças são palavras como: "Bull Terrier", "Golden Retriever", "Labrador", "Poodle",
+        "Shih Tzu", "Yorkshire", "Bulldog", "Beagle", "Dachshund", "Husky", "Pastor Alemão",
+        "Lhasa Apso", "Maltês", "Rottweiler", "Chihuahua", "Pug", "Dobermann", "SRD" etc.
+        Se o cliente mencionar apenas uma raça, NÃO use a raça como nome — pergunte qual é
+        o nome/apelido do pet antes de prosseguir. O nome é o apelido dado pelo dono
+        (ex: "Rex", "Bolinha", "Max", "Luna", "Mel", "Toby").
+
         Args:
-            name: Nome do pet (apelido dado pelo dono)
+            name: Nome/apelido do pet dado pelo dono (NÃO pode ser uma raça)
             species: Espécie — 'cachorro' ou 'gato'
             breed: Raça (ou 'SRD' apenas se o cliente disse que não sabe)
-            size: Porte — 'pequeno', 'médio' ou 'grande' (DEVE ter sido PERGUNTADO ao cliente)
+            size: Porte — 'P', 'M', 'G' ou 'GG' (DEVE ter sido PERGUNTADO ao cliente)
         """
+        # Lista de raças comuns para detectar confusão nome vs raça
+        _KNOWN_BREEDS = {
+            "bull terrier", "golden retriever", "labrador", "labrador retriever",
+            "poodle", "shih tzu", "yorkshire", "yorkshire terrier", "bulldog",
+            "beagle", "dachshund", "husky", "pastor alemão", "german shepherd",
+            "lhasa apso", "maltês", "maltese", "rottweiler", "chihuahua", "pug",
+            "dobermann", "doberman", "border collie", "cocker spaniel", "boxer",
+            "srd", "vira-lata", "vira lata", "pitbull", "pit bull",
+            "american bully", "french bulldog", "bulldog francês",
+            "shiba inu", "akita", "chow chow", "dálmata", "dalmatian",
+            "schnauzer", "bichon frise", "cavalier king charles", "basset hound",
+            "great dane", "são bernardo", "saint bernard",
+        }
+
         missing = []
         if not name or not name.strip():
             missing.append("nome")
@@ -50,13 +72,24 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not breed or not breed.strip():
             missing.append("raça (ou SRD se não souber)")
         if not size or not size.strip():
-            missing.append("porte (pequeno, médio ou grande)")
+            missing.append("porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))")
 
         if missing:
             return {
                 "success": False,
                 "missing_fields": missing,
                 "message": f"Faltam dados obrigatórios: {', '.join(missing)}. Pergunte ao cliente antes de cadastrar.",
+            }
+
+        # Detecta se o nome passado é uma raça conhecida
+        if name.strip().lower() in _KNOWN_BREEDS:
+            return {
+                "success": False,
+                "name_is_breed": True,
+                "message": (
+                    f"'{name}' parece ser uma raça, não um nome de pet. "
+                    "Pergunte ao cliente: 'Qual é o nome/apelido do seu pet?' antes de cadastrar."
+                ),
             }
 
         species_norm = species.lower().strip()
@@ -69,20 +102,26 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             }
 
         size_map = {
-            "pequeno": "small",
-            "médio": "medium",
-            "medio": "medium",
-            "grande": "large",
-            "small": "small",
-            "medium": "medium",
-            "large": "large",
+            "pequeno": "P",
+            "médio": "M",
+            "medio": "M",
+            "grande": "G",
+            "gigante": "GG",
+            "extra grande": "GG",
+            "P": "P",
+            "M": "M",
+            "G": "G",
+            "GG": "GG",
+            "small": "P",
+            "medium": "M",
+            "large": "G",
         }
-        size_db = size_map.get(size_norm)
+        size_db = size_map.get(size_norm) or size_map.get(size_norm.upper())
         if not size_db:
             return {
                 "success": False,
-                "missing_fields": ["porte (pequeno, médio ou grande)"],
-                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+                "missing_fields": ["porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))"],
+                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (P, até 10kg), médio (M, 10-25kg), grande (G, acima de 25kg) ou extra grande (GG)?",
             }
 
         with get_connection() as conn:
@@ -139,8 +178,8 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         NUNCA deduza o porte pela raça — sempre pergunte ao cliente primeiro.
 
         Args:
-            pet_name: Nome do pet (pode ser um pet já cadastrado ou o nome informado pelo cliente)
-            size: Porte informado pelo cliente — 'pequeno', 'médio' ou 'grande'
+            pet_name: Nome/apelido do pet (NÃO use raça como nome — veja instruções em create_pet)
+            size: Porte informado pelo cliente — 'P', 'M', 'G' ou 'GG'
         """
         if not size or not size.strip():
             return {
@@ -149,24 +188,29 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             }
 
         size_map = {
-            "pequeno": "small",
-            "médio": "medium",
-            "medio": "medium",
-            "grande": "large",
-            "small": "small",
-            "medium": "medium",
-            "large": "large",
+            "pequeno": "P",
+            "médio": "M",
+            "medio": "M",
+            "grande": "G",
+            "gigante": "GG",
+            "extra grande": "GG",
+            "P": "P",
+            "M": "M",
+            "G": "G",
+            "GG": "GG",
+            "small": "P",
+            "medium": "M",
+            "large": "G",
         }
-        size_db = size_map.get(size.lower().strip())
+        size_norm_val = size.lower().strip()
+        size_db = size_map.get(size_norm_val) or size_map.get(size_norm_val.upper())
         if not size_db:
             return {
                 "success": False,
-                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (P, até 10kg), médio (M, 10-25kg), grande (G, acima de 25kg) ou extra grande (GG)?",
             }
 
-        size_label = {"small": "pequeno", "medium": "médio", "large": "grande"}.get(
-            size_db, size
-        )
+        size_label = {"P": "pequeno", "M": "médio", "G": "grande", "GG": "extra grande"}.get(size_db, size)
 
         # Tenta atualizar se o pet já existe no banco
         updated = None

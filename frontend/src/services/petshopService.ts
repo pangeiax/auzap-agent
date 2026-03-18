@@ -1,5 +1,17 @@
 import { api } from '@/lib/api'
-import type { Petshop, PetshopCreate, PetshopUpdate } from '@/types'
+import type { Petshop, PetshopUpdate } from '@/types'
+
+type PetshopCreate = {
+  company_id?: number
+  phone: string
+  name?: string
+  address?: string
+  cep?: string
+  owner_phone?: string
+  emergency_contact?: string
+  assistant_name?: string
+  business_hours?: Record<string, string | { open?: string; close?: string; closed?: boolean }>
+}
 
 export const petshopService = {
   async createPetshop(data: PetshopCreate): Promise<Petshop> {

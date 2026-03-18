@@ -40,7 +40,7 @@ export async function chatBusiness(req: Request, res: Response) {
       messages_today,
       total_revenue_month,
     ] = await Promise.all([
-      prisma.saasPetshop.findUnique({
+      prisma.petshopProfile.findUnique({
         where: { companyId },
         include: { company: true },
       }),
@@ -84,15 +84,15 @@ export async function chatBusiness(req: Request, res: Response) {
 
     // Format upcoming appointments for context
     const upcomingText = upcoming_appointments.length > 0
-      ? upcoming_appointments.map(a => {
-          const date = new Date(a.scheduledDate).toLocaleDateString('pt-BR')
+      ? upcoming_appointments.map((a: any) => {
+          const date = new Date(a.scheduledDate ?? new Date()).toLocaleDateString('pt-BR')
           const h = a.schedule ? String(new Date(a.schedule.startTime).getUTCHours()).padStart(2, '0') + ':' + String(new Date(a.schedule.startTime).getUTCMinutes()).padStart(2, '0') : ''
           return `- ${a.client?.name ?? 'Cliente'} | Pet: ${a.pet?.name ?? '-'} | Serviço: ${a.service?.name ?? '-'} | ${date} ${h}`
         }).join('\n')
       : 'Nenhum agendamento próximo.'
 
     const servicesText = services.length > 0
-      ? services.map(s => `${s.name}${s.price ? ` (R$ ${Number(s.price).toFixed(2)})` : ''}`).join(', ')
+      ? services.map((s: any) => `${s.name}${s.price ? ` (R$ ${Number(s.price).toFixed(2)})` : ''}`).join(', ')
       : 'Nenhum serviço ativo.'
 
     const systemPrompt = `Você é um assistente de negócios especializado em petshops.

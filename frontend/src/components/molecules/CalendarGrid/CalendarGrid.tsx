@@ -15,6 +15,7 @@ interface CalendarGridProps {
   events: CalendarEvent[];
   selectedDate: Date | null;
   onSelectDate: (date: Date) => void;
+  availableDates?: Set<string>;
 }
 
 export function CalendarGrid({
@@ -22,6 +23,7 @@ export function CalendarGrid({
   events,
   selectedDate,
   onSelectDate,
+  availableDates,
 }: CalendarGridProps) {
   const weekDays = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
 
@@ -103,42 +105,58 @@ export function CalendarGrid({
           {week.map((day, di) => {
             const dayEvents = getEventsForDate(day.date);
             const selected = isSelected(day.date);
+            const dateKey = formatDateKey(day.date);
+            const isBlocked = day.isCurrentMonth && availableDates != null && !availableDates.has(dateKey);
             return (
               <button
                 key={di}
-                onClick={() => onSelectDate(day.date)}
+                onClick={() => !isBlocked && onSelectDate(day.date)}
+                disabled={isBlocked}
+                title={isBlocked ? "Sem horários disponíveis" : undefined}
                 className={cn(
-                  "min-h-[100px] p-2 text-left border-r border-[#727B8E]/10 dark:border-[#40485A] last:border-r-0 transition-colors duration-200 hover:bg-[#1E62EC]/5 dark:hover:bg-[#2172e5]/20",
-                  selected && "bg-[#1E62EC]/10 dark:bg-[#2172e5]/20",
+                  "min-h-[100px] p-2 text-left border-r border-[#727B8E]/10 dark:border-[#40485A] last:border-r-0 transition-colors duration-200",
+                  isBlocked
+                    ? "cursor-not-allowed bg-[#F4F6F9]/80 dark:bg-[#212225]/60"
+                    : "hover:bg-[#1E62EC]/5 dark:hover:bg-[#2172e5]/20",
+                  selected && !isBlocked && "bg-[#1E62EC]/10 dark:bg-[#2172e5]/20",
                   !day.isCurrentMonth && "bg-[#F4F6F9]/50 dark:bg-[#212225]/50",
                 )}
               >
                 <span
-                  key={selected ? formatDateKey(day.date) : undefined}
+                  key={selected ? dateKey : undefined}
                   className={cn(
                     "inline-block text-sm font-medium",
-                    selected && "animate-calendar-day-select",
-                    !day.isCurrentMonth
-                      ? "text-[#727B8E]/50 dark:text-[#8a94a6]/50"
-                      : isToday(day.date)
-                        ? "text-[#1E62EC] dark:text-[#2172e5] font-bold"
-                        : "text-[#434A57] dark:text-[#f5f9fc]",
+                    selected && !isBlocked && "animate-calendar-day-select",
+                    isBlocked
+                      ? "text-[#727B8E]/30 dark:text-[#8a94a6]/30"
+                      : !day.isCurrentMonth
+                        ? "text-[#727B8E]/50 dark:text-[#8a94a6]/50"
+                        : isToday(day.date)
+                          ? "text-[#1E62EC] dark:text-[#2172e5] font-bold"
+                          : "text-[#434A57] dark:text-[#f5f9fc]",
                   )}
                 >
                   {day.date.getDate() < 10
                     ? `0${day.date.getDate()}`
                     : day.date.getDate()}
                 </span>
-                <div className="mt-1 space-y-0.5">
-                  {dayEvents.slice(0, 3).map((ev) => (
-                    <div
-                      key={ev.id}
-                      className={`text-xs font-medium truncate ${statusColor[ev.status]}`}
-                    >
-                      {ev.time} - {ev.petName}
-                    </div>
-                  ))}
-                </div>
+                {isBlocked && day.isCurrentMonth && (
+                  <div className="mt-1">
+                    <span className="text-[10px] text-[#727B8E]/40 dark:text-[#8a94a6]/40">sem vagas</span>
+                  </div>
+                )}
+                {!isBlocked && (
+                  <div className="mt-1 space-y-0.5">
+                    {dayEvents.slice(0, 3).map((ev) => (
+                      <div
+                        key={ev.id}
+                        className={`text-xs font-medium truncate ${statusColor[ev.status]}`}
+                      >
+                        {ev.time} - {ev.petName}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </button>
             );
           })}

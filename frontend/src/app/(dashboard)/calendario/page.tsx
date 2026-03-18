@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import { CalendarHeader } from "@/components/molecules/CalendarHeader";
@@ -26,6 +26,7 @@ import {
 } from "@/services";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { maskPhone, maskDate, dateToISO, dateFromISO } from "@/lib/masks";
+import { normalizePetSize, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
 import { UserPlus, PawPrint, Plus, Loader2 } from "lucide-react";
 import type { Appointment, Client, Pet, Service } from "@/types";
 import {
@@ -41,9 +42,37 @@ function normalizeStatus(status: string): CalendarStatus {
 }
 
 function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
-  const d = a.scheduled_at ? new Date(a.scheduled_at) : new Date();
-  const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // When scheduled_at has an explicit BRT offset (e.g. "...T14:00:00-03:00") we parse
+  // the date/time from the string directly to avoid local-timezone shifts that could
+  // move an appointment to a different day in non-BRT browsers.
+  let dateStr: string;
+  let timeStr: string;
+  if (a.scheduled_at) {
+    // Extract date and time from the ISO string before any timezone conversion
+    const raw = a.scheduled_at;
+    // Handle both "YYYY-MM-DDTHH:mm:ssZ" and "YYYY-MM-DDTHH:mm:ss±HH:mm"
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+    if (match) {
+      dateStr = match[1]!;
+      timeStr = match[2]!;
+      // If the offset is -03:00, the date/time already represent BRT — use directly.
+      // If offset is Z (UTC), convert to BRT by subtracting 3 hours.
+      if (raw.endsWith("Z") || raw.endsWith("+00:00")) {
+        const d = new Date(raw);
+        d.setUTCHours(d.getUTCHours() - 3);
+        dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+        timeStr = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+      }
+    } else {
+      const d = new Date(raw);
+      dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+  } else {
+    const d = new Date();
+    dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
   const petName = a.pet_name || a.client_name || "Agendamento";
   return {
     id: a.id,
@@ -63,7 +92,7 @@ interface NewAppointmentForm {
   petId: string;
   date: string;
   time: string;
-  scheduleId: string;
+  slotId: string;
   serviceId: string;
   status: string;
   notes: string;
@@ -74,22 +103,25 @@ const initialFormState: NewAppointmentForm = {
   petId: "",
   date: "",
   time: "",
-  scheduleId: "",
+  slotId: "",
   serviceId: "",
   status: "pendente",
   notes: "",
 };
 
-function mapPetSizeToApi(size: string): "small" | "medium" | "large" {
-  switch (size) {
-    case "pequeno":
-      return "small";
-    case "grande":
-      return "large";
-    default:
-      return "medium";
-  }
+interface FormErrors {
+  clientId?: string;
+  petId?: string;
+  date?: string;
+  serviceId?: string;
+  slotId?: string;
+  newClientName?: string;
+  newClientPhone?: string;
+  newPetName?: string;
+  newPetSpecies?: string;
+  newPetSize?: string;
 }
+
 
 function formatDateKey(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -174,9 +206,9 @@ export default function CalendarioPage() {
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [showNewPetForm, setShowNewPetForm] = useState(false);
   const [newPetName, setNewPetName] = useState("");
-  const [newPetSpecies, setNewPetSpecies] = useState("cachorro");
+  const [newPetSpecies, setNewPetSpecies] = useState("");
   const [newPetBreed, setNewPetBreed] = useState("");
-  const [newPetSize, setNewPetSize] = useState("medio");
+  const [newPetSize, setNewPetSize] = useState("");
   const [isCreatingPet, setIsCreatingPet] = useState(false);
 
   useEffect(() => {
@@ -217,11 +249,8 @@ export default function CalendarioPage() {
 
   useEffect(() => {
     const fetchServices = async () => {
-      if (!petshopId) return;
       try {
-        const list = await serviceService.listServices({
-          petshop_id: petshopId,
-        });
+        const list = await serviceService.listServices();
         setServices(list);
       } catch (error) {
         console.error("Erro ao buscar serviços:", error);
@@ -232,21 +261,34 @@ export default function CalendarioPage() {
       }
     };
     fetchServices();
-  }, [petshopId, toast]);
+  }, [toast]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] =
     useState<NewAppointmentForm>(initialFormState);
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
     null,
   );
+  const [availableDates, setAvailableDates] = useState<Set<string>>(
+    new Set(),
+  );
+  const [availableDatesLoading, setAvailableDatesLoading] = useState(false);
+  // Cache de datas disponíveis por mês — evita re-fetch ao navegar para meses já visitados
+  const availableDatesCache = useRef<Map<string, Set<string>>>(new Map());
+
+  // Only fetch slots when both date AND service are selected
   const {
     slots: availableSlots,
     loading: slotsLoading,
     error: slotsError,
-  } = useAvailableScheduleSlots(formData.date, isModalOpen);
+  } = useAvailableScheduleSlots(
+    formData.serviceId ? formData.date : "",
+    formData.serviceId || undefined,
+    isModalOpen,
+  );
 
   const visibleEvents = useMemo(
     () => events.filter((event) => event.status !== "cancelado"),
@@ -279,32 +321,43 @@ export default function CalendarioPage() {
 
   useEffect(() => {
     setFormData((prev) => {
-      if (!prev.scheduleId && !prev.time) {
-        return prev;
-      }
-
+      if (!prev.slotId && !prev.time) return prev;
       const selectedSlot = availableSlots.find(
-        (slot) => String(slot.schedule_id) === prev.scheduleId,
+        (slot) => slot.slot_id === prev.slotId,
       );
-
-      if (!selectedSlot) {
-        return {
-          ...prev,
-          scheduleId: "",
-          time: "",
-        };
-      }
-
-      if (prev.time === selectedSlot.time) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        time: selectedSlot.time,
-      };
+      if (!selectedSlot) return { ...prev, slotId: "", time: "" };
+      if (prev.time === selectedSlot.time) return prev;
+      return { ...prev, time: selectedSlot.time };
     });
   }, [availableSlots]);
+
+  useEffect(() => {
+    const yr = currentDate.getFullYear();
+    const mo = currentDate.getMonth() + 1;
+    const cacheKey = `${yr}-${String(mo).padStart(2, "0")}`;
+
+    const cached = availableDatesCache.current.get(cacheKey);
+    if (cached) {
+      setAvailableDates(cached);
+      return;
+    }
+
+    const fetchAvailableDates = async () => {
+      setAvailableDatesLoading(true);
+      try {
+        const result = await appointmentService.getAvailableDates({ year: yr, month: mo });
+        const dateSet = new Set(result.dates);
+        availableDatesCache.current.set(cacheKey, dateSet);
+        setAvailableDates(dateSet);
+      } catch {
+        setAvailableDates(new Set());
+      } finally {
+        setAvailableDatesLoading(false);
+      }
+    };
+    fetchAvailableDates();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDate.getFullYear(), currentDate.getMonth()]);
 
   const month = currentDate.getMonth();
   const year = currentDate.getFullYear();
@@ -378,21 +431,29 @@ export default function CalendarioPage() {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setFormData(initialFormState);
+    setFormErrors({});
     setShowNewClientForm(false);
     setNewClientName("");
     setNewClientPhone("");
     setIsCreatingClient(false);
     setShowNewPetForm(false);
     setNewPetName("");
-    setNewPetSpecies("cachorro");
+    setNewPetSpecies("");
     setNewPetBreed("");
-    setNewPetSize("medio");
+    setNewPetSize("");
     setIsCreatingPet(false);
     setClientPets([]);
   };
 
   const handleCreateClient = async () => {
-    if (!newClientName || !newClientPhone || isCreatingClient) return;
+    const errs: FormErrors = {};
+    if (!newClientName.trim()) errs.newClientName = "Nome é obrigatório";
+    if (!newClientPhone.trim()) errs.newClientPhone = "Telefone é obrigatório";
+    if (Object.keys(errs).length > 0) {
+      setFormErrors((prev) => ({ ...prev, ...errs }));
+      return;
+    }
+    if (isCreatingClient) return;
     setIsCreatingClient(true);
     try {
       const newClient = await clientService.createClient({
@@ -422,7 +483,15 @@ export default function CalendarioPage() {
   };
 
   const handleCreatePet = async () => {
-    if (!newPetName || !formData.clientId || isCreatingPet) return;
+    const errs: FormErrors = {};
+    if (!newPetName.trim()) errs.newPetName = "Nome do pet é obrigatório";
+    if (!newPetSpecies) errs.newPetSpecies = "Espécie é obrigatória";
+    if (!newPetSize) errs.newPetSize = "Porte é obrigatório";
+    if (Object.keys(errs).length > 0) {
+      setFormErrors((prev) => ({ ...prev, ...errs }));
+      return;
+    }
+    if (!formData.clientId || isCreatingPet) return;
 
     setIsCreatingPet(true);
     try {
@@ -432,7 +501,7 @@ export default function CalendarioPage() {
         name: newPetName,
         species: newPetSpecies,
         breed: newPetBreed || undefined,
-        size: mapPetSizeToApi(newPetSize),
+        size: normalizePetSize(newPetSize),
       });
       setClientPets((prev) => [...prev, newPet]);
       setFormData((prev) => ({ ...prev, petId: newPet.id }));
@@ -516,34 +585,39 @@ export default function CalendarioPage() {
   };
 
   const handleSubmit = async () => {
-    if (
-      !formData.clientId ||
-      !formData.petId ||
-      !formData.date ||
-      !formData.scheduleId ||
-      !formData.serviceId
-    ) {
+    const errs: FormErrors = {};
+    if (!formData.clientId) errs.clientId = "Selecione um cliente";
+    if (!formData.petId) errs.petId = "Selecione um pet";
+    if (!formData.date) errs.date = "Informe a data";
+    if (!formData.serviceId) errs.serviceId = "Selecione um serviço";
+    if (!formData.slotId) errs.slotId = "Selecione um horário";
+
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
       return;
     }
 
     const dateISO = dateToISO(formData.date);
     if (!dateISO) {
-      console.error("Data inválida");
+      setFormErrors((prev) => ({ ...prev, date: "Data inválida" }));
       return;
     }
 
     const selectedSlot = availableSlots.find(
-      (slot) => String(slot.schedule_id) === formData.scheduleId,
+      (slot) => slot.slot_id === formData.slotId,
     );
     if (!selectedSlot) {
-      console.error("Horário indisponível para a data selecionada");
+      setFormErrors((prev) => ({
+        ...prev,
+        slotId: "Horário indisponível, selecione outro",
+      }));
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const selectedService = services.find((s) => s.id === formData.serviceId);
+      const selectedService = services.find((s) => String(s.id) === formData.serviceId);
       const selectedPet = clientPets.find((p) => p.id === formData.petId);
       const scheduledAt = `${dateISO}T${selectedSlot.time}:00`;
 
@@ -551,7 +625,7 @@ export default function CalendarioPage() {
         client_id: formData.clientId,
         pet_id: formData.petId,
         service_id: formData.serviceId,
-        schedule_id: selectedSlot.schedule_id,
+        slot_id: selectedSlot.slot_id,
         scheduled_at: scheduledAt,
         status: appointmentStatusToApi(normalizeStatus(formData.status)),
         notes: formData.notes || undefined,
@@ -578,6 +652,9 @@ export default function CalendarioPage() {
       handleCloseModal();
 
       const [y, m, d] = dateISO.split("-").map(Number);
+      // Invalida cache do mês para forçar re-fetch das datas disponíveis
+      const cacheKey = `${y}-${String(m).padStart(2, "0")}`;
+      availableDatesCache.current.delete(cacheKey);
       setCurrentDate(new Date(y, m - 1, 1));
       setSelectedDate(new Date(y, m - 1, d));
       toast.success(
@@ -680,6 +757,9 @@ export default function CalendarioPage() {
                       events={visibleEvents}
                       selectedDate={selectedDate}
                       onSelectDate={handleSelectDate}
+                      availableDates={
+                        availableDatesLoading ? undefined : availableDates
+                      }
                     />
                   )}
                   {activeView === "week" && (
@@ -721,17 +801,20 @@ export default function CalendarioPage() {
         isLoading={isSubmitting}
         className="max-w-[480px]"
       >
-        <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto">
-          {}
+        <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1">
+          {/* Cliente */}
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-                Cliente
+                Cliente <span className="text-red-500">*</span>
               </p>
               <button
                 type="button"
                 disabled={isCreatingClient}
-                onClick={() => setShowNewClientForm(!showNewClientForm)}
+                onClick={() => {
+                  setShowNewClientForm(!showNewClientForm);
+                  setFormErrors((prev) => ({ ...prev, newClientName: undefined, newClientPhone: undefined }));
+                }}
                 className="flex items-center gap-1 text-xs font-medium text-[#1E62EC] hover:underline dark:text-[#2172e5]"
               >
                 <UserPlus className="h-3.5 w-3.5" />
@@ -740,18 +823,34 @@ export default function CalendarioPage() {
             </div>
             {showNewClientForm ? (
               <div className="space-y-3 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
-                <Input
-                  label="Nome do Cliente"
-                  placeholder="Nome completo"
-                  value={newClientName}
-                  onChange={(e) => setNewClientName(e.target.value)}
-                />
-                <Input
-                  label="Telefone"
-                  placeholder="(11) 99999-9999"
-                  value={newClientPhone}
-                  onChange={(e) => setNewClientPhone(maskPhone(e.target.value))}
-                />
+                <div>
+                  <Input
+                    label="Nome do Cliente *"
+                    placeholder="Nome completo"
+                    value={newClientName}
+                    onChange={(e) => {
+                      setNewClientName(e.target.value);
+                      if (e.target.value) setFormErrors((prev) => ({ ...prev, newClientName: undefined }));
+                    }}
+                  />
+                  {formErrors.newClientName && (
+                    <p className="mt-1 text-xs text-red-500">{formErrors.newClientName}</p>
+                  )}
+                </div>
+                <div>
+                  <Input
+                    label="Telefone *"
+                    placeholder="(11) 99999-9999"
+                    value={newClientPhone}
+                    onChange={(e) => {
+                      setNewClientPhone(maskPhone(e.target.value));
+                      if (e.target.value) setFormErrors((prev) => ({ ...prev, newClientPhone: undefined }));
+                    }}
+                  />
+                  {formErrors.newClientPhone && (
+                    <p className="mt-1 text-xs text-red-500">{formErrors.newClientPhone}</p>
+                  )}
+                </div>
                 <button
                   type="button"
                   disabled={isCreatingClient}
@@ -772,32 +871,41 @@ export default function CalendarioPage() {
                 </button>
               </div>
             ) : (
-              <Select
-                placeholder="Selecione o cliente"
-                value={formData.clientId}
-                onChange={(e) => {
-                  handleFormChange("clientId", e.target.value);
-                  handleFormChange("petId", "");
-                }}
-                options={clients.map((c) => ({
-                  value: c.id,
-                  label: c.name ?? "",
-                }))}
-              />
+              <div>
+                <Select
+                  placeholder="Selecione o cliente"
+                  value={formData.clientId}
+                  onChange={(e) => {
+                    setFormErrors((prev) => ({ ...prev, clientId: undefined }));
+                    handleFormChange("clientId", e.target.value);
+                    handleFormChange("petId", "");
+                  }}
+                  options={clients.map((c) => ({
+                    value: c.id,
+                    label: c.name ?? "",
+                  }))}
+                />
+                {formErrors.clientId && (
+                  <p className="mt-1 text-xs text-red-500">{formErrors.clientId}</p>
+                )}
+              </div>
             )}
           </div>
 
-          {}
+          {/* Pet */}
           {formData.clientId && !showNewClientForm && (
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-                  Pet
+                  Pet <span className="text-red-500">*</span>
                 </p>
                 <button
                   type="button"
                   disabled={isCreatingPet}
-                  onClick={() => setShowNewPetForm(!showNewPetForm)}
+                  onClick={() => {
+                    setShowNewPetForm(!showNewPetForm);
+                    setFormErrors((prev) => ({ ...prev, newPetName: undefined, newPetSpecies: undefined, newPetSize: undefined }));
+                  }}
                   className="flex items-center gap-1 text-xs font-medium text-[#1E62EC] hover:underline dark:text-[#2172e5]"
                 >
                   <PawPrint className="h-3.5 w-3.5" />
@@ -806,42 +914,63 @@ export default function CalendarioPage() {
               </div>
               {showNewPetForm ? (
                 <div className="space-y-3 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
-                  <Input
-                    label="Nome do Pet"
-                    placeholder="Nome do pet"
-                    value={newPetName}
-                    onChange={(e) => setNewPetName(e.target.value)}
-                  />
-                  <Select
-                    label="Espécie"
-                    placeholder="Selecione"
-                    value={newPetSpecies}
-                    onChange={(e) => setNewPetSpecies(e.target.value)}
-                    options={[
-                      { value: "cachorro", label: "Cachorro" },
-                      { value: "gato", label: "Gato" },
-                      { value: "ave", label: "Ave" },
-                      { value: "roedor", label: "Roedor" },
-                      { value: "outro", label: "Outro" },
-                    ]}
-                  />
+                  <div>
+                    <Input
+                      label="Nome do Pet *"
+                      placeholder="Nome do pet"
+                      value={newPetName}
+                      onChange={(e) => {
+                        setNewPetName(e.target.value);
+                        if (e.target.value) setFormErrors((prev) => ({ ...prev, newPetName: undefined }));
+                      }}
+                    />
+                    {formErrors.newPetName && (
+                      <p className="mt-1 text-xs text-red-500">{formErrors.newPetName}</p>
+                    )}
+                  </div>
+                  <div>
+                    <Select
+                      label="Espécie *"
+                      placeholder="Selecione a espécie"
+                      value={newPetSpecies}
+                      onChange={(e) => {
+                        setNewPetSpecies(e.target.value);
+                        if (e.target.value) setFormErrors((prev) => ({ ...prev, newPetSpecies: undefined }));
+                      }}
+                      options={[
+                        { value: "", label: "Selecione a espécie" },
+                        { value: "cachorro", label: "Cachorro" },
+                        { value: "gato", label: "Gato" },
+                        { value: "ave", label: "Ave" },
+                        { value: "roedor", label: "Roedor" },
+                        { value: "outro", label: "Outro" },
+                      ]}
+                    />
+                    {formErrors.newPetSpecies && (
+                      <p className="mt-1 text-xs text-red-500">{formErrors.newPetSpecies}</p>
+                    )}
+                  </div>
                   <Input
                     label="Raça"
                     placeholder="Raça do pet"
                     value={newPetBreed}
                     onChange={(e) => setNewPetBreed(e.target.value)}
                   />
-                  <Select
-                    label="Porte"
-                    placeholder="Selecione"
-                    value={newPetSize}
-                    onChange={(e) => setNewPetSize(e.target.value)}
-                    options={[
-                      { value: "pequeno", label: "Pequeno" },
-                      { value: "medio", label: "Médio" },
-                      { value: "grande", label: "Grande" },
-                    ]}
-                  />
+                  <div>
+                    <Select
+                      label="Porte *"
+                      placeholder="Selecione o porte"
+                      value={newPetSize}
+                      onChange={(e) => {
+                        setNewPetSize(e.target.value);
+                        if (e.target.value) setFormErrors((prev) => ({ ...prev, newPetSize: undefined }));
+                      }}
+                      options={[...PET_SIZE_OPTIONS_WITH_PLACEHOLDER]}
+                    />
+                    {formErrors.newPetSize && (
+                      <p className="mt-1 text-xs text-red-500">{formErrors.newPetSize}</p>
+                    )}
+                  </div>
                   <button
                     type="button"
                     disabled={isCreatingPet}
@@ -862,98 +991,143 @@ export default function CalendarioPage() {
                   </button>
                 </div>
               ) : (
-                <Select
-                  placeholder="Selecione o pet"
-                  value={formData.petId}
-                  onChange={(e) => handleFormChange("petId", e.target.value)}
-                  options={clientPets.map((p) => ({
-                    value: p.id,
-                    label: `${p.name ?? "Pet"} (${p.species ?? "Pet"})`,
-                  }))}
-                />
+                <div>
+                  <Select
+                    placeholder="Selecione o pet"
+                    value={formData.petId}
+                    onChange={(e) => {
+                      setFormErrors((prev) => ({ ...prev, petId: undefined }));
+                      handleFormChange("petId", e.target.value);
+                    }}
+                    options={clientPets.map((p) => ({
+                      value: p.id,
+                      label: `${p.name ?? "Pet"} (${p.species ?? "Pet"})`,
+                    }))}
+                  />
+                  {formErrors.petId && (
+                    <p className="mt-1 text-xs text-red-500">{formErrors.petId}</p>
+                  )}
+                </div>
               )}
             </div>
           )}
 
-          {}
+          {/* Data e Serviço */}
           <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Data"
-              placeholder="DD/MM/AAAA"
-              value={formData.date}
-              onChange={(e) => {
-                const nextDate = maskDate(e.target.value);
-                setFormData((prev) => ({
-                  ...prev,
-                  date: nextDate,
-                  time: "",
-                  scheduleId: "",
-                }));
-              }}
-              maxLength={10}
-            />
-            <Select
-              label="Horário"
-              placeholder={
-                !formData.date
-                  ? "Informe a data primeiro"
-                  : slotsLoading
-                    ? "Carregando horários..."
-                    : availableSlots.length === 0
-                      ? "Nenhum horário disponível"
-                      : "Selecione o horário"
-              }
-              value={formData.scheduleId}
-              onChange={(e) => {
-                const selectedSlot = availableSlots.find(
-                  (slot) => String(slot.schedule_id) === e.target.value,
-                );
-                setFormData((prev) => ({
-                  ...prev,
-                  scheduleId: e.target.value,
-                  time: selectedSlot?.time ?? "",
-                }));
-              }}
-              options={availableSlots.map((slot) => ({
-                value: String(slot.schedule_id),
-                label:
-                  slot.remaining_capacity === 1
-                    ? `${slot.time} • 1 vaga`
-                    : `${slot.time} • ${slot.remaining_capacity} vagas`,
-              }))}
-              disabled={
-                !formData.date || slotsLoading || availableSlots.length === 0
-              }
-            />
+            <div>
+              <Input
+                label="Data *"
+                placeholder="DD/MM/AAAA"
+                value={formData.date}
+                onChange={(e) => {
+                  const nextDate = maskDate(e.target.value);
+                  setFormErrors((prev) => ({ ...prev, date: undefined, slotId: undefined }));
+                  setFormData((prev) => ({
+                    ...prev,
+                    date: nextDate,
+                    time: "",
+                    slotId: "",
+                  }));
+                }}
+                maxLength={10}
+              />
+              {formErrors.date && (
+                <p className="mt-1 text-xs text-red-500">{formErrors.date}</p>
+              )}
+            </div>
+            <div>
+              <Select
+                label="Serviço *"
+                placeholder="Selecione o serviço"
+                options={services.map((s) => ({
+                  value: String(s.id),
+                  label: s.name ?? "",
+                }))}
+                value={formData.serviceId}
+                onChange={(e) => {
+                  setFormErrors((prev) => ({ ...prev, serviceId: undefined, slotId: undefined }));
+                  setFormData((prev) => ({
+                    ...prev,
+                    serviceId: e.target.value,
+                    slotId: "",
+                    time: "",
+                  }));
+                }}
+              />
+              {formErrors.serviceId && (
+                <p className="mt-1 text-xs text-red-500">{formErrors.serviceId}</p>
+              )}
+            </div>
           </div>
-          {slotsError && (
-            <p className="text-xs text-red-500 dark:text-red-400">
-              {slotsError}
-            </p>
+
+          {/* Horários — só aparecem quando data E serviço estão preenchidos */}
+          {formData.date && formData.serviceId && (
+            <div>
+              {slotsLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#1E62EC]" />
+                  <span className="text-sm text-[#727B8E]">Buscando horários disponíveis...</span>
+                </div>
+              ) : availableSlots.length === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/40 dark:bg-amber-900/20">
+                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                    Nenhum horário disponível para esta data e serviço.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                    Horário disponível <span className="text-red-500">*</span>
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {availableSlots.map((slot) => (
+                      <button
+                        key={slot.slot_id}
+                        type="button"
+                        onClick={() => {
+                          setFormErrors((prev) => ({ ...prev, slotId: undefined }));
+                          setFormData((prev) => ({
+                            ...prev,
+                            slotId: slot.slot_id ?? "",
+                            time: slot.time,
+                          }));
+                        }}
+                        className={`flex flex-col items-center rounded-lg border px-2 py-2 text-sm transition-all ${
+                          formData.slotId === slot.slot_id
+                            ? "border-[#1E62EC] bg-[#1E62EC]/10 text-[#1E62EC] dark:border-[#2172e5] dark:bg-[#2172e5]/20 dark:text-[#2172e5]"
+                            : "border-[#727B8E]/20 bg-white text-[#434A57] hover:border-[#1E62EC]/40 hover:bg-[#1E62EC]/5 dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc]"
+                        }`}
+                      >
+                        <span className="font-semibold">{slot.time}</span>
+                        <span className="text-[10px] opacity-70">
+                          {slot.remaining_capacity === 1
+                            ? "1 vaga"
+                            : `${slot.remaining_capacity} vagas`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {formErrors.slotId && (
+                    <p className="mt-1 text-xs text-red-500">{formErrors.slotId}</p>
+                  )}
+                </div>
+              )}
+              {slotsError && (
+                <p className="mt-1 text-xs text-red-500 dark:text-red-400">{slotsError}</p>
+              )}
+            </div>
           )}
 
-          {}
-          <div className="grid grid-cols-2 gap-4">
-            <Select
-              label="Serviço"
-              placeholder="Selecione o serviço"
-              options={services.map((s) => ({
-                value: String(s.id),
-                label: s.name ?? "",
-              }))}
-              value={formData.serviceId}
-              onChange={(e) => handleFormChange("serviceId", e.target.value)}
-            />
-            <Select
-              label="Status"
-              placeholder="Status"
-              options={STATUS_OPTIONS}
-              value={formData.status}
-              onChange={(e) => handleFormChange("status", e.target.value)}
-            />
-          </div>
+          {/* Status */}
+          <Select
+            label="Status"
+            placeholder="Status"
+            options={STATUS_OPTIONS}
+            value={formData.status}
+            onChange={(e) => handleFormChange("status", e.target.value)}
+          />
 
-          {}
+          {/* Observações */}
           <div className="flex flex-col gap-3">
             <label className="font-be-vietnam-pro text-base font-semibold leading-[23px] text-[#434A57] dark:text-[#f5f9fc]">
               Observações

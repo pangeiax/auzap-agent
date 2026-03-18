@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma'
 export async function listServices(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { is_active } = req.query
+    const { is_active, specialty_id } = req.query
 
     const where: any = { companyId }
 
@@ -13,8 +13,13 @@ export async function listServices(req: Request, res: Response) {
       where.isActive = is_active === 'true'
     }
 
+    if (specialty_id !== undefined) {
+      where.specialtyId = specialty_id === 'null' ? null : specialty_id
+    }
+
     const services = await prisma.petshopService.findMany({
       where,
+      include: { specialty: { select: { id: true, name: true, color: true } } },
       orderBy: { name: 'asc' },
     })
 
@@ -50,7 +55,7 @@ export async function getService(req: Request, res: Response) {
 export async function createService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { name, description, duration_min, price, price_by_size, duration_multiplier_large } =
+    const { name, description, duration_min, price, price_by_size, duration_multiplier_large, specialty_id, requires_vet } =
       req.body
 
     if (!name) {
@@ -66,8 +71,11 @@ export async function createService(req: Request, res: Response) {
         price: price ? parseFloat(price) : null,
         priceBySize: price_by_size,
         durationMultiplierLarge: duration_multiplier_large ? parseFloat(duration_multiplier_large) : null,
+        specialtyId: specialty_id ?? null,
+        requiresVet: requires_vet ?? false,
         isActive: true,
       },
+      include: { specialty: { select: { id: true, name: true, color: true } } },
     })
 
     res.status(201).json(service)
@@ -82,7 +90,7 @@ export async function updateService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const serviceId = req.params.serviceId!
-    const { name, description, duration_min, price, price_by_size, is_active } = req.body
+    const { name, description, duration_min, price, price_by_size, is_active, specialty_id, duration_multiplier_large } = req.body
 
     const existing = await prisma.petshopService.findUnique({
       where: { id: parseInt(serviceId) },
@@ -95,13 +103,16 @@ export async function updateService(req: Request, res: Response) {
     const service = await prisma.petshopService.update({
       where: { id: parseInt(serviceId) },
       data: {
-        name,
-        description,
-        durationMin: duration_min,
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(duration_min !== undefined ? { durationMin: duration_min } : {}),
         ...(price !== undefined ? { price: price !== null && price !== '' ? parseFloat(String(price)) : null } : {}),
         ...(price_by_size !== undefined ? { priceBySize: price_by_size } : {}),
-        isActive: is_active,
+        ...(is_active !== undefined ? { isActive: is_active } : {}),
+        ...(specialty_id !== undefined ? { specialtyId: specialty_id || null } : {}),
+        ...(duration_multiplier_large !== undefined ? { durationMultiplierLarge: duration_multiplier_large !== null ? parseFloat(String(duration_multiplier_large)) : null } : {}),
       },
+      include: { specialty: { select: { id: true, name: true, color: true } } },
     })
 
     res.json(service)

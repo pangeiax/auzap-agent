@@ -1,36 +1,20 @@
 import { Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
 
-function normalizePetSize(size: unknown): string | undefined {
-  if (typeof size !== 'string') return undefined
-
-  switch (size.toLowerCase().trim()) {
-    case 'pequeno':
-    case 'small':
-      return 'small'
-    case 'medio':
-    case 'médio':
-    case 'medium':
-      return 'medium'
-    case 'grande':
-    case 'large':
-      return 'large'
-    default:
-      return size.trim() || undefined
-  }
+const PET_SIZE_LOOKUP: Record<string, string> = {
+  // Canonical (pass-through)
+  p: 'P', m: 'M', g: 'G', gg: 'GG',
+  // English
+  mini: 'P', small: 'P', medium: 'M', large: 'G',
+  gigante: 'GG', xl: 'GG', extra_large: 'GG', 'extra grande': 'GG',
+  // Portuguese
+  pequeno: 'P', médio: 'M', medio: 'M', grande: 'G',
 }
 
-function denormalizePetSize(size?: string | null): string | null | undefined {
-  switch (size) {
-    case 'small':
-      return 'pequeno'
-    case 'large':
-      return 'grande'
-    case 'medium':
-      return 'medio'
-    default:
-      return size
-  }
+function normalizePetSize(size: unknown): string | undefined {
+  if (typeof size !== 'string') return undefined
+  const code = PET_SIZE_LOOKUP[size.toLowerCase().trim()]
+  return code ?? (size.trim() || undefined)
 }
 
 function calculateAge(birthDate?: Date | null): number | null {
@@ -157,7 +141,7 @@ function shapePet(pet: any) {
     weightKg,
     weight_kg: weightKg,
     weight: weightKg,
-    size: denormalizePetSize(pet.size),
+    size: pet.size ?? null,
     medical_info: pet.notes ? { conditions: [pet.notes] } : null,
     is_active: pet.isActive,
   }

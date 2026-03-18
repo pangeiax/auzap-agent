@@ -1,763 +1,706 @@
-import { useState, useCallback, useEffect } from 'react'
+'use client'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { DashboardLayout } from '@/components/templates/DashboardLayout'
 import { Modal } from '@/components/molecules/Modal'
+import { Button } from '@/components/atoms/Button'
 import { Input } from '@/components/atoms/Input'
-import { Select } from '@/components/atoms/Select'
-import { TextArea } from '@/components/atoms/TextArea'
-import {
-  ChevronLeft,
-  ChevronRight,
-  Crown,
-  PawPrint,
-  Phone,
-  Check,
-  Clock,
-  ChevronRight as ArrowRight,
-  ChevronLeft as ArrowLeft,
-  AlertTriangle,
-  Plus,
-  Calendar,
-  UserPlus,
-} from 'lucide-react'
+import { PawPrint, Clock, LogIn, LogOut, Home, Loader2, AlertTriangle, Plus, Search, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { maskPhone, maskDate, dateToISO, dateFromISO } from '@/lib/masks'
-import { boardingService } from '@/services'
-import { useAuthContext } from '@/contexts/AuthContext'
-import type { BoardingStay } from '@/types'
+import { lodgingConfigService, lodgingReservationService } from '@/services/lodgingService'
+import type { LodgingReservation, LodgingType, LodgingConfig } from '@/services/lodgingService'
+import { clientService } from '@/services'
+import type { Client, Pet } from '@/types'
 
-type PetType = 'Hotel' | 'Creche'
-
-interface PetItem {
-  id: string
-  petName: string
-  initials: string
-  ownerName: string
-  type: PetType
-  checkIn: string
-  checkOut: string
-  note?: string
-}
-
-interface ReservationItem {
-  id: string
-  petName: string
-  initials: string
-  ownerName: string
-  phone: string
-  exitDate: string
-  statusPrimary: 'ativo' | 'checkin'
-  type: PetType
-}
-
-type BoardingStayWithNames = BoardingStay & { client_name?: string; pet_name?: string; client_phone?: string }
-
-const DEFAULT_CAPACITY = 8
-
-function formatDateBR(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return iso
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-function formatDateFullBR(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return iso
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+function formatDateBR(iso: string | Date | null | undefined): string {
+  if (!iso) return '—'
+  const d = typeof iso === 'string' ? new Date(iso) : iso
+  if (isNaN(d.getTime())) return String(iso)
+  return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`
 }
 
 function getInitials(name: string): string {
-  return name
-    .trim()
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase() || '—'
+  return name.trim().split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || '—'
 }
 
-function stayToPetItem(s: BoardingStayWithNames): PetItem {
-  const petName = s.pet_name ?? `Pet ${s.pet_id.slice(0, 8)}`
-  const ownerName = s.client_name ?? `Cliente ${s.client_id?.slice(0, 8) ?? ''}`
-  return {
-    id: s.id,
-    petName,
-    initials: getInitials(petName),
-    ownerName,
-    type: (s.service_type === 'creche' ? 'Creche' : 'Hotel') as PetType,
-    checkIn: formatDateBR(s.check_in_at),
-    checkOut: s.check_out_at ? formatDateBR(s.check_out_at) : '—',
-    note: s.notes ?? undefined,
-  }
+function daysFromNow(isoDate: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const d = new Date(isoDate); d.setHours(0, 0, 0, 0)
+  return Math.ceil((d.getTime() - today.getTime()) / 86400000)
 }
 
-function stayToReservationItem(s: BoardingStayWithNames): ReservationItem {
-  const petName = s.pet_name ?? `Pet ${s.pet_id.slice(0, 8)}`
-  const ownerName = s.client_name ?? `Cliente ${s.client_id?.slice(0, 8) ?? ''}`
-  const exitDate = s.check_out_at ? formatDateFullBR(s.check_out_at) : '—'
-  return {
-    id: s.id,
-    petName,
-    initials: getInitials(petName),
-    ownerName,
-    phone: (s as BoardingStayWithNames).client_phone ?? '—',
-    exitDate,
-    statusPrimary: s.status === 'active' || s.status === 'ativo' ? 'ativo' : 'checkin',
-    type: (s.service_type === 'creche' ? 'Creche' : 'Hotel') as PetType,
-  }
-}
+// ─── Cards ────────────────────────────────────────────────────────────────────
 
-interface MockCustomer {
-  id: string
-  name: string
-  phone: string
-  pets: { id: string; name: string; species: string }[]
-}
-
-const MOCK_CUSTOMERS_FALLBACK: MockCustomer[] = []
-
-const MONTH_NAMES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-]
-
-function SectionHeaderPets({
-  title,
-  subtitle,
-  count,
-  icon: Icon,
-  iconColor,
-}: {
-  title: string
-  subtitle: string
-  count: number
-  icon: typeof Check
-  iconColor: string
-}) {
+function ReservadoCard({ res, onCheckin }: { res: LodgingReservation; onCheckin: (r: LodgingReservation) => void }) {
+  const petName = res.pet_name ?? 'Pet'
+  const daysToCheckin = daysFromNow(res.checkin_date)
+  const urgent = daysToCheckin <= 0
+  const soon = daysToCheckin === 1 || daysToCheckin === 0
   return (
-    <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] px-4 py-4">
-      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', iconColor)}>
-        <Icon className="h-5 w-5" strokeWidth={2} />
+    <div className={cn(
+      'group flex items-start gap-3 rounded-xl border p-3 transition-colors',
+      res.status === 'needs_reschedule'
+        ? 'border-amber-200 dark:border-amber-800/50 bg-amber-50/60 dark:bg-amber-950/20'
+        : urgent
+        ? 'border-red-200 dark:border-red-800/30 bg-red-50/40 dark:bg-red-950/10'
+        : 'border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] hover:border-[#727B8E]/20'
+    )}>
+      <div className={cn(
+        'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl',
+        res.status === 'needs_reschedule' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-[#F4F6F9] dark:bg-[#212225]'
+      )}>
+        <span className={cn('text-sm font-bold', res.status === 'needs_reschedule' ? 'text-amber-600' : 'text-[#727B8E]')}>
+          {getInitials(petName)}
+        </span>
       </div>
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">{title}</h3>
-        <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">{subtitle}</p>
-      </div>
-      <span className={cn('shrink-0 rounded-lg px-2.5 py-1 text-sm font-bold', iconColor)}>
-        {count}
-      </span>
-    </div>
-  )
-}
-
-function PetCard({ item }: { item: PetItem }) {
-  const typeClass = item.type === 'Hotel' ? 'bg-[#8B5CF6]/10 text-[#8B5CF6]' : 'bg-[#F59E0B]/10 text-[#F59E0B]'
-  return (
-    <div className="flex items-start gap-3 border-b border-[#727B8E]/5 py-4 last:border-b-0">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#F4F6F9]">
-        <span className="text-sm font-semibold text-[#727B8E]">{item.initials}</span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-bold text-[#434A57]">{item.petName}</span>
-          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold', typeClass)}>
-            {item.type}
-          </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="text-sm font-bold text-[#434A57] dark:text-[#f5f9fc]">{petName}</p>
+          {res.status === 'needs_reschedule' && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-2.5 w-2.5" />Reagendar
+            </span>
+          )}
         </div>
-        <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">{item.ownerName}</p>
-        <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
-          → {item.checkIn} | → {item.checkOut}
-        </p>
-        {item.note && (
-          <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#F59E0B]">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>{item.note}</span>
-          </div>
+        {(res.pet_breed || res.pet_size) && (
+          <p className="text-xs text-[#727B8E]">{[res.pet_breed, res.pet_size].filter(Boolean).join(' · ')}</p>
         )}
+        <p className="mt-0.5 text-xs text-[#727B8E]">{res.client_name ?? '—'}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[#727B8E]">
+          <span>
+            Check-in: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkin_date)}</span>
+            {daysToCheckin === 0 ? <span className="ml-1 font-semibold text-green-600">(hoje)</span>
+             : daysToCheckin === 1 ? <span className="ml-1 font-semibold text-blue-600">(amanhã)</span>
+             : daysToCheckin > 0 ? <span className="ml-1">({daysToCheckin}d)</span>
+             : <span className="ml-1 font-semibold text-red-500">({Math.abs(daysToCheckin)}d atraso)</span>}
+          </span>
+          <span>Saída: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span></span>
+        </div>
       </div>
       <button
         type="button"
-        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/5 px-3 py-1.5 text-xs font-medium text-[#F59E0B] transition-colors hover:bg-[#F59E0B]/10"
+        onClick={() => onCheckin(res)}
+        className={cn(
+          'shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+          soon
+            ? 'bg-[#1E62EC] text-white hover:bg-[#1a55d4] shadow-sm'
+            : 'bg-[#1E62EC]/10 text-[#1E62EC] hover:bg-[#1E62EC]/20'
+        )}
       >
-        Checkout
-        <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
+        <LogIn className="h-3.5 w-3.5" />
+        Check-in
       </button>
     </div>
   )
 }
 
-function ReservationCard({ item }: { item: ReservationItem }) {
-  const typeClass = item.type === 'Hotel' ? 'bg-[#8B5CF6]/10 text-[#8B5CF6]' : 'bg-[#F59E0B]/10 text-[#F59E0B]'
+function HospedadoCard({ res, onCheckout, loadingId }: { res: LodgingReservation; onCheckout: (r: LodgingReservation) => void; loadingId: string | null }) {
+  const petName = res.pet_name ?? 'Pet'
+  const remaining = daysFromNow(res.checkout_date)
+  const checkoutUrgent = remaining <= 0
   return (
-    <div className="flex items-start gap-3 border-b border-[#727B8E]/5 py-4 last:border-b-0">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#F4F6F9]">
-        <span className="text-sm font-semibold text-[#727B8E]">{item.initials}</span>
+    <div className={cn(
+      'group flex items-start gap-3 rounded-xl border p-3 transition-colors',
+      checkoutUrgent
+        ? 'border-amber-200 dark:border-amber-800/30 bg-amber-50/40 dark:bg-amber-950/10'
+        : 'border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] hover:border-[#727B8E]/20'
+    )}>
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950/30">
+        <span className="text-sm font-bold text-green-600">{getInitials(petName)}</span>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-bold text-[#434A57]">{item.petName}</span>
-          <span className="rounded-full bg-[#3DCA21]/10 px-2 py-0.5 text-[10px] font-semibold text-[#3DCA21]">
-            {item.statusPrimary === 'ativo' ? 'ativo' : 'checkin'}
-          </span>
-          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold', typeClass)}>
-            {item.type}
-          </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="text-sm font-bold text-[#434A57] dark:text-[#f5f9fc]">{petName}</p>
+          {res.kennel_id && (
+            <span className="rounded-full bg-[#727B8E]/10 px-2 py-0.5 text-[10px] font-semibold text-[#727B8E]">
+              Vaga {res.kennel_id}
+            </span>
+          )}
         </div>
-        <p className="text-xs text-[#727B8E]">{item.ownerName}</p>
-        <div className="flex items-center gap-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-          <Phone className="h-3 w-3 shrink-0" />
-          <span>{item.phone}</span>
-        </div>
-        <div className="mt-1 flex items-center gap-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-          <Calendar className="h-3 w-3 shrink-0" />
-          <span>Saída: {item.exitDate}</span>
+        {(res.pet_breed || res.pet_size) && (
+          <p className="text-xs text-[#727B8E]">{[res.pet_breed, res.pet_size].filter(Boolean).join(' · ')}</p>
+        )}
+        <p className="mt-0.5 text-xs text-[#727B8E]">{res.client_name ?? '—'}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[#727B8E]">
+          <span>
+            Check-out: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span>
+            {remaining <= 0 ? <span className="ml-1 font-semibold text-amber-500">(vence hoje)</span>
+             : remaining === 1 ? <span className="ml-1 font-semibold text-amber-500">(1 dia)</span>
+             : <span className="ml-1">({remaining}d restantes)</span>}
+          </span>
         </div>
       </div>
+      <button
+        type="button"
+        disabled={loadingId === res.id}
+        onClick={() => onCheckout(res)}
+        className={cn(
+          'shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50',
+          checkoutUrgent
+            ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm'
+            : 'bg-green-50 dark:bg-green-950/20 text-green-600 hover:bg-green-100 dark:hover:bg-green-950/40'
+        )}
+      >
+        {loadingId === res.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}
+        Check-out
+      </button>
     </div>
   )
 }
 
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function HotelCrechePage() {
-  const { user } = useAuthContext()
-  const petshopId = user?.petshop_id ?? 0
+  const [config, setConfig] = useState<LodgingConfig | null>(null)
+  const [loadingConfig, setLoadingConfig] = useState(true)
+  const [activeTab, setActiveTab] = useState<LodgingType>('hotel')
 
-  const [currentDate, setCurrentDate] = useState(new Date())
-  const [petsHospedados, setPetsHospedados] = useState<PetItem[]>([])
-  const [reservas, setReservas] = useState<ReservationItem[]>([])
-  const [customers, setCustomers] = useState<MockCustomer[]>(MOCK_CUSTOMERS_FALLBACK)
-  const [ocupacaoAtual, setOcupacaoAtual] = useState(0)
-  const [checkInsHoje, setCheckInsHoje] = useState(0)
-  const [checkOutsHoje, setCheckOutsHoje] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [capacidadeTotal, setCapacidadeTotal] = useState(DEFAULT_CAPACITY)
+  const [reservations, setReservations] = useState<LodgingReservation[]>([])
+  const [loadingRes, setLoadingRes] = useState(false)
+
+  // Check-in modal
+  const [checkinTarget, setCheckinTarget] = useState<LodgingReservation | null>(null)
+  const [kennelMode, setKennelMode] = useState<'auto' | 'manual'>('auto')
+  const [autoKennel, setAutoKennel] = useState('')
+  const [kennelInput, setKennelInput] = useState('')
+  const [checkinLoading, setCheckinLoading] = useState(false)
+  const [checkinError, setCheckinError] = useState('')
+
+  // Check-out
+  const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
+  const [checkoutTarget, setCheckoutTarget] = useState<LodgingReservation | null>(null)
+
+  // Nova reserva manual
+  const [newResOpen, setNewResOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Client[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [clientPets, setClientPets] = useState<Pet[]>([])
+  const [selectedPetId, setSelectedPetId] = useState('')
+  const [newCheckinDate, setNewCheckinDate] = useState('')
+  const [newCheckoutDate, setNewCheckoutDate] = useState('')
+  const [newDailyRate, setNewDailyRate] = useState('')
+  const [newEmergencyContact, setNewEmergencyContact] = useState('')
+  const [newResLoading, setNewResLoading] = useState(false)
+  const [newResError, setNewResError] = useState('')
+  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const fetchConfig = useCallback(async () => {
+    try {
+      setLoadingConfig(true)
+      const cfg = await lodgingConfigService.get()
+      setConfig(cfg)
+      // Set initial tab based on what's enabled
+      if (!cfg.hotel_enabled && cfg.daycare_enabled) setActiveTab('daycare')
+    } catch (err) {
+      console.error('Erro ao carregar config hospedagem:', err)
+    } finally {
+      setLoadingConfig(false)
+    }
+  }, [])
+
+  const fetchReservations = useCallback(async () => {
+    try {
+      setLoadingRes(true)
+      const list = await lodgingReservationService.list({ status: 'confirmed,checked_in,needs_reschedule' })
+      setReservations(list)
+    } catch (err) {
+      console.error('Erro ao carregar reservas:', err)
+    } finally {
+      setLoadingRes(false)
+    }
+  }, [])
 
   useEffect(() => {
-    if (!petshopId) {
-      setLoading(false)
-      return
-    }
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-        const [stats, activeList] = await Promise.allSettled([
-          boardingService.getStats(petshopId),
-          boardingService.getActiveBoardings(petshopId),
-        ])
-        if (stats.status === 'fulfilled') {
-          setOcupacaoAtual(stats.value.total_active ?? 0)
-          const today = new Date().toISOString().slice(0, 10)
-          setCheckInsHoje(0)
-          setCheckOutsHoje(0)
-        }
-        if (activeList.status === 'fulfilled') {
-          const stays = activeList.value as BoardingStayWithNames[]
-          setPetsHospedados(stays.map(stayToPetItem))
-          setReservas(stays.map(stayToReservationItem))
-        }
-      } catch (error) {
-        console.error('Erro ao buscar dados Hotel/Creche:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchData()
-  }, [petshopId])
+    fetchConfig()
+    fetchReservations()
+  }, [fetchConfig, fetchReservations])
 
-  const [reservaModalOpen, setReservaModalOpen] = useState(false)
-  const [serviceType, setServiceType] = useState<PetType>('Hotel')
-  const [customerId, setCustomerId] = useState('')
-  const [petId, setPetId] = useState('')
-  const [checkInDate, setCheckInDate] = useState('')
-  const [checkOutDate, setCheckOutDate] = useState('')
-  const [dailyRate, setDailyRate] = useState('80')
-  const [notes, setNotes] = useState('')
-  const [showNewCustomerForm, setShowNewCustomerForm] = useState(false)
-  const [newCustomerName, setNewCustomerName] = useState('')
-  const [newCustomerPhone, setNewCustomerPhone] = useState('')
-  const [showNewPetForm, setShowNewPetForm] = useState(false)
-  const [newPetName, setNewPetName] = useState('')
-  const [newPetSpecies, setNewPetSpecies] = useState('cachorro')
+  const currentRes = reservations.filter((r) => r.type === activeTab)
+  const reservados = currentRes.filter((r) => r.status === 'confirmed' || r.status === 'needs_reschedule')
+  const hospedados = currentRes.filter((r) => r.status === 'checked_in')
 
-  const selectedCustomer = customers.find((c) => c.id === customerId)
-  const selectedPet = selectedCustomer?.pets.find((p) => p.id === petId)
-  const availableSpots = capacidadeTotal - ocupacaoAtual
-
-  useEffect(() => {
-    if (!reservaModalOpen) {
-      setCustomerId('')
-      setPetId('')
-      setCheckInDate('')
-      setCheckOutDate('')
-      setDailyRate('80')
-      setNotes('')
-      setServiceType('Hotel')
-      setShowNewCustomerForm(false)
-      setShowNewPetForm(false)
-      setNewCustomerName('')
-      setNewCustomerPhone('')
-      setNewPetName('')
-      setNewPetSpecies('cachorro')
-    }
-  }, [reservaModalOpen])
-
-  const handleCreateCustomer = () => {
-    if (!newCustomerName.trim() || !newCustomerPhone.trim()) return
-    const newCustomer: MockCustomer = {
-      id: `c_${Date.now()}`,
-      name: newCustomerName.trim(),
-      phone: newCustomerPhone.trim(),
-      pets: [],
-    }
-    setCustomers((prev) => [...prev, newCustomer])
-    setCustomerId(newCustomer.id)
-    setPetId('')
-    setShowNewCustomerForm(false)
-    setNewCustomerName('')
-    setNewCustomerPhone('')
+  const computeAutoKennel = (target: LodgingReservation) => {
+    const occupied = reservations
+      .filter((r) => r.status === 'checked_in' && r.kennel_id && /^\d+$/.test(r.kennel_id) && r.type === target.type)
+      .map((r) => parseInt(r.kennel_id!))
+    return String(occupied.length > 0 ? Math.max(...occupied) + 1 : 1)
   }
 
-  const handleCreatePet = () => {
-    if (!newPetName.trim() || !customerId) return
-    const newPet = { id: `p_${Date.now()}`, name: newPetName.trim(), species: newPetSpecies }
-    setCustomers((prev) =>
-      prev.map((c) =>
-        c.id === customerId ? { ...c, pets: [...c.pets, newPet] } : c
+  const handleOpenCheckin = (r: LodgingReservation) => {
+    const auto = computeAutoKennel(r)
+    setAutoKennel(auto)
+    setKennelInput(auto)
+    setKennelMode('auto')
+    setCheckinError('')
+    setCheckinTarget(r)
+  }
+
+  const handleConfirmCheckin = async () => {
+    if (!checkinTarget) return
+    const kennelId = kennelMode === 'auto' ? autoKennel : kennelInput.trim()
+    if (!kennelId) { setCheckinError('Informe o identificador da vaga.'); return }
+
+    if (kennelMode === 'manual') {
+      const conflict = reservations.find(
+        (r) => r.kennel_id === kennelId && r.status === 'checked_in' && r.id !== checkinTarget.id && r.type === checkinTarget.type &&
+          new Date(r.checkin_date) < new Date(checkinTarget.checkout_date) &&
+          new Date(r.checkout_date) > new Date(checkinTarget.checkin_date)
       )
-    )
-    setPetId(newPet.id)
-    setShowNewPetForm(false)
-    setNewPetName('')
-    setNewPetSpecies('cachorro')
-  }
-
-  const handleCreateReserva = () => {
-    if (!selectedCustomer || !selectedPet || !checkInDate || !checkOutDate) return
-    if (availableSpots <= 0) return
-    const exitDate = checkOutDate
-    const newReserva: ReservationItem = {
-      id: `res-${Date.now()}`,
-      petName: selectedPet.name,
-      initials: getInitials(selectedPet.name),
-      ownerName: selectedCustomer.name,
-      phone: selectedCustomer.phone,
-      exitDate,
-      statusPrimary: 'ativo',
-      type: serviceType,
+      if (conflict) { setCheckinError('Esta vaga já está ocupada neste período.'); return }
     }
-    setReservas((prev) => [...prev, newReserva])
-    setReservaModalOpen(false)
+
+    setCheckinLoading(true)
+    try {
+      await lodgingReservationService.update(checkinTarget.id, { status: 'checked_in', kennel_id: kennelId })
+      setCheckinTarget(null)
+      await fetchReservations()
+    } catch {
+      setCheckinError('Erro ao fazer check-in. Tente novamente.')
+    } finally {
+      setCheckinLoading(false)
+    }
   }
 
-  const handlePrevMonth = useCallback(() => {
-    setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
-  }, [])
+  const handleCheckout = async (r: LodgingReservation) => {
+    setCheckoutLoadingId(r.id)
+    try {
+      await lodgingReservationService.update(r.id, { status: 'checked_out' })
+      setCheckoutTarget(null)
+      await fetchReservations()
+    } catch (err) {
+      console.error('Erro ao fazer check-out:', err)
+    } finally {
+      setCheckoutLoadingId(null)
+    }
+  }
 
-  const handleNextMonth = useCallback(() => {
-    setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
-  }, [])
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value)
+    setSelectedClient(null)
+    setClientPets([])
+    setSelectedPetId('')
+    if (searchRef.current) clearTimeout(searchRef.current)
+    if (!value.trim()) { setSearchResults([]); setShowDropdown(false); return }
+    setSearchLoading(true)
+    searchRef.current = setTimeout(async () => {
+      try {
+        const results = await clientService.searchClients(value, 8)
+        setSearchResults(results)
+        setShowDropdown(true)
+      } catch { setSearchResults([]) } finally { setSearchLoading(false) }
+    }, 350)
+  }
 
-  const handleToday = useCallback(() => {
-    setCurrentDate(new Date())
-  }, [])
+  const handleSelectClient = async (client: Client) => {
+    setSelectedClient(client)
+    setSearchQuery(client.name ?? '')
+    setShowDropdown(false)
+    setSelectedPetId('')
+    try {
+      const pets = await clientService.getClientPets(client.id)
+      setClientPets(pets)
+      if (pets.length === 1) setSelectedPetId(pets[0].id)
+    } catch { setClientPets([]) }
+  }
 
-  const ocupacaoPercent = Math.round((ocupacaoAtual / capacidadeTotal) * 100)
+  const handleOpenNewRes = () => {
+    setSearchQuery('')
+    setSearchResults([])
+    setShowDropdown(false)
+    setSelectedClient(null)
+    setClientPets([])
+    setSelectedPetId('')
+    const today = new Date().toISOString().slice(0, 10)
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+    setNewCheckinDate(today)
+    setNewCheckoutDate(tomorrow)
+    const rate = activeTab === 'hotel' ? config?.hotel_daily_rate : config?.daycare_daily_rate
+    setNewDailyRate(rate ? String(Number(rate).toFixed(2)) : '')
+    setNewEmergencyContact('')
+    setNewResError('')
+    setNewResOpen(true)
+  }
 
-  const reservaValid = customerId && petId && checkInDate && checkOutDate
+  const handleCreateReservation = async () => {
+    if (!selectedClient) { setNewResError('Selecione um cliente.'); return }
+    if (!selectedPetId) { setNewResError('Selecione um pet.'); return }
+    if (!newCheckinDate) { setNewResError('Informe a data de check-in.'); return }
+    if (!newCheckoutDate) { setNewResError('Informe a data de check-out.'); return }
+    if (newCheckoutDate <= newCheckinDate) { setNewResError('A data de check-out deve ser após o check-in.'); return }
+    setNewResLoading(true)
+    setNewResError('')
+    try {
+      await lodgingReservationService.create({
+        client_id: selectedClient.id,
+        pet_id: selectedPetId,
+        type: activeTab,
+        checkin_date: newCheckinDate,
+        checkout_date: newCheckoutDate,
+        ...(newDailyRate ? { daily_rate: Number(newDailyRate.replace(',', '.')) } : {}),
+        ...(newEmergencyContact.trim() ? { emergency_contact: newEmergencyContact.trim() } : {}),
+      })
+      setNewResOpen(false)
+      await fetchReservations()
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.detail ||
+        'Erro ao criar reserva. Verifique os dados e tente novamente.'
+      setNewResError(msg)
+    } finally {
+      setNewResLoading(false)
+    }
+  }
+
+  if (loadingConfig) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-1 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#1E62EC]" />
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  const noneEnabled = !config?.hotel_enabled && !config?.daycare_enabled
+
+  if (noneEnabled) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#1E62EC]/10">
+            <Home className="h-8 w-8 text-[#1E62EC]" />
+          </div>
+          <h2 className="text-lg font-semibold text-[#434A57] dark:text-[#f5f9fc]">Hospedagem não habilitada</h2>
+          <p className="max-w-sm text-sm text-[#727B8E] dark:text-[#8a94a6]">
+            Vá em Configurações → Hospedagem para habilitar o Hotel e/ou Creche.
+          </p>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  const isHotel = activeTab === 'hotel'
+  const accentBg = isHotel ? 'bg-[#8B5CF6]/10' : 'bg-amber-50 dark:bg-amber-950/20'
+  const accentText = isHotel ? 'text-[#8B5CF6]' : 'text-amber-600 dark:text-amber-400'
 
   return (
     <DashboardLayout>
       <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white p-4 shadow-lg dark:border-[#40485A] dark:bg-[#1A1B1D] sm:p-6">
-        <div className="flex min-h-0 flex-1 flex-col space-y-6 overflow-y-auto">
-          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <a
-                href="/calendario"
-                className="flex items-center gap-1.5 rounded-lg border border-transparent px-3 py-1.5 text-sm font-medium text-[#727B8E] dark:text-[#8a94a6] transition-colors hover:text-[#434A57] dark:hover:text-[#f5f9fc]"
-              >
-                <Crown className="h-4 w-4" />
-                <span>Agenda</span>
-              </a>
-              <div className="h-5 w-px bg-[#727B8E]/10" />
-              <span
-                className={cn(
-                  'rounded-lg border border-[#727B8E]/10 dark:border-[#40485A] bg-[#0e1629] dark:bg-[#2172e5] px-3 py-1.5 text-sm font-medium text-white'
-                )}
-              >
-                Hotel/Creche
-              </span>
-            </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white shadow-sm dark:border-[#40485A] dark:bg-[#1A1B1D] sm:p-6 p-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
 
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h2 className="text-base font-semibold text-[#434A57] dark:text-[#f5f9fc] sm:text-lg">
-                {MONTH_NAMES[currentDate.getMonth()]}, {currentDate.getFullYear()}
-              </h2>
-              <button
-                type="button"
-                onClick={handlePrevMonth}
-                className="rounded-md p-1 text-[#727B8E] hover:bg-[#F4F6F9] dark:text-[#8a94a6] dark:hover:bg-[#212225]"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleToday}
-                className="rounded-md border border-[#727B8E]/10 dark:border-[#40485A] px-3 py-1 text-sm text-[#434A57] dark:text-[#f5f9fc] hover:bg-[#F4F6F9] dark:hover:bg-[#212225]"
-              >
-                Hoje
-              </button>
-              <button
-                type="button"
-                onClick={handleNextMonth}
-                className="rounded-md p-1 text-[#727B8E] hover:bg-[#F4F6F9] dark:text-[#8a94a6] dark:hover:bg-[#212225]"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0 }}
-              whileHover={{ scale: 1.02 }}
-              className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 shadow-sm transition-shadow duration-200 hover:shadow-md">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#727B8E]/10">
-                  <PawPrint className="h-5 w-5 text-[#727B8E]" strokeWidth={1.5} />
+            {/* ─── Header ─── */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {/* Tabs Hotel / Creche */}
+                <div className="flex gap-1 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] p-1">
+                  {config?.hotel_enabled && (
+                    <button type="button" onClick={() => setActiveTab('hotel')}
+                      className={cn('rounded-lg px-4 py-1.5 text-sm font-semibold transition-all',
+                        activeTab === 'hotel' ? 'bg-[#8B5CF6] text-white shadow-sm' : 'text-[#727B8E] hover:text-[#434A57] dark:hover:text-[#f5f9fc]'
+                      )}>Hotel</button>
+                  )}
+                  {config?.daycare_enabled && (
+                    <button type="button" onClick={() => setActiveTab('daycare')}
+                      className={cn('rounded-lg px-4 py-1.5 text-sm font-semibold transition-all',
+                        activeTab === 'daycare' ? 'bg-amber-500 text-white shadow-sm' : 'text-[#727B8E] hover:text-[#434A57] dark:hover:text-[#f5f9fc]'
+                      )}>Creche</button>
+                  )}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-[#727B8E] dark:text-[#8a94a6]">Ocupação Atual</p>
-                  <p className="text-2xl font-bold text-[#434A57] dark:text-[#f5f9fc]">
-                    {ocupacaoAtual} / {capacidadeTotal} pets
-                  </p>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#F4F6F9]">
-                    <div
-                      className="h-full rounded-full bg-[#3DCA21]"
-                      style={{ width: `${ocupacaoPercent}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-                    {capacidadeTotal - ocupacaoAtual} vagas disponíveis
-                  </p>
+
+                {/* Rate + check-in info pills */}
+                <div className="hidden sm:flex items-center gap-2">
+                  {(isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate) && (
+                    <span className={cn('rounded-lg border px-2.5 py-1 text-xs font-medium', accentBg, accentText, 'border-transparent')}>
+                      R$ {Number(isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate).toFixed(2)}/dia
+                    </span>
+                  )}
+                  <span className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:bg-[#212225] px-2.5 py-1 text-xs text-[#727B8E]">
+                    Entrada: {isHotel ? config?.hotel_checkin_time : config?.daycare_checkin_time}
+                  </span>
+                  <span className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:bg-[#212225] px-2.5 py-1 text-xs text-[#727B8E]">
+                    Saída: {isHotel ? config?.hotel_checkout_time : config?.daycare_checkout_time}
+                  </span>
                 </div>
               </div>
-            </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.075 }}
-              whileHover={{ scale: 1.02 }}
-              className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 shadow-sm transition-shadow duration-200 hover:shadow-md"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#3DCA21]/10">
-                  <ArrowRight className="h-5 w-5 text-[#3DCA21]" strokeWidth={2} />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-[#727B8E] dark:text-[#8a94a6]">Check-ins Hoje</p>
-                  <p className="text-2xl font-bold text-[#3DCA21]">{checkInsHoje}</p>
-                  <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">Aguardando entrada</p>
-                </div>
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.15 }}
-              whileHover={{ scale: 1.02 }}
-              className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 shadow-sm transition-shadow duration-200 hover:shadow-md"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F59E0B]/10">
-                  <ArrowLeft className="h-5 w-5 text-[#F59E0B]" strokeWidth={2} />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-[#727B8E] dark:text-[#8a94a6]">Check-outs Hoje</p>
-                  <p className="text-2xl font-bold text-[#F59E0B]">{checkOutsHoje}</p>
-                  <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">Saídas previstas</p>
-                </div>
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.225 }}
-              whileHover={{ scale: 1.02 }}
-              className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 shadow-sm transition-shadow duration-200 hover:shadow-md"
-            >
-              <p className="mb-3 text-xs font-medium text-[#727B8E] dark:text-[#8a94a6]">Ações Rápidas</p>
               <button
                 type="button"
-                onClick={() => setReservaModalOpen(true)}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#0e1629] px-4 py-3 text-sm font-medium text-white transition-colors hover:opacity-90 dark:bg-[#2172e5]"
+                onClick={handleOpenNewRes}
+                className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1a55d4] transition-colors"
               >
-                <Plus className="h-5 w-5" strokeWidth={2} />
+                <Plus className="h-4 w-4" />
                 Nova Reserva
               </button>
-            </motion.div>
-          </div>
+            </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.3 }}
-              className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white transition-shadow duration-200 hover:shadow-md dark:border-[#40485A] dark:bg-[#1A1B1D]"
-            >
-              <SectionHeaderPets
-                title="Pets Hospedados"
-                subtitle={`${petsHospedados.length} hospedados`}
-                count={petsHospedados.length}
-                icon={Check}
-                iconColor="bg-[#3DCA21]/10 text-[#3DCA21]"
-              />
-              <div className="min-h-0 flex-1 overflow-y-auto px-4">
-                {loading ? (
-                  <p className="py-4 text-sm text-[#727B8E] dark:text-[#8a94a6]">Carregando...</p>
-                ) : (
-                  petsHospedados.map((pet) => (
-                    <PetCard key={pet.id} item={pet} />
-                  ))
-                )}
-              </div>
-            </motion.div>
+            {/* ─── Stats bar ─── */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                { label: 'Aguardando check-in', value: reservados.length, color: 'text-[#1E62EC]', bg: 'bg-[#1E62EC]/5 dark:bg-[#1E62EC]/10', border: 'border-[#1E62EC]/10' },
+                { label: 'Hospedados agora', value: hospedados.length, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-950/20', border: 'border-green-200 dark:border-green-800/30' },
+                { label: 'Diária', value: (isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate) ? `R$ ${Number(isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate).toFixed(2)}` : '—', color: accentText, bg: accentBg, border: 'border-transparent' },
+                { label: 'Horário de entrada', value: isHotel ? config?.hotel_checkin_time : config?.daycare_checkin_time, color: 'text-[#434A57] dark:text-[#f5f9fc]', bg: 'bg-[#F4F6F9] dark:bg-[#212225]', border: 'border-[#727B8E]/10' },
+              ].map((stat, i) => (
+                <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: i * 0.05 }}
+                  className={cn('rounded-xl border p-3.5', stat.bg, stat.border)}>
+                  <p className="text-[11px] font-medium text-[#727B8E] dark:text-[#8a94a6]">{stat.label}</p>
+                  <p className={cn('mt-1.5 text-2xl font-bold', stat.color)}>{stat.value}</p>
+                </motion.div>
+              ))}
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.375 }}
-              className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white transition-shadow duration-200 hover:shadow-md dark:border-[#40485A] dark:bg-[#1A1B1D]">
-              <SectionHeaderPets
-                title="Reservas & Check-ins"
-                subtitle={`${reservas.length} reservas`}
-                count={reservas.length}
-                icon={Clock}
-                iconColor="bg-[#1E62EC]/10 text-[#1E62EC]"
-              />
-              <div className="min-h-0 flex-1 overflow-y-auto px-4">
-                {loading ? (
-                  <p className="py-4 text-sm text-[#727B8E] dark:text-[#8a94a6]">Carregando...</p>
-                ) : (
-                  reservas.map((res) => (
-                    <ReservationCard key={res.id} item={res} />
-                  ))
-                )}
+            {/* ─── Two-column reservation lists ─── */}
+            {loadingRes ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-6 w-6 animate-spin text-[#1E62EC]" />
               </div>
-            </motion.div>
+            ) : (
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                {/* Reservados */}
+                <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}
+                  className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
+                  <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#1E62EC]/10">
+                      <Clock className="h-4 w-4 text-[#1E62EC]" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-sm font-bold text-[#434A57] dark:text-[#f5f9fc]">Reservados</h3>
+                      <p className="text-xs text-[#727B8E]">Aguardando check-in</p>
+                    </div>
+                    <span className={cn('rounded-lg px-2.5 py-1 text-sm font-bold',
+                      reservados.length > 0 ? 'bg-[#1E62EC]/10 text-[#1E62EC]' : 'bg-[#F4F6F9] dark:bg-[#212225] text-[#727B8E]'
+                    )}>{reservados.length}</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto bg-[#F4F6F9]/40 dark:bg-[#212225]/40 p-3 space-y-2">
+                    {reservados.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-14 text-center">
+                        <PawPrint className="h-9 w-9 text-[#727B8E]/30" />
+                        <p className="text-sm text-[#727B8E]">Nenhuma reserva pendente</p>
+                      </div>
+                    ) : (
+                      reservados.map((r) => <ReservadoCard key={r.id} res={r} onCheckin={handleOpenCheckin} />)
+                    )}
+                  </div>
+                </motion.div>
+
+                {/* Hospedados */}
+                <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.15 }}
+                  className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
+                  <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-100 dark:bg-green-950/30">
+                      <Home className="h-4 w-4 text-green-600" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-sm font-bold text-[#434A57] dark:text-[#f5f9fc]">Hospedados</h3>
+                      <p className="text-xs text-[#727B8E]">Em estadia agora</p>
+                    </div>
+                    <span className={cn('rounded-lg px-2.5 py-1 text-sm font-bold',
+                      hospedados.length > 0 ? 'bg-green-100 dark:bg-green-950/30 text-green-600 dark:text-green-400' : 'bg-[#F4F6F9] dark:bg-[#212225] text-[#727B8E]'
+                    )}>{hospedados.length}</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto bg-[#F4F6F9]/40 dark:bg-[#212225]/40 p-3 space-y-2">
+                    {hospedados.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-14 text-center">
+                        <PawPrint className="h-9 w-9 text-[#727B8E]/30" />
+                        <p className="text-sm text-[#727B8E]">Nenhum pet hospedado</p>
+                      </div>
+                    ) : (
+                      hospedados.map((r) => <HospedadoCard key={r.id} res={r} onCheckout={(r) => setCheckoutTarget(r)} loadingId={checkoutLoadingId} />)
+                    )}
+                  </div>
+                </motion.div>
+              </div>
+            )}
           </div>
         </div>
       </div>
-      </div>
 
-      <button
-        type="button"
-        onClick={() => setReservaModalOpen(true)}
-        className="fixed right-6 flex h-14 w-14 items-center justify-center rounded-full bg-[#0e1629] text-white shadow-xl transition-transform duration-200 hover:scale-105 sm:right-8 dark:bg-[#2172e5]"
-        style={{ bottom: 'max(1.5rem, calc(1.5rem + env(safe-area-inset-bottom, 0px)))' }}
-        aria-label="Nova reserva"
-      >
-        <PawPrint className="h-5 w-5" />
-      </button>
-
-      <Modal
-        isOpen={reservaModalOpen}
-        onClose={() => setReservaModalOpen(false)}
-        title="Nova Reserva - Hotel/Creche"
-        onSubmit={handleCreateReserva}
-        submitText="Criar Reserva"
-        cancelText="Cancelar"
-      >
-        <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto">
-          {availableSpots <= 2 && (
-            <div
-              className={cn(
-                'rounded-lg p-3 text-sm',
-                availableSpots <= 0
-                  ? 'bg-red-500/20 text-red-600 dark:text-red-400'
-                  : 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
-              )}
-            >
-              {availableSpots <= 0
-                ? 'Capacidade máxima atingida! Não é possível criar novas reservas.'
-                : `Atenção: Apenas ${availableSpots} vaga(s) disponível(eis).`}
+      {/* Check-in Modal */}
+      <Modal isOpen={!!checkinTarget} onClose={() => setCheckinTarget(null)} title="Fazer Check-in" className="max-w-[420px]">
+        {checkinTarget && (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-3 text-sm">
+              <p className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">{checkinTarget.pet_name}</p>
+              <p className="text-[#727B8E]">{checkinTarget.client_name}</p>
+              <p className="text-[#727B8E]">{formatDateBR(checkinTarget.checkin_date)} → {formatDateBR(checkinTarget.checkout_date)}</p>
             </div>
-          )}
 
-          <div>
-            <p className="mb-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">Tipo de Serviço</p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setServiceType('Hotel')}
-                className={cn(
-                  'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
-                  serviceType === 'Hotel'
-                    ? 'border-[#1E62EC] bg-[#1E62EC]/10 text-[#1E62EC] dark:bg-[#2172e5]/20 dark:border-[#2172e5] dark:text-[#2172e5]'
-                    : 'border-[#727B8E]/20 bg-transparent text-[#727B8E] hover:bg-[#F4F6F9] dark:border-[#40485A] dark:text-[#8a94a6] dark:hover:bg-[#212225]'
-                )}
-              >
-                Hotel
-              </button>
-              <button
-                type="button"
-                onClick={() => setServiceType('Creche')}
-                className={cn(
-                  'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
-                  serviceType === 'Creche'
-                    ? 'border-[#1E62EC] bg-[#1E62EC]/10 text-[#1E62EC] dark:bg-[#2172e5]/20 dark:border-[#2172e5] dark:text-[#2172e5]'
-                    : 'border-[#727B8E]/20 bg-transparent text-[#727B8E] hover:bg-[#F4F6F9] dark:border-[#40485A] dark:text-[#8a94a6] dark:hover:bg-[#212225]'
-                )}
-              >
-                Creche
-              </button>
+            <div>
+              <p className="mb-2 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Identificador da vaga</p>
+              <div className="mb-3 flex gap-2">
+                <button type="button" onClick={() => { setKennelMode('auto'); setKennelInput(autoKennel) }}
+                  className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition-colors border',
+                    kennelMode === 'auto' ? 'bg-[#1E62EC] text-white border-[#1E62EC]' : 'border-[#727B8E]/20 text-[#727B8E] hover:border-[#1E62EC]'
+                  )}>Automático</button>
+                <button type="button" onClick={() => setKennelMode('manual')}
+                  className={cn('rounded-lg px-3 py-1.5 text-sm font-medium transition-colors border',
+                    kennelMode === 'manual' ? 'bg-[#1E62EC] text-white border-[#1E62EC]' : 'border-[#727B8E]/20 text-[#727B8E] hover:border-[#1E62EC]'
+                  )}>Manual</button>
+              </div>
+              {kennelMode === 'auto' ? (
+                <div className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] dark:bg-[#212225] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]">
+                  Vaga {autoKennel}
+                </div>
+              ) : (
+                <Input placeholder="Ex: 3, Suite 1, Quarto VIP..." value={kennelInput} onChange={(e) => setKennelInput(e.target.value)} />
+              )}
+              {checkinError && <p className="mt-1 text-xs text-red-500">{checkinError}</p>}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCheckinTarget(null)} disabled={checkinLoading}>Cancelar</Button>
+              <Button onClick={handleConfirmCheckin} disabled={checkinLoading}>
+                {checkinLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Fazendo check-in...</> : 'Confirmar check-in'}
+              </Button>
             </div>
           </div>
+        )}
+      </Modal>
 
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">Cliente</p>
-              <button
-                type="button"
-                onClick={() => setShowNewCustomerForm(!showNewCustomerForm)}
-                className="flex items-center gap-1 text-xs font-medium text-[#1E62EC] hover:underline dark:text-[#2172e5]"
-              >
-                <UserPlus className="h-3.5 w-3.5" />
-                {showNewCustomerForm ? 'Cancelar' : 'Novo Cliente'}
-              </button>
-            </div>
-            {showNewCustomerForm ? (
-              <div className="space-y-3 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
-                <Input
-                  label="Nome do Cliente"
-                  placeholder="Nome completo"
-                  value={newCustomerName}
-                  onChange={(e) => setNewCustomerName(e.target.value)}
-                />
-                <Input
-                  label="Telefone"
-                  placeholder="(11) 99999-9999"
-                  value={newCustomerPhone}
-                  onChange={(e) => setNewCustomerPhone(maskPhone(e.target.value))}
-                />
-                <button
-                  type="button"
-                  onClick={handleCreateCustomer}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0e1629] py-2 text-sm font-medium text-white hover:opacity-90 dark:bg-[#2172e5]"
-                >
-                  <Plus className="h-4 w-4" />
-                  Criar Cliente
-                </button>
-              </div>
-            ) : (
-              <Select
-                placeholder="Selecione o cliente"
-                value={customerId}
-                onChange={(e) => {
-                  setCustomerId(e.target.value)
-                  setPetId('')
-                }}
-                options={customers.map((c) => ({ value: c.id, label: c.name }))}
+      {/* Nova Reserva Manual Modal */}
+      <Modal isOpen={newResOpen} onClose={() => setNewResOpen(false)} title={`Nova Reserva — ${activeTab === 'hotel' ? 'Hotel' : 'Creche'}`} className="max-w-[480px]">
+        <div className="flex flex-col gap-4">
+          {/* Busca de cliente */}
+          <div className="relative">
+            <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Cliente</p>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#727B8E]" />
+              <input
+                type="text"
+                placeholder="Buscar cliente por nome ou telefone..."
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+                onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#212225] py-2 pl-9 pr-3 text-sm text-[#434A57] dark:text-[#f5f9fc] placeholder-[#727B8E] focus:border-[#1E62EC] focus:outline-none focus:ring-1 focus:ring-[#1E62EC]/20"
               />
+              {searchLoading && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[#727B8E]" />}
+            </div>
+            {showDropdown && searchResults.length > 0 && (
+              <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] shadow-lg">
+                {searchResults.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onMouseDown={() => handleSelectClient(c)}
+                    className="flex w-full flex-col px-3 py-2.5 text-left text-sm hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-colors"
+                  >
+                    <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{c.name}</span>
+                    {c.phone && <span className="text-xs text-[#727B8E]">{c.phone}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedClient && (
+              <p className="mt-1 text-xs text-green-600 dark:text-green-400">✓ {selectedClient.name} selecionado</p>
             )}
           </div>
 
-          {selectedCustomer && !showNewCustomerForm && (
+          {/* Pet */}
+          {selectedClient && (
             <div>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">Pet</p>
-                <button
-                  type="button"
-                  onClick={() => setShowNewPetForm(!showNewPetForm)}
-                  className="flex items-center gap-1 text-xs font-medium text-[#1E62EC] hover:underline dark:text-[#2172e5]"
-                >
-                  <PawPrint className="h-3.5 w-3.5" />
-                  {showNewPetForm ? 'Cancelar' : 'Novo Pet'}
-                </button>
-              </div>
-              {showNewPetForm ? (
-                <div className="space-y-3 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
-                  <Input
-                    label="Nome do Pet"
-                    placeholder="Nome do pet"
-                    value={newPetName}
-                    onChange={(e) => setNewPetName(e.target.value)}
-                  />
-                  <Select
-                    label="Espécie"
-                    placeholder="Selecione"
-                    value={newPetSpecies}
-                    onChange={(e) => setNewPetSpecies(e.target.value)}
-                    options={[
-                      { value: 'cachorro', label: 'Cachorro' },
-                      { value: 'gato', label: 'Gato' },
-                      { value: 'ave', label: 'Ave' },
-                      { value: 'roedor', label: 'Roedor' },
-                      { value: 'outro', label: 'Outro' },
-                    ]}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCreatePet}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0e1629] py-2 text-sm font-medium text-white hover:opacity-90 dark:bg-[#2172e5]"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Criar Pet
-                  </button>
-                </div>
+              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Pet</p>
+              {clientPets.length === 0 ? (
+                <p className="text-sm text-[#727B8E]">Nenhum pet cadastrado para este cliente.</p>
               ) : (
-                <Select
-                  placeholder="Selecione o pet"
-                  value={petId}
-                  onChange={(e) => setPetId(e.target.value)}
-                  options={selectedCustomer.pets.map((p) => ({
-                    value: p.id,
-                    label: `${p.name} (${p.species})`,
-                  }))}
-                />
+                <div className="relative">
+                  <select
+                    value={selectedPetId}
+                    onChange={(e) => setSelectedPetId(e.target.value)}
+                    className="w-full appearance-none rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#212225] px-3 py-2 pr-8 text-sm text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none focus:ring-1 focus:ring-[#1E62EC]/20"
+                  >
+                    <option value="">Selecione um pet</option>
+                    {clientPets.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}{p.breed ? ` · ${p.breed}` : ''}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#727B8E]" />
+                </div>
               )}
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          {/* Datas */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Check-in</p>
+              <Input
+                type="date"
+                value={newCheckinDate}
+                onChange={(e) => setNewCheckinDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Check-out</p>
+              <Input
+                type="date"
+                value={newCheckoutDate}
+                onChange={(e) => setNewCheckoutDate(e.target.value)}
+                min={newCheckinDate}
+              />
+            </div>
+          </div>
+
+          {/* Diária */}
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Valor da diária (opcional)</p>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#727B8E]">R$</span>
+              <Input
+                type="text"
+                placeholder="0,00"
+                value={newDailyRate}
+                onChange={(e) => setNewDailyRate(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          {/* Contato de emergência */}
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Contato de emergência (opcional)</p>
             <Input
-              label="Check-in"
-              placeholder="DD/MM/AAAA"
-              value={checkInDate}
-              onChange={(e) => setCheckInDate(maskDate(e.target.value))}
-              maxLength={10}
-            />
-            <Input
-              label="Check-out"
-              placeholder="DD/MM/AAAA"
-              value={checkOutDate}
-              onChange={(e) => setCheckOutDate(maskDate(e.target.value))}
-              maxLength={10}
+              placeholder="Ex: João — (11) 99999-9999"
+              value={newEmergencyContact}
+              onChange={(e) => setNewEmergencyContact(e.target.value)}
             />
           </div>
 
-          <Input
-            label="Diária (R$)"
-            type="number"
-            placeholder="80"
-            value={dailyRate}
-            onChange={(e) => setDailyRate(e.target.value)}
-          />
+          {newResError && (
+            <p className="rounded-lg bg-red-50 dark:bg-red-950/20 px-3 py-2 text-xs text-red-600 dark:text-red-400">{newResError}</p>
+          )}
 
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">Observações</p>
-            <TextArea
-              placeholder="Medicações, alimentação especial, comportamento..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-            />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setNewResOpen(false)} disabled={newResLoading}>Cancelar</Button>
+            <Button onClick={handleCreateReservation} disabled={newResLoading}>
+              {newResLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Salvando...</> : 'Criar Reserva'}
+            </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Check-out Modal */}
+      <Modal isOpen={!!checkoutTarget} onClose={() => setCheckoutTarget(null)} title="Fazer Check-out" className="max-w-[400px]">
+        {checkoutTarget && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+              Confirmar check-out de <span className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">{checkoutTarget.pet_name}</span>?
+              A estadia será encerrada e o pet liberado.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCheckoutTarget(null)} disabled={!!checkoutLoadingId}>Cancelar</Button>
+              <Button onClick={() => handleCheckout(checkoutTarget)} disabled={!!checkoutLoadingId}
+                className="bg-green-600 hover:bg-green-700 text-white">
+                {checkoutLoadingId === checkoutTarget.id ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saindo...</> : 'Confirmar check-out'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </DashboardLayout>
   )

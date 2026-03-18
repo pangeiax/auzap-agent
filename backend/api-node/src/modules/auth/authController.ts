@@ -101,7 +101,7 @@ export async function register(req: Request, res: Response) {
         data: { companyId: company.id, email, name, hashedPassword, role: 'owner' },
       })
 
-      await tx.saasPetshop.create({
+      await tx.petshopProfile.create({
         data: { companyId: company.id, phone: '', assistantName: 'Assistente' },
       })
 

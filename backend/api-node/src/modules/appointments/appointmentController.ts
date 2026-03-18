@@ -37,9 +37,17 @@ function toScheduledAt(date: Date, startTime: Date): string {
 }
 
 function shapeAppointment(a: any) {
-  const scheduledAt = a.schedule
-    ? toScheduledAt(a.scheduledDate, a.schedule.startTime)
-    : new Date(a.scheduledDate).toISOString()
+  // Prefer slot date+time, fall back to scheduledDate+slotTime, then schedule time, then bare date.
+  // Guard against null scheduledDate (appointments created by AI agent without scheduled_date).
+  const scheduledAt: string = !a.scheduledDate
+    ? (a.slot?.slotDate && a.slot?.slotTime
+        ? toScheduledAt(a.slot.slotDate, a.slot.slotTime)
+        : (a.createdAt ? new Date(a.createdAt).toISOString() : new Date().toISOString()))
+    : a.slot?.slotTime
+      ? toScheduledAt(a.scheduledDate, a.slot.slotTime)
+      : a.schedule?.startTime
+        ? toScheduledAt(a.scheduledDate, a.schedule.startTime)
+        : new Date(a.scheduledDate).toISOString()
 
   return {
     id: a.id,
@@ -53,7 +61,8 @@ function shapeAppointment(a: any) {
     pet_size: a.pet?.size ?? null,
     specialty: a.service?.name ?? null,
     service_id: a.serviceId,
-    schedule_id: a.scheduleId,
+    slot_id: a.slotId ?? null,
+    schedule_id: a.scheduleId ?? null,
     scheduled_at: scheduledAt,
     price: a.priceCharged ? Number(a.priceCharged) : null,
     status: a.status,
@@ -69,6 +78,7 @@ const appointmentInclude = {
   pet: { select: { name: true, species: true, breed: true, size: true } },
   service: { select: { name: true } },
   schedule: { select: { startTime: true, endTime: true } },
+  slot: { select: { slotDate: true, slotTime: true } },
 }
 
 // GET /appointments
@@ -110,7 +120,47 @@ export async function listAppointments(req: Request, res: Response) {
   }
 }
 
-// GET /appointments/available-slots
+// GET /appointments/available-dates?year=YYYY&month=MM
+// Returns an array of dates (YYYY-MM-DD) in the given month that have at least one available slot.
+export async function getAvailableDates(req: Request, res: Response) {
+  try {
+    const companyId = req.user!.companyId
+    const year = Number(req.query.year)
+    const month = Number(req.query.month) // 1-based
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'year e month são obrigatórios (month = 1-12)' })
+    }
+
+    const startDate = new Date(Date.UTC(year, month - 1, 1))
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
+
+    const slots = await prisma.petshopSlot.findMany({
+      where: {
+        companyId,
+        slotDate: { gte: startDate, lte: endDate },
+      },
+      select: { slotDate: true, maxCapacity: true, usedCapacity: true },
+    })
+
+    const datesSet = new Set<string>()
+    for (const s of slots) {
+      if (s.maxCapacity - s.usedCapacity > 0) {
+        datesSet.add(s.slotDate.toISOString().slice(0, 10))
+      }
+    }
+
+    res.json({ dates: [...datesSet].sort() })
+  } catch (error) {
+    console.error('Error getting available dates:', error)
+    res.status(500).json({ error: 'Failed to get available dates' })
+  }
+}
+
+// GET /appointments/available-slots?date=YYYY-MM-DD&service_id=<int>
+// Reads from petshop_slots (the new capacity-rule-driven slot table).
+// service_id is optional but strongly recommended — it narrows results to the
+// service's specialty and ensures the right capacity rules are reflected.
 export async function getAvailableSlots(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
@@ -121,59 +171,38 @@ export async function getAvailableSlots(req: Request, res: Response) {
       return res.status(400).json({ error: 'date deve estar no formato YYYY-MM-DD' })
     }
 
-    const schedules = await prisma.petshopSchedule.findMany({
-      where: {
-        companyId,
-        weekday: parsed.weekday,
-        isActive: true,
-      },
-      orderBy: { startTime: 'asc' },
-    })
+    const [year, month, day] = date.split('-').map(Number)
+    const slotDate = new Date(Date.UTC(year!, month! - 1, day!))
 
-    if (schedules.length === 0) {
-      return res.json({
-        date,
-        available_slots: [],
-        total_available: 0,
+    // Optionally filter by specialty from the chosen service
+    let specialtyId: string | undefined
+    const serviceIdRaw = req.query.service_id
+    if (serviceIdRaw) {
+      const service = await prisma.petshopService.findFirst({
+        where: { id: Number(serviceIdRaw), companyId },
+        select: { specialtyId: true },
       })
+      specialtyId = service?.specialtyId ?? undefined
     }
 
-    const occupancy = await prisma.petshopAppointment.groupBy({
-      by: ['scheduleId'],
+    const slots = await prisma.petshopSlot.findMany({
       where: {
         companyId,
-        scheduledDate: {
-          gte: parsed.start,
-          lt: parsed.end,
-        },
-        status: {
-          notIn: ['cancelled', 'no_show'],
-        },
+        slotDate,
+        ...(specialtyId ? { specialtyId } : {}),
       },
-      _count: {
-        _all: true,
-      },
+      orderBy: { slotTime: 'asc' },
     })
 
-    const occupiedBySchedule = new Map(
-      occupancy.map((entry) => [entry.scheduleId, entry._count._all])
-    )
-
-    const availableSlots = schedules
-      .map((schedule) => {
-        const occupied = occupiedBySchedule.get(schedule.id) ?? 0
-        const capacity = schedule.capacity ?? 1
-        const remainingCapacity = Math.max(capacity - occupied, 0)
-
-        return {
-          schedule_id: schedule.id,
-          time: formatTimeLabel(schedule.startTime),
-          end_time: formatTimeLabel(schedule.endTime),
-          capacity,
-          remaining_capacity: remainingCapacity,
-        }
-      })
-      .filter((slot) => slot.remaining_capacity > 0)
+    const availableSlots = slots
+      .filter((slot) => slot.maxCapacity - slot.usedCapacity > 0)
+      .map((slot) => ({
+        slot_id: slot.id,
+        specialty_id: slot.specialtyId,
+        time: formatTimeLabel(slot.slotTime),
+        capacity: slot.maxCapacity,
+        remaining_capacity: slot.maxCapacity - slot.usedCapacity,
+      }))
 
     res.json({
       date,
@@ -216,7 +245,7 @@ export async function scheduleAppointment(req: Request, res: Response) {
       client_id,
       pet_id,
       service_id,
-      schedule_id,
+      slot_id,
       scheduled_at,
       notes,
       status = 'pending',
@@ -228,40 +257,25 @@ export async function scheduleAppointment(req: Request, res: Response) {
       })
     }
 
-    const scheduledDate = new Date(scheduled_at)
-
-    // Resolve schedule_id: usa o informado ou encontra o slot mais próximo pelo horário
-    let resolvedScheduleId: number = Number(schedule_id)
-    if (!schedule_id) {
-      const weekday = scheduledDate.getDay() // 0=Dom … 6=Sab
-      const hh = scheduledDate.getHours()
-      const mm = scheduledDate.getMinutes()
-
-      const slots = await prisma.petshopSchedule.findMany({
-        where: { companyId, weekday, isActive: true },
-        orderBy: { startTime: 'asc' },
-      })
-
-      if (!slots.length) {
-        return res.status(400).json({ error: 'Nenhum horário disponível para este dia da semana' })
-      }
-
-      // Pega o slot cujo startTime é o mais próximo do horário escolhido
-      const target = hh * 60 + mm
-      const best = slots.reduce((prev, cur) => {
-        const prevMin = new Date(prev.startTime).getHours() * 60 + new Date(prev.startTime).getMinutes()
-        const curMin = new Date(cur.startTime).getHours() * 60 + new Date(cur.startTime).getMinutes()
-        return Math.abs(curMin - target) < Math.abs(prevMin - target) ? cur : prev
-      })
-      resolvedScheduleId = best.id
+    // Validate slot and check remaining capacity
+    if (!slot_id) {
+      return res.status(400).json({ error: 'slot_id é obrigatório' })
     }
 
-    const service = await prisma.petshopService.findFirst({
-      where: { id: Number(service_id), companyId },
-    })
-    const pet = await prisma.petshopPet.findFirst({
-      where: { id: pet_id, companyId },
-    })
+    const slot = await prisma.petshopSlot.findUnique({ where: { id: slot_id } })
+    if (!slot || slot.companyId !== companyId) {
+      return res.status(404).json({ error: 'Horário não encontrado' })
+    }
+    if (slot.maxCapacity - slot.usedCapacity <= 0) {
+      return res.status(409).json({ error: 'Horário sem vagas disponíveis' })
+    }
+
+    const scheduledDate = new Date(scheduled_at)
+
+    const [service, pet] = await Promise.all([
+      prisma.petshopService.findFirst({ where: { id: Number(service_id), companyId } }),
+      prisma.petshopPet.findFirst({ where: { id: pet_id, companyId } }),
+    ])
 
     let priceCharged: number | null = null
     if (service && pet) {
@@ -273,20 +287,27 @@ export async function scheduleAppointment(req: Request, res: Response) {
       }
     }
 
-    const appointment = await prisma.petshopAppointment.create({
-      data: {
-        companyId,
-        clientId: client_id,
-        petId: pet_id,
-        serviceId: Number(service_id),
-        scheduleId: resolvedScheduleId,
-        scheduledDate,
-        status,
-        notes: notes ?? null,
-        priceCharged: priceCharged,
-      },
-      include: appointmentInclude,
-    })
+    // Create appointment and increment usedCapacity atomically
+    const [appointment] = await prisma.$transaction([
+      prisma.petshopAppointment.create({
+        data: {
+          companyId,
+          clientId: client_id,
+          petId: pet_id,
+          serviceId: Number(service_id),
+          slotId: slot_id,
+          scheduledDate,
+          status,
+          notes: notes ?? null,
+          priceCharged,
+        },
+        include: appointmentInclude,
+      }),
+      prisma.petshopSlot.update({
+        where: { id: slot_id },
+        data: { usedCapacity: { increment: 1 } },
+      }),
+    ])
 
     res.status(201).json(shapeAppointment(appointment))
   } catch (error) {
@@ -339,15 +360,23 @@ export async function cancelAppointment(req: Request, res: Response) {
       return res.status(404).json({ error: 'Appointment not found' })
     }
 
+    // Only decrement if it was an active appointment that held a slot
+    const wasActive = !['cancelled', 'no_show'].includes(existing.status)
+
     const now = new Date()
-    await prisma.petshopAppointment.update({
-      where: { id },
-      data: {
-        status: 'cancelled',
-        cancelledAt: now,
-        cancelReason: cancel_reason ?? null,
-        updatedAt: now,
-      },
+
+    await prisma.$transaction(async (tx) => {
+      await tx.petshopAppointment.update({
+        where: { id },
+        data: { status: 'cancelled', cancelledAt: now, cancelReason: cancel_reason ?? null, updatedAt: now },
+      })
+
+      if (wasActive && existing.slotId) {
+        await tx.petshopSlot.update({
+          where: { id: existing.slotId },
+          data: { usedCapacity: { decrement: 1 } },
+        })
+      }
     })
 
     res.json({ success: true, appointment_id: id, cancelled_at: now.toISOString() })

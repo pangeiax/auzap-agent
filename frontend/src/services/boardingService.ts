@@ -9,147 +9,129 @@ import type {
   BoardingStats,
 } from '@/types'
 
+/** Mapeia resposta de /lodgings para o shape BoardingStay esperado pela UI */
+function lodgingToBoarding(l: any): BoardingStay & { client_name?: string; pet_name?: string; client_phone?: string } {
+  return {
+    id: l.id,
+    petshop_id: l.company_id ?? 0,
+    client_id: l.client_id,
+    pet_id: l.pet_id,
+    service_type: 'hotel',
+    check_in_at: l.checkin_date ?? l.created_at,
+    check_out_at: l.checkout_date ?? undefined,
+    num_days: l.checkout_date && l.checkin_date
+      ? Math.ceil((new Date(l.checkout_date).getTime() - new Date(l.checkin_date).getTime()) / 86400000)
+      : undefined,
+    base_price: l.daily_rate ?? 0,
+    additional_charges: {},
+    total_price: l.total_amount ?? undefined,
+    status: l.status,
+    notes: l.care_notes ? JSON.stringify(l.care_notes) : undefined,
+    created_at: l.created_at,
+    updated_at: l.updated_at,
+    // campos extras com nomes dos relacionamentos
+    client_name: l.client_name,
+    pet_name: l.pet_name,
+    client_phone: l.phone_client,
+  }
+}
+
 export const boardingService = {
 
   async checkIn(
-    petshopId: number,
+    _petshopId: number,
     checkInData: BoardingCheckIn
   ): Promise<BoardingStay> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.post<BoardingStay>(
-      '/boarding/check-in',
-      checkInData,
-      {
-        params: { petshop_id: petshopId },
-      }
-    )
-    return response.data
+    const response = await api.post<any>('/lodgings', {
+      client_id: checkInData.client_id,
+      pet_id: checkInData.pet_id,
+      checkin_date: new Date().toISOString().slice(0, 10),
+      checkout_date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+    })
+    return lodgingToBoarding(response.data)
   },
 
   async checkOut(
     stayId: string,
-    petshopId: number,
-    checkOutData: BoardingCheckOut
+    _petshopId: number,
+    _checkOutData: BoardingCheckOut
   ): Promise<BoardingStay> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.put<BoardingStay>(
-      `/boarding/${stayId}/check-out`,
-      checkOutData,
-      {
-        params: { petshop_id: petshopId },
-      }
-    )
-    return response.data
+    const response = await api.patch<any>(`/lodgings/${stayId}`, {
+      status: 'checked_out',
+    })
+    return lodgingToBoarding(response.data)
   },
 
   async getActiveBoardings(
-    petshopId: number,
+    _petshopId: number,
     serviceType?: 'hotel' | 'creche'
   ): Promise<BoardingStay[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.get<BoardingStay[]>(
-      '/boarding/active',
-      {
-        params: {
-          petshop_id: petshopId,
-          ...(serviceType && { service_type: serviceType }),
-        },
-      }
-    )
-    return response.data
+    const response = await api.get<any[]>('/lodgings', {
+      params: { status: 'pending,confirmed,checked_in' },
+    })
+    return (response.data ?? []).map(lodgingToBoarding)
   },
 
   async getBoarding(
     stayId: string,
-    petshopId: number
+    _petshopId: number
   ): Promise<BoardingStay> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.get<BoardingStay>(
-      `/boarding/${stayId}`,
-      {
-        params: { petshop_id: petshopId },
-      }
-    )
-    return response.data
+    const response = await api.get<any>(`/lodgings/${stayId}`)
+    return lodgingToBoarding(response.data)
   },
 
   async getBoardingsByDateRange(
-    petshopId: number,
+    _petshopId: number,
     startDate: string,
     endDate: string,
-    serviceType?: 'hotel' | 'creche'
+    _serviceType?: 'hotel' | 'creche'
   ): Promise<BoardingStay[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.get<BoardingStay[]>('/boarding/', {
-      params: {
-        petshop_id: petshopId,
-        start_date: startDate,
-        end_date: endDate,
-        ...(serviceType && { service_type: serviceType }),
-      },
+    const response = await api.get<any[]>('/lodgings', {
+      params: { checkin_from: startDate, checkin_to: endDate },
     })
-    return response.data
+    return (response.data ?? []).map(lodgingToBoarding)
   },
 
   async createDailyLog(
-    stayId: string,
-    petshopId: number,
-    logData: DailyLogCreate
+    _stayId: string,
+    _petshopId: number,
+    _logData: DailyLogCreate
   ): Promise<DailyLog> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.post<DailyLog>(
-      `/boarding/${stayId}/daily-logs`,
-      logData,
-      {
-        params: { petshop_id: petshopId },
-      }
-    )
-    return response.data
+    throw new Error('Daily logs não implementados ainda')
   },
 
   async getDailyLogs(
-    stayId: string,
-    petshopId: number
+    _stayId: string,
+    _petshopId: number
   ): Promise<DailyLog[]> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.get<DailyLog[]>(
-      `/boarding/${stayId}/daily-logs`,
-      {
-        params: { petshop_id: petshopId },
-      }
-    )
-    return response.data
+    return []
   },
 
   async updateDailyLog(
-    logId: string,
-    petshopId: number,
-    logData: DailyLogUpdate
+    _logId: string,
+    _petshopId: number,
+    _logData: DailyLogUpdate
   ): Promise<DailyLog> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.put<DailyLog>(
-      `/boarding/daily-logs/${logId}`,
-      logData,
-      {
-        params: { petshop_id: petshopId },
-      }
-    )
-    return response.data
+    throw new Error('Daily logs não implementados ainda')
   },
 
   async getStats(
-    petshopId: number,
-    startDate?: string,
-    endDate?: string
+    _petshopId: number,
+    _startDate?: string,
+    _endDate?: string
   ): Promise<BoardingStats> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.get<BoardingStats>('/boarding/stats', {
-      params: {
-        petshop_id: petshopId,
-        ...(startDate && { start_date: startDate }),
-        ...(endDate && { end_date: endDate }),
-      },
+    const response = await api.get<any[]>('/lodgings', {
+      params: { status: 'pending,confirmed,checked_in' },
     })
-    return response.data
+    const active = response.data ?? []
+    return {
+      total_active: active.length,
+      total_hotel: active.length,
+      total_creche: 0,
+      total_revenue_month: active.reduce((sum: number, l: any) => sum + (l.total_amount ?? 0), 0),
+      average_stay_duration: active.length
+        ? active.reduce((sum: number, l: any) => sum + (l.num_days ?? 1), 0) / active.length
+        : 0,
+    }
   },
 }

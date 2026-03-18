@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import app from './app'
 import { restoreActiveSessions } from './services/baileysService'
+import { startSlotCron } from './jobs/slotCronJob'
 
 const PORT = process.env.PORT || 3000
 
@@ -14,8 +15,11 @@ async function main() {
     console.warn('[Server] O servidor continuará rodando normalmente.')
   }
 
+  // Inicia cron job de geração de slots (segunda, 06h BRT)
+  startSlotCron()
+
   app.listen(PORT, () => {
-    console.log(`[Server] ✅ Rodando em http://localhost:${PORT}`)
+    console.log(`[Server] Rodando em http://localhost:${PORT}`)
   })
 }
 

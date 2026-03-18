@@ -1,6 +1,8 @@
 export interface Service {
   id: number
   companyId: number
+  specialtyId?: string | null
+  specialty?: { id: string; name: string; color?: string | null } | null
   name: string
   description?: string
   durationMin: number
@@ -18,6 +20,7 @@ export interface Service {
 
 export interface ServiceCreate {
   name: string
+  specialty_id?: string | null
   description?: string
   duration_min?: number
   price?: number | string
@@ -31,6 +34,7 @@ export interface ServiceCreate {
 
 export interface ServiceUpdate {
   name?: string
+  specialty_id?: string | null
   description?: string
   duration_min?: number
   price?: number | string | null
@@ -40,6 +44,7 @@ export interface ServiceUpdate {
     large?: number
   } | null
   is_active?: boolean
+  duration_multiplier_large?: number | null
 }
 
 export interface ServiceFilters {

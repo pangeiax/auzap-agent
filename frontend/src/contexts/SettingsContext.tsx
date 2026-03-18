@@ -8,7 +8,7 @@ interface SettingsContextType {
   services: Service[];
   businessHours: Petshop["businessHours"] | null;
   defaultCapacityPerHour: number | null;
-  customCapacityHours: Petshop["customCapacityHours"] | null;
+  customCapacityHours: Record<string, unknown> | null;
 
   // Loading states
   loadingPetshop: boolean;
@@ -143,8 +143,8 @@ export function SettingsProvider({
     petshop,
     services,
     businessHours: petshop?.businessHours || null,
-    defaultCapacityPerHour: petshop?.defaultCapacityPerHour || null,
-    customCapacityHours: petshop?.customCapacityHours || null,
+    defaultCapacityPerHour: (petshop as any)?.defaultCapacityPerHour || null,
+    customCapacityHours: (petshop as any)?.customCapacityHours || null,
     loadingPetshop,
     loadingServices,
     petshopError,

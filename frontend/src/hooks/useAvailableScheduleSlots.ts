@@ -7,8 +7,15 @@ function isValidIsoDate(date: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
 }
 
+/**
+ * Fetches available schedule slots for a given date.
+ * @param dateInput - Date in DD/MM/YYYY or YYYY-MM-DD format
+ * @param serviceId - Optional service ID to filter slots by specialty. When provided, slots are filtered by the service's specialty.
+ * @param enabled - Whether fetching is enabled (default: true)
+ */
 export function useAvailableScheduleSlots(
   dateInput: string,
+  serviceId?: string,
   enabled = true
 ) {
   const [slots, setSlots] = useState<AvailableSlot[]>([])
@@ -36,6 +43,7 @@ export function useAvailableScheduleSlots(
         setError(null)
         const response = await appointmentService.getAvailableSlots({
           date: dateIso,
+          ...(serviceId ? { service_id: serviceId } : {}),
         })
 
         if (!cancelled) {
@@ -62,7 +70,7 @@ export function useAvailableScheduleSlots(
     return () => {
       cancelled = true
     }
-  }, [dateIso, enabled])
+  }, [dateIso, serviceId, enabled])
 
   return {
     dateIso,

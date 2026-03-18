@@ -105,11 +105,14 @@ export function CalendarSidebar({
               const staggerClass =
                 STAGGER_CLASSES[index % STAGGER_CLASSES.length];
               return (
-                <button
+                <div
                   key={event.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onEventClick?.(event)}
+                  onKeyDown={(e) => e.key === "Enter" && onEventClick?.(event)}
                   className={cn(
-                    "flex w-full items-start gap-3 rounded-lg p-2 text-left transition-colors hover:bg-[#F4F6F9] dark:hover:bg-[#212225] animate-fade-in-up opacity-0",
+                    "flex w-full cursor-pointer items-start gap-3 rounded-lg p-2 text-left transition-colors hover:bg-[#F4F6F9] dark:hover:bg-[#212225] animate-fade-in-up opacity-0",
                     staggerClass,
                   )}
                 >
@@ -175,7 +178,7 @@ export function CalendarSidebar({
                       </div>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
 

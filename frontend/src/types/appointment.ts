@@ -7,11 +7,15 @@ export interface Appointment {
   professional_id?: string
   professional_name?: string
   specialty?: string
+  specialty_id?: string
   service_id?: number
+  slot_id?: string
   schedule_id?: number
   scheduled_at: string
+  scheduled_date?: string
   price: number
   status: string
+  confirmed?: boolean
   google_calendar_event_id?: string
   pet_name?: string
   pet_species?: string
@@ -31,6 +35,7 @@ export interface Appointment {
 export interface AppointmentSchedule {
   client_id: string
   scheduled_at: string
+  slot_id?: string
   schedule_id?: number
   payment_method?: string
   origin_channel?: string
@@ -98,11 +103,13 @@ export interface ConfirmAppointmentRequest {
 }
 
 export interface AvailableSlot {
-  schedule_id: number
+  slot_id?: string
+  schedule_id?: number
   time: string
-  end_time: string
+  end_time?: string
   capacity: number
   remaining_capacity: number
+  specialty_id?: string
 }
 
 export interface AvailableSlotsResponse {

@@ -16,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { normalizePetSize, petSizeAbbrev, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
 import { formatPhoneForDisplay, maskPhone, maskDate } from "@/lib/masks";
 import { useAddressByCep, useAvailableScheduleSlots, useToast } from "@/hooks";
 import { useAuthContext } from "@/contexts";
@@ -44,7 +45,7 @@ interface Pet {
   breed: string;
   age: string;
   weight: string;
-  size: "pequeno" | "medio" | "grande";
+  size: string;
   color: string;
   notes: string;
 }
@@ -259,22 +260,22 @@ function ClientsSidebar({
 
 interface PetFormData {
   name: string;
-  species: Pet["species"];
+  species: string;
   breed: string;
   age: string;
   weight: string;
-  size: Pet["size"];
+  size: string;
   color: string;
   notes: string;
 }
 
 const emptyPetForm: PetFormData = {
   name: "",
-  species: "cachorro",
+  species: "",
   breed: "",
   age: "",
   weight: "",
-  size: "medio",
+  size: "",
   color: "",
   notes: "",
 };
@@ -319,6 +320,11 @@ function CustomerDetails({
   const [petModalOpen, setPetModalOpen] = useState(false);
   const [editingPet, setEditingPet] = useState<Pet | null>(null);
   const [petForm, setPetForm] = useState<PetFormData>(emptyPetForm);
+  const [petFormErrors, setPetFormErrors] = useState<{
+    name?: string;
+    species?: string;
+    size?: string;
+  }>({});
   const [savingPet, setSavingPet] = useState(false);
   const [appointmentModalOpen, setAppointmentModalOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] =
@@ -398,7 +404,7 @@ function CustomerDetails({
         breed: pet.breed,
         age: pet.age,
         weight: pet.weight,
-        size: pet.size,
+        size: normalizePetSize(pet.size) ?? "",
         color: pet.color,
         notes: pet.notes,
       });
@@ -409,11 +415,19 @@ function CustomerDetails({
   };
 
   const handleSavePet = async () => {
-    if (!petForm.name.trim()) return;
+    const errs: { name?: string; species?: string; size?: string } = {};
+    if (!petForm.name.trim()) errs.name = "Nome é obrigatório";
+    if (!petForm.species) errs.species = "Espécie é obrigatória";
+    if (!petForm.size) errs.size = "Porte é obrigatório";
+    if (Object.keys(errs).length > 0) {
+      setPetFormErrors(errs);
+      return;
+    }
+    setPetFormErrors({});
 
     setSavingPet(true);
     try {
-      await onSavePet(petForm, editingPet?.id);
+      await onSavePet(petForm as Omit<Pet, "id" | "customerId">, editingPet?.id);
       setPetModalOpen(false);
       setPetForm(emptyPetForm);
       setEditingPet(null);
@@ -632,11 +646,7 @@ function CustomerDetails({
                             </p>
                             <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
                               {pet.breed} • {pet.age} • {pet.weight} • Porte{" "}
-                              {pet.size === "pequeno"
-                                ? "P"
-                                : pet.size === "medio"
-                                  ? "M"
-                                  : "G"}
+                              {petSizeAbbrev(pet.size)}
                             </p>
                             {pet.notes && (
                               <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
@@ -813,6 +823,7 @@ function CustomerDetails({
         onClose={() => {
           setPetModalOpen(false);
           setPetForm(emptyPetForm);
+          setPetFormErrors({});
           setEditingPet(null);
         }}
         title={editingPet ? "Editar pet" : "Novo pet"}
@@ -822,32 +833,42 @@ function CustomerDetails({
         className="max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden"
       >
         <div className="flex flex-col gap-4 overflow-y-auto max-h-[320px]">
-          <Input
-            label="Nome do pet"
-            placeholder="Nome"
-            value={petForm.name}
-            onChange={(e) =>
-              setPetForm((prev) => ({ ...prev, name: e.target.value }))
-            }
-          />
-          <Select
-            label="Espécie"
-            placeholder="Selecione"
-            value={petForm.species}
-            onChange={(e) =>
-              setPetForm((prev) => ({
-                ...prev,
-                species: e.target.value as Pet["species"],
-              }))
-            }
-            options={[
-              { value: "cachorro", label: "Cachorro" },
-              { value: "gato", label: "Gato" },
-              { value: "ave", label: "Ave" },
-              { value: "roedor", label: "Roedor" },
-              { value: "outro", label: "Outro" },
-            ]}
-          />
+          <div>
+            <Input
+              label="Nome do pet *"
+              placeholder="Nome"
+              value={petForm.name}
+              onChange={(e) => {
+                setPetForm((prev) => ({ ...prev, name: e.target.value }));
+                if (e.target.value) setPetFormErrors((prev) => ({ ...prev, name: undefined }));
+              }}
+            />
+            {petFormErrors.name && (
+              <p className="mt-1 text-xs text-red-500">{petFormErrors.name}</p>
+            )}
+          </div>
+          <div>
+            <Select
+              label="Espécie *"
+              placeholder="Selecione a espécie"
+              value={petForm.species}
+              onChange={(e) => {
+                setPetForm((prev) => ({ ...prev, species: e.target.value }));
+                if (e.target.value) setPetFormErrors((prev) => ({ ...prev, species: undefined }));
+              }}
+              options={[
+                { value: "", label: "Selecione a espécie" },
+                { value: "cachorro", label: "Cachorro" },
+                { value: "gato", label: "Gato" },
+                { value: "ave", label: "Ave" },
+                { value: "roedor", label: "Roedor" },
+                { value: "outro", label: "Outro" },
+              ]}
+            />
+            {petFormErrors.species && (
+              <p className="mt-1 text-xs text-red-500">{petFormErrors.species}</p>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="Raça"
@@ -875,22 +896,21 @@ function CustomerDetails({
                 setPetForm((prev) => ({ ...prev, weight: e.target.value }))
               }
             />
-            <Select
-              label="Porte"
-              placeholder="Selecione"
-              value={petForm.size}
-              onChange={(e) =>
-                setPetForm((prev) => ({
-                  ...prev,
-                  size: e.target.value as Pet["size"],
-                }))
-              }
-              options={[
-                { value: "pequeno", label: "Pequeno" },
-                { value: "medio", label: "Médio" },
-                { value: "grande", label: "Grande" },
-              ]}
-            />
+            <div>
+              <Select
+                label="Porte *"
+                placeholder="Selecione o porte"
+                value={petForm.size}
+                onChange={(e) => {
+                  setPetForm((prev) => ({ ...prev, size: e.target.value }));
+                  if (e.target.value) setPetFormErrors((prev) => ({ ...prev, size: undefined }));
+                }}
+                options={[...PET_SIZE_OPTIONS_WITH_PLACEHOLDER]}
+              />
+              {petFormErrors.size && (
+                <p className="mt-1 text-xs text-red-500">{petFormErrors.size}</p>
+              )}
+            </div>
           </div>
           <Input
             label="Cor/Pelagem"
@@ -1077,29 +1097,6 @@ type ApiPetAppointment = ApiAppointment & {
   pet_id?: string | null;
 };
 
-function normalizePetSize(size?: string | null): Pet["size"] {
-  switch (size?.toLowerCase()) {
-    case "small":
-    case "pequeno":
-      return "pequeno";
-    case "large":
-    case "grande":
-      return "grande";
-    default:
-      return "medio";
-  }
-}
-
-function petSizeToApi(size: Pet["size"]): "small" | "medium" | "large" {
-  switch (size) {
-    case "pequeno":
-      return "small";
-    case "grande":
-      return "large";
-    default:
-      return "medium";
-  }
-}
 
 function formatPetAge(pet: ApiPet): string {
   if (pet.age !== undefined && pet.age !== null) {
@@ -1180,7 +1177,7 @@ function mapPetFromApi(pet: ApiPet, customerId: string): Pet {
     breed: pet.breed || "",
     age: formatPetAge(pet),
     weight: formatPetWeight(pet),
-    size: normalizePetSize(pet.size),
+    size: normalizePetSize(pet.size) ?? pet.size ?? "",
     color: pet.color || "",
     notes: getPetNotes(pet),
   };
@@ -1673,7 +1670,7 @@ export default function ClientesPage() {
             breed: petData.breed || undefined,
             birthDate: ageToBirthDate(petData.age),
             weightKg: parseWeightKg(petData.weight),
-            size: petSizeToApi(petData.size),
+            size: normalizePetSize(petData.size),
             color: petData.color || undefined,
             notes: petData.notes || undefined,
           });
@@ -1705,7 +1702,7 @@ export default function ClientesPage() {
             breed: petData.breed || undefined,
             birthDate: ageToBirthDate(petData.age),
             weightKg: parseWeightKg(petData.weight),
-            size: petSizeToApi(petData.size),
+            size: normalizePetSize(petData.size),
             color: petData.color || undefined,
             notes: petData.notes || undefined,
           });

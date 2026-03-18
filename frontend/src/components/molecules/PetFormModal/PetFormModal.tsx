@@ -6,6 +6,7 @@ import { Select } from '@/components/atoms/Select'
 import { TextArea } from '@/components/atoms/TextArea'
 import { Input } from '@/components/atoms/Input'
 import { maskDate, dateToISO, dateFromISO } from '@/lib/masks'
+import { PET_SIZE_OPTIONS_WITH_PLACEHOLDER, normalizePetSize } from '@/lib/petSize'
 import type { Pet } from '@/types'
 import type { PetCreate, PetUpdate } from '@/services/petService'
 
@@ -43,14 +44,7 @@ const speciesOptions = [
   { value: 'outro', label: 'Outro' },
 ]
 
-const sizeOptions = [
-  { value: '', label: 'Selecione o porte' },
-  { value: 'mini', label: 'Mini (até 3kg)' },
-  { value: 'pequeno', label: 'Pequeno (3-10kg)' },
-  { value: 'medio', label: 'Médio (10-25kg)' },
-  { value: 'grande', label: 'Grande (25-45kg)' },
-  { value: 'gigante', label: 'Gigante (+45kg)' },
-]
+const sizeOptions = [...PET_SIZE_OPTIONS_WITH_PLACEHOLDER]
 
 export function PetFormModal({
   isOpen,
@@ -91,10 +85,10 @@ export function PetFormModal({
         species: pet.species || '',
         breed: pet.breed || '',
         age: pet.age?.toString() || '',
-        size: pet.size || '',
+        size: normalizePetSize(pet.size) ?? '',
         weight: pet.weight?.toString() || '',
         color: pet.color || '',
-        medical_info: pet.medical_info || '',
+        medical_info: (typeof pet.medical_info === 'string' ? pet.medical_info : '') || '',
         vaccination_date: pet.vaccination_date ? dateFromISO(pet.vaccination_date.split('T')[0]) : '',
         last_vet_visit: pet.last_vet_visit ? dateFromISO(pet.last_vet_visit.split('T')[0]) : '',
         emergency_contact: pet.emergency_contact || '',
@@ -170,9 +164,15 @@ export function PetFormModal({
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-[#434A57] dark:text-[#c5cdd9]">
-              Espécie
+              Espécie <span className="text-red-500">*</span>
             </label>
-            <Select options={speciesOptions} {...register('species')} />
+            <Select
+              options={speciesOptions}
+              {...register('species', { required: 'Espécie é obrigatória' })}
+            />
+            {errors.species && (
+              <p className="text-xs text-red-500">{errors.species.message}</p>
+            )}
           </div>
 
           <FormField
@@ -194,9 +194,15 @@ export function PetFormModal({
 
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-[#434A57] dark:text-[#c5cdd9]">
-              Porte
+              Porte <span className="text-red-500">*</span>
             </label>
-            <Select options={sizeOptions} {...register('size')} />
+            <Select
+              options={sizeOptions}
+              {...register('size', { required: 'Porte é obrigatório' })}
+            />
+            {errors.size && (
+              <p className="text-xs text-red-500">{errors.size.message}</p>
+            )}
           </div>
 
           <FormField

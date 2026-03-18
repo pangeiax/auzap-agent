@@ -93,9 +93,21 @@ export const appointmentService = {
 
   async getAvailableSlots(params: {
     date: string
+    service_id?: string
   }): Promise<AvailableSlotsResponse> {
     const response = await api.get<AvailableSlotsResponse>(
       '/appointments/available-slots',
+      { params }
+    )
+    return response.data
+  },
+
+  async getAvailableDates(params: {
+    year: number
+    month: number
+  }): Promise<{ dates: string[] }> {
+    const response = await api.get<{ dates: string[] }>(
+      '/appointments/available-dates',
       { params }
     )
     return response.data

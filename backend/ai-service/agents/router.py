@@ -9,12 +9,16 @@ from agents.team.booking_agent import build_booking_agent
 from agents.team.faq_agent import build_faq_agent
 from agents.team.sales_agent import build_sales_agent
 from agents.team.escalation_agent import build_escalation_agent
+from agents.team.lodging_agent import build_lodging_agent
+from agents.team.health_agent import build_health_agent
 
 logger = logging.getLogger("ai-service.router")
 
 VALID_AGENTS = {
     "onboarding_agent",
     "booking_agent",
+    "lodging_agent",
+    "health_agent",
     "faq_agent",
     "sales_agent",
     "escalation_agent",
@@ -27,6 +31,8 @@ DEFAULT_ROUTER_CTX = {
     "service": None,
     "date_mentioned": None,
     "selected_time": None,
+    "checkin_mentioned": None,
+    "checkout_mentioned": None,
     "awaiting_confirmation": False,
 }
 
@@ -90,9 +96,14 @@ def _parse_router_response(content: str) -> dict:
 
 
 def _build_specialist(agent_name: str, context: dict, router_ctx: dict) -> Agent:
+    if router_ctx.get("specialty_type") == "health":
+        return build_health_agent(context, router_ctx)
+
     builders = {
         "onboarding_agent": build_onboarding_agent,
         "booking_agent": build_booking_agent,
+        "lodging_agent": build_lodging_agent,
+        "health_agent": build_health_agent,
         "faq_agent": build_faq_agent,
         "sales_agent": build_sales_agent,
         "escalation_agent": build_escalation_agent,

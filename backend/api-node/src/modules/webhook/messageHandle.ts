@@ -517,7 +517,7 @@ async function _notifyEscalationToOwner(
 
   if (!freshClient?.aiPaused) return
 
-  const petshop = await prisma.saasPetshop.findUnique({
+  const petshop = await prisma.petshopProfile.findUnique({
     where: { companyId },
     select: { ownerPhone: true },
   })

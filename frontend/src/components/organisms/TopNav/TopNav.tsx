@@ -8,6 +8,7 @@ import {
   Settings,
   Moon,
   Sun,
+  Bed,
 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { cn } from "@/lib/cn";
@@ -88,6 +89,7 @@ const NAV_ICONS = [
   { icon: MessageSquare, label: "Chat", href: "/chat" },
   { icon: Users, label: "Clientes", href: "/clientes" },
   { icon: Calendar, label: "Agenda", href: "/calendario" },
+  { icon: Bed, label: "Hotel/Creche", href: "/hotel-creche" },
   { icon: Settings, label: "Configurações", href: "/configuracoes" },
 ];
 

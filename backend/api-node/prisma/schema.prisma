@@ -9,7 +9,7 @@ datasource db {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CORE — MULTI-TENANT (genérico, qualquer nicho)
+// CORE — MULTI-TENANT
 // ═══════════════════════════════════════════════════════════════
 
 model SaasCompany {
@@ -21,18 +21,24 @@ model SaasCompany {
   createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Relations
   users         SaasUser[]
-  petshop       SaasPetshop?
+  petshopProfile PetshopProfile?
   clients       Client[]
   sessions      WhatsappSession[]
   conversations AgentConversation[]
   messages      AgentMessage[]
 
-  // Petshop-specific
-  petshopServices    PetshopService[]
-  petshopSchedules   PetshopSchedule[]
-  petshopAppointments PetshopAppointment[]
+  petshopSpecialties    PetshopSpecialty[]
+  petshopServices       PetshopService[]
+  petshopSchedules      PetshopSchedule[]
+  petshopSlots          PetshopSlot[]
+  petshopAppointments   PetshopAppointment[]
+  petshopLodgings       PetshopLodging[]
+  specialtyCapacityRules SpecialtyCapacityRule[]
+
+  lodgingConfig       PetshopLodgingConfig?
+  lodgingCapacities   PetshopLodgingCapacity[]
+  lodgingReservations PetshopLodgingReservation[]
 
   @@map("saas_companies")
 }
@@ -60,29 +66,27 @@ model SaasUser {
 // PERFIL DO NICHO (1:1 com company)
 // ═══════════════════════════════════════════════════════════════
 
-model SaasPetshop {
-  id                     Int       @id @default(autoincrement())
-  companyId              Int       @unique @map("company_id")
-  address                String?   @db.VarChar(500)
-  cep                    String?   @db.VarChar(10)
-  phone                  String    @db.VarChar(20)
-  latitude               Float?
-  longitude              Float?
-  ownerPhone             String?   @map("owner_phone") @db.VarChar(20)
-  emergencyContact       String?   @map("emergency_contact") @db.VarChar(20)
-  assistantName          String?   @map("assistant_name") @db.VarChar(50)
-  features               Json?     @default("{}")
-  businessHours          Json?     @default("{}") @map("business_hours")
-  defaultCapacityPerHour Int?      @default(3) @map("default_capacity_per_hour")
-  customCapacityHours    Json?     @map("custom_capacity_hours")
-  isActive               Boolean?  @default(true) @map("is_active")
-  createdAt              DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+model PetshopProfile {
+  id               Int       @id @default(autoincrement())
+  companyId        Int       @unique @map("company_id")
+  address          String?   @db.VarChar(500)
+  cep              String?   @db.VarChar(10)
+  phone            String    @db.VarChar(20)
+  latitude         Float?
+  longitude        Float?
+  ownerPhone       String?   @map("owner_phone") @db.VarChar(20)
+  emergencyContact String?   @map("emergency_contact") @db.VarChar(20)
+  assistantName    String?   @map("assistant_name") @db.VarChar(50)
+  features         Json?     @default("{}")
+  businessHours    Json?     @default("{}") @map("business_hours")
+  isActive         Boolean?  @default(true) @map("is_active")
+  createdAt        DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   company SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  @@index([companyId], map: "idx_petshops_company")
-  @@map("saas_petshops")
+  @@index([companyId], map: "idx_petshop_profile_company")
+  @@map("petshop_profile")
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -113,10 +117,12 @@ model Client {
   updatedAt              DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
   lastMessageAt          DateTime? @map("last_message_at") @db.Timestamptz(6)
 
-  saasCompany   SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  conversations AgentConversation[]
-  pets          PetshopPet[]
-  appointments  PetshopAppointment[]
+  saasCompany          SaasCompany               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversations        AgentConversation[]
+  pets                 PetshopPet[]
+  appointments         PetshopAppointment[]
+  lodgings             PetshopLodging[]
+  lodgingReservations  PetshopLodgingReservation[]
 
   @@unique([companyId, phone])
   @@index([companyId], map: "idx_clients_company")
@@ -175,59 +181,129 @@ model AgentMessage {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PETSHOP — TABELAS ESPECÍFICAS DO NICHO
+// PETSHOP — ESPECIALIDADES E CAPACIDADE
+// ═══════════════════════════════════════════════════════════════
+
+model PetshopSpecialty {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   Int       @map("company_id")
+  name        String    @db.VarChar(100)
+  color       String?   @db.VarChar(7)
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company       SaasCompany             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  capacityRules SpecialtyCapacityRule[]
+  slots         PetshopSlot[]
+  services      PetshopService[]
+  lodgings      PetshopLodging[]
+
+  @@unique([companyId, name])
+  @@index([companyId], map: "idx_specialties_company")
+  @@map("petshop_specialties")
+}
+
+model SpecialtyCapacityRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  specialtyId String   @map("specialty_id") @db.Uuid
+  companyId   Int      @map("company_id")
+  dayOfWeek   Int      @map("day_of_week") @db.SmallInt
+  slotTime    DateTime @map("slot_time") @db.Time
+  maxCapacity Int      @default(1) @map("max_capacity")
+  isActive    Boolean  @default(true) @map("is_active")
+
+  specialty PetshopSpecialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+  company   SaasCompany      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([specialtyId, dayOfWeek, slotTime])
+  @@index([specialtyId], map: "idx_capacity_rules_specialty")
+  @@index([companyId], map: "idx_capacity_rules_company")
+  @@map("specialty_capacity_rules")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PETSHOP — TABELAS OPERACIONAIS
 // ═══════════════════════════════════════════════════════════════
 
 model PetshopService {
   id          Int       @id @default(autoincrement())
   companyId   Int       @map("company_id")
-  name        String    @db.VarChar(100)
+  specialtyId String?   @map("specialty_id") @db.Uuid
+  name        String    @db.VarChar(200)
   description String?
   durationMin Int       @default(60) @map("duration_min")
   price       Decimal?  @db.Decimal(10, 2)
   priceBySize Json?     @map("price_by_size")
-  // Se NULL → preço único (price). Se preenchido → { small, medium, large }
+  // Formato: {"P": 50.00, "M": 70.00, "G": 90.00, "GG": 110.00}
+  requiresVet Boolean   @default(false) @map("requires_vet")
   durationMultiplierLarge Decimal? @map("duration_multiplier_large") @db.Decimal(3, 1)
-  // Se NULL → sem multiplicador. Ex: 2.0 → porte grande ocupa o dobro do slot
   isActive    Boolean?  @default(true) @map("is_active")
   createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   saasCompany  SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  specialty    PetshopSpecialty?    @relation(fields: [specialtyId], references: [id])
   appointments PetshopAppointment[]
 
   @@index([companyId], map: "idx_services_company")
+  @@index([specialtyId], map: "idx_services_specialty")
   @@map("petshop_services")
 }
 
-model PetshopPet {
-  id        String    @id @default(uuid()) @db.Uuid
-  companyId Int       @map("company_id")
-  clientId  String    @map("client_id") @db.Uuid
-  name      String    @db.VarChar(100)
-  species   String?   @db.VarChar(50)
-  breed     String?   @db.VarChar(100)
-  birthDate DateTime? @map("birth_date") @db.Date
-  weightKg  Decimal?  @map("weight_kg") @db.Decimal(5, 2)
-  gender    String?   @db.VarChar(10)
-  size      String?   @db.VarChar(10)   // small | medium | large
-  notes     String?
-  isActive  Boolean?  @default(true) @map("is_active")
-  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+model PetshopSlot {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    Int       @map("company_id")
+  specialtyId  String    @map("specialty_id") @db.Uuid
+  slotDate     DateTime  @map("slot_date") @db.Date
+  slotTime     DateTime  @map("slot_time") @db.Time
+  maxCapacity  Int       @map("max_capacity")
+  usedCapacity Int       @default(0) @map("used_capacity")
 
-  client       Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  company      SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  specialty    PetshopSpecialty     @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
   appointments PetshopAppointment[]
+
+  @@unique([specialtyId, slotDate, slotTime])
+  @@index([companyId, slotDate], map: "idx_slots_company_date")
+  @@index([specialtyId, slotDate], map: "idx_slots_specialty")
+  @@map("petshop_slots")
+}
+
+model PetshopPet {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    Int       @map("company_id")
+  clientId     String    @map("client_id") @db.Uuid
+  name         String    @db.VarChar(100)
+  species      String?   @db.VarChar(50)
+  breed        String?   @db.VarChar(100)
+  birthDate    DateTime? @map("birth_date") @db.Date
+  weightKg     Decimal?  @map("weight_kg") @db.Decimal(5, 2)
+  gender       String?   @db.VarChar(10)
+  size         String?   @db.VarChar(10)   // P | M | G | GG
+  coatType     String?   @map("coat_type") @db.VarChar(50)
+  medicalNotes Json?     @default("{}") @map("medical_notes")
+  // Formato: {"alergias": [], "vacinas": [], "medicamentos": [], "observacoes": ""}
+  notes        String?
+  isActive     Boolean?  @default(true) @map("is_active")
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  client               Client                    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  appointments         PetshopAppointment[]
+  lodgings             PetshopLodging[]
+  lodgingReservations  PetshopLodgingReservation[]
 
   @@index([companyId], map: "idx_pets_company")
   @@index([clientId], map: "idx_pets_client")
   @@map("petshop_pets")
 }
 
+// Mantida para compatibilidade com código legado (será removida em versão futura)
 model PetshopSchedule {
   id        Int       @id @default(autoincrement())
   companyId Int       @map("company_id")
-  weekday   Int       @db.SmallInt               // 0=Dom, 1=Seg ... 6=Sab
+  weekday   Int       @db.SmallInt
   startTime DateTime  @map("start_time") @db.Time
   endTime   DateTime  @map("end_time") @db.Time
   capacity  Int       @default(1)
@@ -248,10 +324,11 @@ model PetshopAppointment {
   clientId      String    @map("client_id") @db.Uuid
   petId         String    @map("pet_id") @db.Uuid
   serviceId     Int       @map("service_id")
-  scheduleId    Int       @map("schedule_id")
-  scheduledDate DateTime  @map("scheduled_date") @db.Date
+  slotId        String?   @map("slot_id") @db.Uuid
+  scheduleId    Int?      @map("schedule_id")
+  scheduledDate DateTime? @map("scheduled_date") @db.Date
   status        String    @default("pending") @db.VarChar(30)
-  // pending | confirmed | in_progress | completed | cancelled | no_show
+  confirmed     Boolean   @default(false)
   notes         String?
   priceCharged  Decimal?  @map("price_charged") @db.Decimal(10, 2)
   cancelledAt   DateTime? @map("cancelled_at") @db.Timestamptz(6)
@@ -259,16 +336,123 @@ model PetshopAppointment {
   createdAt     DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  saasCompany SaasCompany     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  client      Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  pet         PetshopPet      @relation(fields: [petId], references: [id], onDelete: Cascade)
-  service     PetshopService  @relation(fields: [serviceId], references: [id])
-  schedule    PetshopSchedule @relation(fields: [scheduleId], references: [id])
+  saasCompany SaasCompany      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pet         PetshopPet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  service     PetshopService   @relation(fields: [serviceId], references: [id])
+  slot        PetshopSlot?     @relation(fields: [slotId], references: [id])
+  schedule    PetshopSchedule? @relation(fields: [scheduleId], references: [id])
 
-  @@index([companyId], map: "idx_appointments_company")
-  @@index([clientId],  map: "idx_appointments_client")
-  @@index([petId],     map: "idx_appointments_pet")
+  @@index([slotId],       map: "idx_appointments_slot")
+  @@index([companyId],    map: "idx_appointments_company")
+  @@index([clientId],     map: "idx_appointments_client")
+  @@index([petId],        map: "idx_appointments_pet")
   @@index([scheduledDate], map: "idx_appointments_date")
-  @@index([status],    map: "idx_appointments_status")
+  @@index([status],       map: "idx_appointments_status")
   @@map("petshop_appointments")
+}
+
+model PetshopLodging {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    Int       @map("company_id")
+  clientId     String    @map("client_id") @db.Uuid
+  petId        String    @map("pet_id") @db.Uuid
+  specialtyId  String?   @map("specialty_id") @db.Uuid
+  kennelId     String?   @map("kennel_id") @db.VarChar(50)
+  checkinDate  DateTime  @map("checkin_date") @db.Date
+  checkoutDate DateTime  @map("checkout_date") @db.Date
+  checkinTime  DateTime  @default(dbgenerated("'08:00'::time")) @map("checkin_time") @db.Time
+  checkoutTime DateTime  @default(dbgenerated("'18:00'::time")) @map("checkout_time") @db.Time
+  status       String    @default("pending") @db.VarChar(30)
+  confirmed    Boolean   @default(false)
+  dailyRate    Decimal?  @map("daily_rate") @db.Decimal(10, 2)
+  totalAmount  Decimal?  @map("total_amount") @db.Decimal(10, 2)
+  careNotes    Json?     @default("{}") @map("care_notes")
+  emergencyVet String?   @map("emergency_vet") @db.VarChar(100)
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company   SaasCompany       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client    Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pet       PetshopPet         @relation(fields: [petId], references: [id])
+  specialty PetshopSpecialty?  @relation(fields: [specialtyId], references: [id])
+
+  @@index([companyId, checkinDate, checkoutDate], map: "idx_lodgings_company_dates")
+  @@index([petId],    map: "idx_lodgings_pet")
+  @@index([clientId], map: "idx_lodgings_client")
+  @@map("petshop_lodgings")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SISTEMA DE HOSPEDAGEM (Hotel e Creche) — novo módulo dedicado
+// ═══════════════════════════════════════════════════════════════
+
+model PetshopLodgingConfig {
+  id                  String    @id @default(uuid()) @db.Uuid
+  companyId           Int       @unique @map("company_id")
+
+  hotelEnabled        Boolean   @default(false) @map("hotel_enabled")
+  hotelDailyRate      Decimal?  @map("hotel_daily_rate") @db.Decimal(10, 2)
+  hotelCheckinTime    DateTime  @default(dbgenerated("'08:00'::time")) @map("hotel_checkin_time") @db.Time
+  hotelCheckoutTime   DateTime  @default(dbgenerated("'18:00'::time")) @map("hotel_checkout_time") @db.Time
+
+  daycareEnabled      Boolean   @default(false) @map("daycare_enabled")
+  daycareDailyRate    Decimal?  @map("daycare_daily_rate") @db.Decimal(10, 2)
+  daycareCheckinTime  DateTime  @default(dbgenerated("'07:00'::time")) @map("daycare_checkin_time") @db.Time
+  daycareCheckoutTime DateTime  @default(dbgenerated("'19:00'::time")) @map("daycare_checkout_time") @db.Time
+
+  createdAt           DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  saasCompany SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId], map: "idx_lodging_config_company")
+  @@map("petshop_lodging_config")
+}
+
+model PetshopLodgingCapacity {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   Int     @map("company_id")
+  type        String  @db.VarChar(10)   // 'hotel' | 'daycare'
+  dayOfWeek   Int     @map("day_of_week") @db.SmallInt  // 0=dom..6=sab
+  maxCapacity Int     @default(0) @map("max_capacity")
+  isActive    Boolean @default(true) @map("is_active")
+
+  saasCompany SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, type, dayOfWeek])
+  @@index([companyId], map: "idx_lodging_capacity_company")
+  @@map("petshop_lodging_capacity")
+}
+
+model PetshopLodgingReservation {
+  id               String    @id @default(uuid()) @db.Uuid
+  companyId        Int       @map("company_id")
+  clientId         String    @map("client_id") @db.Uuid
+  petId            String    @map("pet_id") @db.Uuid
+  type             String    @db.VarChar(10)   // 'hotel' | 'daycare'
+  checkinDate      DateTime  @map("checkin_date") @db.Date
+  checkoutDate     DateTime  @map("checkout_date") @db.Date
+  checkinTime      DateTime? @map("checkin_time") @db.Time
+  checkoutTime     DateTime? @map("checkout_time") @db.Time
+  kennelId         String?   @map("kennel_id") @db.VarChar(50)
+  status           String    @default("confirmed") @db.VarChar(30)
+  confirmed        Boolean   @default(false)
+  dailyRate        Decimal?  @map("daily_rate") @db.Decimal(10, 2)
+  totalAmount      Decimal?  @map("total_amount") @db.Decimal(10, 2)
+  careNotes        Json?     @default("{}") @map("care_notes")
+  emergencyContact String?   @map("emergency_contact") @db.VarChar(100)
+  createdAt        DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  saasCompany SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pet         PetshopPet  @relation(fields: [petId], references: [id])
+
+  @@index([companyId], map: "idx_lodging_res_company")
+  @@index([clientId],  map: "idx_lodging_res_client")
+  @@index([petId],     map: "idx_lodging_res_pet")
+  @@index([companyId, checkinDate, checkoutDate], map: "idx_lodging_res_dates")
+  @@index([companyId, type, checkinDate],         map: "idx_lodging_res_type")
+  @@map("petshop_lodging_reservations")
 }

@@ -109,15 +109,15 @@ export async function getRevenueChart(req: Request, res: Response) {
       let key: string
 
       if (group_by === 'day') {
-        key = getBrasiliaDate(appt.scheduledDate)
+        key = getBrasiliaDate(appt.scheduledDate ?? new Date())
       } else if (group_by === 'week') {
-        const d = new Date(appt.scheduledDate.getTime() + BRASILIA_OFFSET_MS)
+        const d = new Date((appt.scheduledDate ?? new Date()).getTime() + BRASILIA_OFFSET_MS)
         const day = d.getUTCDay()
         const weekStart = new Date(d.getTime() - day * 24 * 60 * 60 * 1000)
         key = weekStart.toISOString().split('T')[0]!
       } else {
         // month
-        const d = new Date(appt.scheduledDate.getTime() + BRASILIA_OFFSET_MS)
+        const d = new Date((appt.scheduledDate ?? new Date()).getTime() + BRASILIA_OFFSET_MS)
         key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
       }
 

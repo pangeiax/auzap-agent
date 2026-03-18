@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { cn } from "@/lib/cn";
 import { motion } from "framer-motion";
 import {
   Crown,
@@ -13,6 +14,7 @@ import {
   Edit2,
   Trash2,
   Clock,
+  CalendarClock,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import {
@@ -38,10 +40,313 @@ import {
   serviceService,
   whatsappService,
   paymentService,
+  settingsService,
+  specialtyService,
 } from "@/services";
+import {
+  lodgingConfigService,
+  type LodgingConfig,
+} from "@/services/lodgingService";
 import { useAuthContext } from "@/contexts/AuthContext";
-import type { Petshop, PetshopCustomCapacityHours } from "@/types";
+import type { Petshop } from "@/types";
+import type { Specialty } from "@/types/petshop";
+type PetshopCustomCapacityHours = {
+  hourly?: { [weekday: string]: { [hour: string]: number } };
+} | null;
 import type { Service } from "@/types";
+import type { CapacityRule } from "@/types/petshop";
+
+// ─── Hourly capacity helpers ──────────────────────────────────────────────────
+const DAY_CONFIGS_ORDERED = [
+  { dayOfWeek: 1, label: "Seg" },
+  { dayOfWeek: 2, label: "Ter" },
+  { dayOfWeek: 3, label: "Qua" },
+  { dayOfWeek: 4, label: "Qui" },
+  { dayOfWeek: 5, label: "Sex" },
+  { dayOfWeek: 6, label: "Sáb" },
+  { dayOfWeek: 0, label: "Dom" },
+] as const;
+
+const BH_DAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+type HourSlotConfig = { enabled: boolean; capacity: number };
+type DaySlotConfig = Record<string, HourSlotConfig>;
+
+function getDayBHInfo(
+  bh: Petshop["businessHours"] | undefined,
+  dayOfWeek: number,
+): { isOpen: boolean; open?: string; close?: string } {
+  const dayName = BH_DAY_NAMES[dayOfWeek];
+  if (!bh || !dayName) return { isOpen: false };
+  const entry = bh[dayName];
+  if (!entry) return { isOpen: false };
+  if (typeof entry === "string") {
+    if (entry === "closed") return { isOpen: false };
+    const [open, close] = entry.split("-");
+    if (!open || !close) return { isOpen: false };
+    return { isOpen: true, open, close };
+  }
+  if (typeof entry === "object") {
+    if ((entry as any).closed) return { isOpen: false };
+    const open = (entry as any).open as string | undefined;
+    const close = (entry as any).close as string | undefined;
+    if (open && close) return { isOpen: true, open, close };
+  }
+  return { isOpen: false };
+}
+
+function generateHourSlots(open: string, close: string): string[] {
+  const p1 = open.split(":").map(Number);
+  const p2 = close.split(":").map(Number);
+  const openMin = (p1[0] ?? 8) * 60 + (p1[1] ?? 0);
+  const closeMin = (p2[0] ?? 18) * 60 + (p2[1] ?? 0);
+  const slots: string[] = [];
+  for (let m = openMin; m < closeMin; m += 60) {
+    slots.push(
+      `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`,
+    );
+  }
+  return slots;
+}
+
+function buildInitialSlotConfig(
+  bh: Petshop["businessHours"] | undefined,
+  rules: CapacityRule[],
+): Record<number, DaySlotConfig> {
+  const rulesMap = new Map<string, CapacityRule>();
+  for (const r of rules) {
+    rulesMap.set(`${r.dayOfWeek}|${r.slot_time}`, r);
+  }
+  const result: Record<number, DaySlotConfig> = {};
+  for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
+    const bhInfo = getDayBHInfo(bh, dayOfWeek);
+    if (!bhInfo.isOpen || !bhInfo.open || !bhInfo.close) {
+      result[dayOfWeek] = {};
+      continue;
+    }
+    const hours = generateHourSlots(bhInfo.open, bhInfo.close);
+    const dayConfig: DaySlotConfig = {};
+    for (const h of hours) {
+      const rule = rulesMap.get(`${dayOfWeek}|${h}`);
+      dayConfig[h] = {
+        enabled: !!(rule?.isActive && (rule.maxCapacity ?? 0) > 0),
+        capacity:
+          rule?.maxCapacity && rule.maxCapacity > 0 ? rule.maxCapacity : 1,
+      };
+    }
+    result[dayOfWeek] = dayConfig;
+  }
+  return result;
+}
+
+function slotConfigToRules(
+  config: Record<number, DaySlotConfig>,
+): { day_of_week: number; slot_time: string; max_capacity: number }[] {
+  const rules: {
+    day_of_week: number;
+    slot_time: string;
+    max_capacity: number;
+  }[] = [];
+  for (const [dow, slots] of Object.entries(config)) {
+    for (const [time, slot] of Object.entries(slots)) {
+      if (slot.enabled) {
+        rules.push({ day_of_week: Number(dow), slot_time: time, max_capacity: slot.capacity });
+      }
+    }
+  }
+  return rules;
+}
+
+function HourlyCapacityEditor({
+  businessHours,
+  config,
+  onChange,
+  disabled,
+}: {
+  businessHours: Petshop["businessHours"] | undefined;
+  config: Record<number, DaySlotConfig>;
+  onChange: (c: Record<number, DaySlotConfig>) => void;
+  disabled?: boolean;
+}) {
+  const [defaultCap, setDefaultCap] = useState(2);
+
+  const updateSlot = (dow: number, time: string, field: keyof HourSlotConfig, value: boolean | number) => {
+    const daySlots = config[dow] ?? {};
+    onChange({ ...config, [dow]: { ...daySlots, [time]: { ...(daySlots[time] ?? { enabled: false, capacity: 1 }), [field]: value } } });
+  };
+  const toggleAllInDay = (dow: number, enabled: boolean) => {
+    const daySlots = config[dow] ?? {};
+    onChange({ ...config, [dow]: Object.fromEntries(Object.entries(daySlots).map(([t, s]) => [t, { enabled, capacity: enabled ? defaultCap : s.capacity }])) });
+  };
+  const applyToEnabled = () => {
+    const next: Record<number, DaySlotConfig> = {};
+    for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
+      const daySlots = config[dayOfWeek] ?? {};
+      next[dayOfWeek] = Object.fromEntries(Object.entries(daySlots).map(([t, s]) => [t, { ...s, capacity: s.enabled ? defaultCap : s.capacity }]));
+    }
+    onChange(next);
+  };
+  const enableAllAndApply = () => {
+    const next: Record<number, DaySlotConfig> = {};
+    for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
+      const bhInfo = getDayBHInfo(businessHours, dayOfWeek);
+      if (!bhInfo.isOpen) { next[dayOfWeek] = config[dayOfWeek] ?? {}; continue; }
+      const daySlots = config[dayOfWeek] ?? {};
+      next[dayOfWeek] = Object.fromEntries(Object.entries(daySlots).map(([t]) => [t, { enabled: true, capacity: defaultCap }]));
+    }
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Quick config panel */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] px-4 py-3">
+        <div>
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[#727B8E]">Capacidade padrão</p>
+          <input
+            type="number"
+            min="1"
+            max="99"
+            value={defaultCap}
+            disabled={disabled}
+            onChange={(e) => setDefaultCap(parseInt(e.target.value) || 1)}
+            className="w-16 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-2 py-1.5 text-sm text-center text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none disabled:opacity-40"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={applyToEnabled}
+            className="rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-3 py-1.5 text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] hover:border-[#727B8E]/40 transition-colors disabled:opacity-40"
+          >
+            Aplicar nos ativos
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={enableAllAndApply}
+            className="rounded-lg border border-[#1E62EC]/25 bg-[#1E62EC]/10 px-3 py-1.5 text-xs font-medium text-[#1E62EC] hover:bg-[#1E62EC]/20 transition-colors disabled:opacity-40"
+          >
+            Habilitar todos
+          </button>
+        </div>
+      </div>
+
+      {DAY_CONFIGS_ORDERED.map(({ dayOfWeek, label }) => {
+        const bhInfo = getDayBHInfo(businessHours, dayOfWeek);
+        const daySlots = config[dayOfWeek] ?? {};
+        const hours = Object.keys(daySlots).sort();
+        const enabledCount = hours.filter((h) => daySlots[h]?.enabled).length;
+
+        return (
+          <div
+            key={dayOfWeek}
+            className={cn(
+              "rounded-lg border border-[#727B8E]/10 dark:border-[#40485A] p-3",
+              !bhInfo.isOpen && "opacity-40",
+            )}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-7 shrink-0 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                {label}
+              </span>
+              {!bhInfo.isOpen ? (
+                <span className="text-xs text-[#727B8E]">
+                  Fechado (horário comercial)
+                </span>
+              ) : (
+                <>
+                  <span className="text-xs text-[#727B8E]">
+                    {bhInfo.open}–{bhInfo.close}
+                  </span>
+                  <span className="ml-auto flex items-center gap-1.5">
+                    {enabledCount > 0 && (
+                      <span className="rounded-full bg-[#1E62EC]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#1E62EC]">
+                        {enabledCount} ativo{enabledCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => toggleAllInDay(dayOfWeek, true)}
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-[#1E62EC] hover:bg-[#1E62EC]/10 transition-colors disabled:opacity-40"
+                    >
+                      Todos
+                    </button>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => toggleAllInDay(dayOfWeek, false)}
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-[#727B8E] hover:bg-[#727B8E]/10 transition-colors disabled:opacity-40"
+                    >
+                      Nenhum
+                    </button>
+                  </span>
+                </>
+              )}
+            </div>
+
+            {bhInfo.isOpen && hours.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {hours.map((h) => {
+                  const slot = daySlots[h] ?? { enabled: false, capacity: 1 };
+                  return (
+                    <div
+                      key={h}
+                      className={cn(
+                        "flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
+                        slot.enabled
+                          ? "border-[#1E62EC]/40 bg-[#1E62EC]/10 text-[#1E62EC]"
+                          : "border-[#727B8E]/15 bg-[#F4F6F9] dark:bg-[#212225] text-[#727B8E]",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => updateSlot(dayOfWeek, h, "enabled", !slot.enabled)}
+                        className="font-medium disabled:cursor-not-allowed"
+                        title={slot.enabled ? "Desativar" : "Ativar"}
+                      >
+                        {h}
+                      </button>
+                      {slot.enabled && (
+                        <>
+                          <span className="text-[#1E62EC]/40">|</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="99"
+                            value={slot.capacity}
+                            disabled={disabled}
+                            onChange={(e) =>
+                              updateSlot(dayOfWeek, h, "capacity", parseInt(e.target.value) || 1)
+                            }
+                            className="w-7 bg-transparent text-center text-xs outline-none disabled:cursor-not-allowed"
+                            title="Vagas"
+                          />
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 
 function SettingsProfileSidebar({
   petshop,
@@ -50,6 +355,10 @@ function SettingsProfileSidebar({
   onNovoServico,
   showNovoServico,
   onLogout,
+  onGenerateSlots,
+  generatingSlots,
+  generateDays,
+  onGenerateDaysChange,
 }: {
   petshop: Petshop | null;
   loading?: boolean;
@@ -57,32 +366,33 @@ function SettingsProfileSidebar({
   onNovoServico?: () => void;
   showNovoServico: boolean;
   onLogout: () => void;
+  onGenerateSlots?: () => void;
+  generatingSlots?: boolean;
+  generateDays?: number;
+  onGenerateDaysChange?: (days: number) => void;
 }) {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col items-center gap-4 rounded-lg sm:flex-row sm:items-start">
+    <div className="flex h-full flex-col gap-4">
+      {/* User / Petshop info */}
+      <div className="flex flex-col items-center gap-4 rounded-xl sm:flex-row sm:items-start">
         <img
           width={200}
           height={200}
           alt="Estabelecimento avatar"
-          className="size-24 object-cover rounded-full"
+          className="size-20 shrink-0 object-cover rounded-full ring-2 ring-[#727B8E]/10"
           src={getImage("cleber_santos").src}
         />
-        <div>
+        <div className="min-w-0 text-center sm:text-left">
           {loading ? (
-            <div className="mt-3 h-5 w-32 animate-pulse rounded bg-[#727B8E]/20" />
+            <div className="mt-2 h-4 w-28 animate-pulse rounded bg-[#727B8E]/20" />
           ) : error ? (
-            <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
-              {error}
-            </p>
+            <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">{error}</p>
           ) : (
             <>
-              <p className="mt-3 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-                {petshop?.company?.name ??
-                  petshop?.assistantName ??
-                  "Estabelecimento"}
+              <p className="mt-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc] truncate">
+                {petshop?.company?.name ?? petshop?.assistantName ?? "Estabelecimento"}
               </p>
-              <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+              <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
                 {petshop?.phone || petshop?.ownerPhone || "—"}
               </p>
             </>
@@ -101,19 +411,60 @@ function SettingsProfileSidebar({
         </Button>
       )}
 
+      {/* Generate slots (below user photo) */}
+      {onGenerateSlots && (
+        <div className="rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] p-3 flex flex-col gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">
+            Disponibilidade
+          </p>
+          <button
+            type="button"
+            disabled={generatingSlots}
+            onClick={onGenerateSlots}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 px-3 py-2 text-sm font-medium text-[#1E62EC] hover:bg-[#1E62EC]/20 transition-colors disabled:opacity-50"
+          >
+            {generatingSlots ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" />Gerando...</>
+            ) : (
+              <><CalendarClock className="h-3.5 w-3.5" />Gerar slots</>
+            )}
+          </button>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] text-[#727B8E] dark:text-[#8a94a6] whitespace-nowrap">
+              Dias a gerar
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={generateDays ?? 30}
+              onChange={(e) => onGenerateDaysChange?.(Math.min(60, Math.max(1, Number(e.target.value))))}
+              className="w-14 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-2 py-1 text-xs text-[#434A57] dark:text-[#f5f9fc] text-center focus:border-[#1E62EC] focus:outline-none"
+            />
+          </div>
+          <p className="text-[10px] text-[#727B8E] dark:text-[#8a94a6] leading-tight">
+            Atualizado automaticamente toda segunda-feira.
+          </p>
+        </div>
+      )}
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* Logout — bottom, gray */}
       <button
         type="button"
         onClick={onLogout}
-        className="flex w-full items-center gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/40"
+        className="flex w-full items-center gap-2.5 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] px-3 py-2.5 text-sm font-medium text-[#727B8E] transition-colors hover:bg-[#727B8E]/15 hover:text-[#434A57] dark:border-[#40485A] dark:bg-[#212225] dark:text-[#8a94a6] dark:hover:bg-[#40485A]"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
+          width="15"
+          height="15"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.67"
+          strokeWidth="1.8"
           strokeLinecap="round"
           strokeLinejoin="round"
           className="shrink-0"
@@ -130,22 +481,76 @@ function SettingsProfileSidebar({
 
 function ServicosContent({
   services,
+  specialties,
   loading,
+  loadingSpecialties,
   petshopId,
+  petshop,
   onEditService,
   onRefresh,
+  onCreateSpecialty,
+  onDeleteSpecialty,
+  onNewService,
+  onRefreshSpecialties,
 }: {
   services: Service[];
+  specialties: Specialty[];
   loading?: boolean;
+  loadingSpecialties?: boolean;
   petshopId: number;
+  petshop: Petshop | null;
   onEditService: (service: Service) => void;
   onRefresh: () => void;
+  onCreateSpecialty: (name: string, color?: string) => Promise<string>;
+  onDeleteSpecialty: (id: string) => Promise<void>;
+  onNewService: (specialtyId: string) => void;
+  onRefreshSpecialties: () => Promise<void>;
 }) {
   const toast = useToast();
+  const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<string | null>(
+    null,
+  );
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [deactivateSpecialtyModal, setDeactivateSpecialtyModal] =
+    useState<Specialty | null>(null);
+  const [deactivatingSpecialty, setDeactivatingSpecialty] = useState(false);
+
+  // Specialty creation state
+  const [newSpecialtyModal, setNewSpecialtyModal] = useState(false);
+  const [newSpecialtyName, setNewSpecialtyName] = useState("");
+  const [newSpecialtyColor, setNewSpecialtyColor] = useState("#1E62EC");
+  const [creatingSpecialty, setCreatingSpecialty] = useState(false);
+  const [newSpSlotConfig, setNewSpSlotConfig] = useState<Record<number, DaySlotConfig>>({});
+
+  // Specialty edit state
+  const [editSpecialtyOpen, setEditSpecialtyOpen] = useState(false);
+  const [editingSpecialtyData, setEditingSpecialtyData] =
+    useState<Specialty | null>(null);
+  const [spEditName, setSpEditName] = useState("");
+  const [spEditColor, setSpEditColor] = useState("#1E62EC");
+  const [spEditDescription, setSpEditDescription] = useState("");
+  const [spEditDays, setSpEditDays] =
+    useState<Record<number, DaySlotConfig>>({});
+  const [existingCapRules, setExistingCapRules] = useState<CapacityRule[]>([]);
+  const [loadingSpEdit, setLoadingSpEdit] = useState(false);
+  const [savingSpEdit, setSavingSpEdit] = useState(false);
+
+  // Filter: Hospedagem is managed in its own tab
+  const displaySpecialties = specialties.filter((s) => s.name !== "Hospedagem");
+
+  // Auto-select first specialty
+  const firstSpecialtyId = displaySpecialties[0]?.id ?? null;
+  const effectiveSelected = selectedSpecialtyId ?? firstSpecialtyId;
+
+  const servicesForSelected = services.filter(
+    (s) => s.specialtyId === effectiveSelected,
+  );
+
+  const servicesCountBySpecialty = (spId: string) =>
+    services.filter((s) => s.specialtyId === spId).length;
 
   const handleConfirmDelete = async () => {
     if (!serviceToDelete) return;
@@ -182,92 +587,430 @@ function ServicosContent({
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-[#727B8E] dark:text-[#8a94a6]">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Carregando serviços...
-      </div>
-    );
-  }
-  if (!services.length) {
-    return (
-      <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-        Nenhum serviço cadastrado. Use o botão &quot;Novo serviço&quot; para
-        adicionar.
-      </p>
-    );
-  }
+  const handleCreateSpecialty = async () => {
+    if (!newSpecialtyName.trim()) {
+      toast.warning("Campo obrigatório", "Informe o nome da especialidade.");
+      return;
+    }
+    setCreatingSpecialty(true);
+    try {
+      const newId = await onCreateSpecialty(newSpecialtyName.trim(), newSpecialtyColor);
+      const rules = slotConfigToRules(newSpSlotConfig);
+      if (newId && rules.length > 0) {
+        await specialtyService.bulkUpsertCapacityRules(newId, rules);
+      }
+      toast.success(
+        "Especialidade criada!",
+        `"${newSpecialtyName}" adicionada.`,
+      );
+      setNewSpecialtyModal(false);
+      setNewSpecialtyName("");
+      setNewSpecialtyColor("#1E62EC");
+      setNewSpSlotConfig({});
+    } catch (err: any) {
+      toast.error(
+        "Erro",
+        err?.response?.data?.error || "Não foi possível criar a especialidade.",
+      );
+    } finally {
+      setCreatingSpecialty(false);
+    }
+  };
+
+  const handleConfirmDeactivateSpecialty = async () => {
+    if (!deactivateSpecialtyModal) return;
+    setDeactivatingSpecialty(true);
+    try {
+      await onDeleteSpecialty(deactivateSpecialtyModal.id);
+      toast.success(
+        "Especialidade desativada!",
+        `"${deactivateSpecialtyModal.name}" e seus serviços foram desativados.`,
+      );
+      setDeactivateSpecialtyModal(null);
+      if (selectedSpecialtyId === deactivateSpecialtyModal.id)
+        setSelectedSpecialtyId(null);
+      await onRefreshSpecialties();
+    } catch {
+      toast.error("Erro", "Não foi possível desativar a especialidade.");
+    } finally {
+      setDeactivatingSpecialty(false);
+    }
+  };
+
+  const handleOpenEditSpecialty = async (sp: Specialty) => {
+    setEditingSpecialtyData(sp);
+    setSpEditName(sp.name);
+    setSpEditColor(sp.color || "#1E62EC");
+    setSpEditDescription(sp.description || "");
+    setSpEditDays(buildInitialSlotConfig(petshop?.businessHours, []));
+    setExistingCapRules([]);
+    setEditSpecialtyOpen(true);
+    setLoadingSpEdit(true);
+    try {
+      const rules = await specialtyService.listCapacityRules(sp.id);
+      setExistingCapRules(rules);
+      setSpEditDays(buildInitialSlotConfig(petshop?.businessHours, rules));
+    } catch {
+      // keep defaults
+    } finally {
+      setLoadingSpEdit(false);
+    }
+  };
+
+  const handleSaveSpecialtyEdit = async () => {
+    if (!editingSpecialtyData) return;
+    setSavingSpEdit(true);
+    try {
+      await specialtyService.update(editingSpecialtyData.id, {
+        name: spEditName,
+        color: spEditColor,
+        description: spEditDescription || undefined,
+      });
+      const rules = slotConfigToRules(spEditDays);
+      await specialtyService.bulkUpsertCapacityRules(
+        editingSpecialtyData.id,
+        rules,
+      );
+      toast.success(
+        "Especialidade salva!",
+        "Configurações e disponibilidade atualizadas.",
+      );
+      setEditSpecialtyOpen(false);
+      await onRefreshSpecialties();
+    } catch (err: any) {
+      toast.error(
+        "Erro",
+        err?.response?.data?.error || "Não foi possível salvar.",
+      );
+    } finally {
+      setSavingSpEdit(false);
+    }
+  };
+
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {services.map((s) => (
-          <div
-            key={s.id}
-            className="flex flex-col gap-2 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4 relative"
-          >
-            <h3 className="text-base font-semibold text-[#434A57] dark:text-[#f5f9fc] pr-14">
-              {s.name}
-            </h3>
-            <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-              {s.description || "Sem descrição"}
-            </p>
-            <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-              {s.durationMin} min
-              {s.price ? ` • R$ ${Number(s.price).toFixed(2)}` : ""}
-              {s.priceBySize
-                ? ` • P: R$${s.priceBySize.small ?? "-"} M: R$${s.priceBySize.medium ?? "-"} G: R$${s.priceBySize.large ?? "-"}`
-                : ""}
-            </p>
-            <span
-              className={`absolute top-3 right-3 inline-flex px-2 py-1 rounded-full text-[8px] font-medium border ${
-                s.isActive
-                  ? "border-[#3CD057]/36 bg-[#D4F3D6] text-[#3CD057]"
-                  : "border-gray-200 bg-gray-100 text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400"
-              }`}
-            >
-              {s.isActive ? "ATIVO" : "INATIVO"}
-            </span>
+      {/* ─── Master-Detail layout ─── */}
+      <div className="flex min-h-0 gap-5">
 
-            <div className="mt-2 flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-1"
-                onClick={() => onEditService(s)}
-              >
-                <Edit2 className="h-3 w-3" />
-                Editar
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-1"
-                disabled={togglingId === s.id}
-                onClick={() => handleToggle(s)}
-              >
-                {togglingId === s.id ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Clock className="h-3 w-3" />
-                )}
-                {s.isActive ? "Desativar" : "Ativar"}
-              </Button>
-              <button
-                type="button"
-                onClick={() => {
-                  setServiceToDelete(s);
-                  setDeleteModalOpen(true);
-                }}
-                className="rounded p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                aria-label="Deletar"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+        {/* ─── Left: Specialty sidebar ─── */}
+        <div className="flex w-52 shrink-0 flex-col gap-1">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#727B8E] dark:text-[#8a94a6]">
+              Especialidades
+            </p>
+          </div>
+
+          {loadingSpecialties ? (
+            <div className="flex items-center gap-2 py-4 text-sm text-[#727B8E]">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+            </div>
+          ) : displaySpecialties.length === 0 ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-dashed border-[#727B8E]/20 p-4 text-center">
+              <p className="text-xs text-[#727B8E]">Nenhuma especialidade</p>
+            </div>
+          ) : (
+            displaySpecialties.map((sp) => {
+              const isSelected = sp.id === effectiveSelected;
+              const spColor = sp.color || "#1E62EC";
+              const count = servicesCountBySpecialty(sp.id);
+              return (
+                <div
+                  key={sp.id}
+                  className={cn(
+                    "group flex items-center gap-2 rounded-xl border px-3 py-2.5 cursor-pointer transition-all",
+                    isSelected
+                      ? "shadow-sm"
+                      : "border-[#727B8E]/10 dark:border-[#40485A] hover:border-[#727B8E]/25 bg-white dark:bg-[#1A1B1D]",
+                    !sp.isActive && "opacity-50",
+                  )}
+                  style={isSelected ? { backgroundColor: `${spColor}12`, borderColor: `${spColor}45` } : {}}
+                  onClick={() => setSelectedSpecialtyId(sp.id)}
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: spColor }}
+                  />
+                  <span
+                    className={cn("min-w-0 flex-1 truncate text-sm font-medium")}
+                    style={{ color: isSelected ? spColor : "#434A57" }}
+                  >
+                    {sp.name}
+                  </span>
+                  {count > 0 && (
+                    <span className="shrink-0 rounded-full bg-[#727B8E]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#727B8E]">
+                      {count}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    title="Editar especialidade"
+                    onClick={(e) => { e.stopPropagation(); handleOpenEditSpecialty(sp); }}
+                    className="shrink-0 flex h-6 w-6 items-center justify-center rounded-lg opacity-40 hover:opacity-100 hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-all"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" style={{ color: isSelected ? spColor : "#727B8E" }} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Desativar especialidade"
+                    onClick={(e) => { e.stopPropagation(); setDeactivateSpecialtyModal(sp); }}
+                    className="shrink-0 flex h-6 w-6 items-center justify-center rounded-lg opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all text-red-400"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setNewSpSlotConfig(buildInitialSlotConfig(petshop?.businessHours, []));
+              setNewSpecialtyModal(true);
+            }}
+            className="mt-1 flex items-center gap-1.5 rounded-xl border border-dashed border-[#727B8E]/20 px-3 py-2.5 text-sm text-[#727B8E] hover:border-[#1E62EC]/40 hover:text-[#1E62EC] transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Nova especialidade
+          </button>
+        </div>
+
+        {/* ─── Right: Services panel ─── */}
+        <div className="min-w-0 flex-1">
+          {!effectiveSelected ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#727B8E]/15 py-20 text-center">
+              <CalendarClock className="h-10 w-10 text-[#727B8E]/30" />
+              <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+                Selecione uma especialidade para ver seus serviços.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Services header */}
+              <div className="mb-3 flex items-center justify-between">
+                {(() => {
+                  const sp = displaySpecialties.find((s) => s.id === effectiveSelected);
+                  const spColor = sp?.color || "#1E62EC";
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: spColor }} />
+                      <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">{sp?.name}</p>
+                      <span className="text-xs text-[#727B8E]">
+                        {servicesForSelected.length} serviço{servicesForSelected.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                  );
+                })()}
+                <button
+                  type="button"
+                  onClick={() => effectiveSelected && onNewService(effectiveSelected)}
+                  className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-[#1a55d4] transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Novo serviço
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-[#727B8E]">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Carregando serviços...
+                </div>
+              ) : servicesForSelected.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#727B8E]/15 py-16 text-center">
+                  <Plus className="h-8 w-8 text-[#727B8E]/30" />
+                  <p className="text-sm text-[#727B8E]">Nenhum serviço nesta especialidade.</p>
+                  <button
+                    type="button"
+                    onClick={() => effectiveSelected && onNewService(effectiveSelected)}
+                    className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a55d4] transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Adicionar primeiro serviço
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {servicesForSelected.map((s) => {
+                    const selectedSp = displaySpecialties.find((sp) => sp.id === effectiveSelected);
+                    const spColor = selectedSp?.color || "#1E62EC";
+                    return (
+                      <div
+                        key={s.id}
+                        className="group flex items-center gap-3 rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-4 py-3 hover:border-[#727B8E]/20 transition-colors"
+                      >
+                        <div className="h-9 w-1 shrink-0 rounded-full" style={{ backgroundColor: spColor }} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">{s.name}</p>
+                            <span className={cn(
+                              "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                              s.isActive
+                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+                            )}>
+                              {s.isActive ? "Ativo" : "Inativo"}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                            {s.durationMin}min
+                            {s.price ? ` · R$ ${Number(s.price).toFixed(2)}` : ""}
+                            {s.priceBySize ? ` · P:${s.priceBySize.small ?? "—"} M:${s.priceBySize.medium ?? "—"} G:${s.priceBySize.large ?? "—"}` : ""}
+                            {s.durationMultiplierLarge === 2 ? " · 2× G/GG" : ""}
+                            {s.description ? ` · ${s.description}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => onEditService(s)}
+                            title="Editar serviço"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-[#727B8E] hover:bg-[#F4F6F9] dark:hover:bg-[#212225] hover:text-[#1E62EC] transition-colors"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={togglingId === s.id}
+                            onClick={() => handleToggle(s)}
+                            title={s.isActive ? "Desativar" : "Ativar"}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-[#727B8E] hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-colors disabled:opacity-40"
+                          >
+                            {togglingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setServiceToDelete(s); setDeleteModalOpen(true); }}
+                            title="Excluir serviço"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Modal Nova Especialidade */}
+      <Modal
+        isOpen={newSpecialtyModal}
+        onClose={() => {
+          setNewSpecialtyModal(false);
+          setNewSpecialtyName("");
+          setNewSpSlotConfig({});
+        }}
+        title="Nova especialidade"
+        className="max-w-[560px]"
+      >
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Nome"
+              placeholder="Ex: Estética, Veterinária..."
+              value={newSpecialtyName}
+              onChange={(e) => setNewSpecialtyName(e.target.value)}
+            />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                Cor
+              </label>
+              <input
+                type="color"
+                value={newSpecialtyColor}
+                onChange={(e) => setNewSpecialtyColor(e.target.value)}
+                className="h-10 w-20 cursor-pointer rounded border border-[#727B8E]/20"
+              />
             </div>
           </div>
-        ))}
-      </div>
+          <div>
+            <p className="mb-2 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              Disponibilidade por hora
+            </p>
+            <p className="mb-3 text-xs text-[#727B8E]">
+              Configure as vagas por horário (sincronizado com o horário comercial). Pode ser ajustado depois.
+            </p>
+            <HourlyCapacityEditor
+              businessHours={petshop?.businessHours}
+              config={newSpSlotConfig}
+              onChange={setNewSpSlotConfig}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setNewSpecialtyModal(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleCreateSpecialty}
+              disabled={creatingSpecialty}
+            >
+              {creatingSpecialty ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Criando...
+                </>
+              ) : (
+                "Criar"
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal confirmação desativar especialidade */}
+      <Modal
+        isOpen={!!deactivateSpecialtyModal}
+        onClose={() => setDeactivateSpecialtyModal(null)}
+        title="Desativar especialidade"
+        className="max-w-[420px]"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+            Desativar a especialidade{" "}
+            <span className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+              &quot;{deactivateSpecialtyModal?.name}&quot;
+            </span>{" "}
+            irá desativar{" "}
+            <span className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+              {deactivateSpecialtyModal
+                ? servicesCountBySpecialty(deactivateSpecialtyModal.id)
+                : 0}{" "}
+              serviço(s)
+            </span>{" "}
+            vinculado(s). Deseja continuar?
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeactivateSpecialtyModal(null)}
+              disabled={deactivatingSpecialty}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmDeactivateSpecialty}
+              disabled={deactivatingSpecialty}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deactivatingSpecialty ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Desativando...
+                </>
+              ) : (
+                "Sim, desativar"
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={deleteModalOpen}
@@ -312,6 +1055,91 @@ function ServicosContent({
               )}
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Modal editar especialidade */}
+      <Modal
+        isOpen={editSpecialtyOpen}
+        onClose={() => setEditSpecialtyOpen(false)}
+        title={`Editar especialidade${editingSpecialtyData ? `: ${editingSpecialtyData.name}` : ""}`}
+        className="max-w-[560px]"
+      >
+        <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
+          {loadingSpEdit ? (
+            <div className="flex items-center gap-2 py-4 text-sm text-[#727B8E]">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando
+              configurações...
+            </div>
+          ) : (
+            <>
+              <Input
+                label="Nome"
+                value={spEditName}
+                onChange={(e) => setSpEditName(e.target.value)}
+                placeholder="Nome da especialidade"
+              />
+              <div>
+                <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                  Cor
+                </label>
+                <input
+                  type="color"
+                  value={spEditColor}
+                  onChange={(e) => setSpEditColor(e.target.value)}
+                  className="h-10 w-20 cursor-pointer rounded border border-[#727B8E]/20"
+                />
+              </div>
+              <Input
+                label="Descrição (opcional)"
+                value={spEditDescription}
+                onChange={(e) => setSpEditDescription(e.target.value)}
+                placeholder="Descrição da especialidade"
+              />
+              <div>
+                <p className="mb-1 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  Slots por hora
+                </p>
+                <p className="mb-3 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                  Clique em cada horário para ativar/desativar. O número ao lado é a capacidade (vagas). Dias fechados no horário comercial aparecem desabilitados.
+                </p>
+                {!petshop?.businessHours ? (
+                  <p className="rounded-lg bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                    Configure o horário de funcionamento na aba Horários para habilitar os slots por hora.
+                  </p>
+                ) : (
+                  <HourlyCapacityEditor
+                    businessHours={petshop?.businessHours}
+                    config={spEditDays}
+                    onChange={setSpEditDays}
+                    disabled={savingSpEdit}
+                  />
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditSpecialtyOpen(false)}
+                  disabled={savingSpEdit}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleSaveSpecialtyEdit}
+                  disabled={savingSpEdit}
+                >
+                  {savingSpEdit ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Salvar"
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </>
@@ -977,14 +1805,14 @@ function HorariosContent({
   const toast = useToast();
   const [saving, setSaving] = useState(false);
 
-  const DIAS: { key: string; label: string }[] = [
-    { key: "monday", label: "Segunda-feira" },
-    { key: "tuesday", label: "Terça-feira" },
-    { key: "wednesday", label: "Quarta-feira" },
-    { key: "thursday", label: "Quinta-feira" },
-    { key: "friday", label: "Sexta-feira" },
-    { key: "saturday", label: "Sábado" },
-    { key: "sunday", label: "Domingo" },
+  const DIAS: { key: string; label: string; short: string }[] = [
+    { key: "monday", label: "Segunda-feira", short: "Seg" },
+    { key: "tuesday", label: "Terça-feira", short: "Ter" },
+    { key: "wednesday", label: "Quarta-feira", short: "Qua" },
+    { key: "thursday", label: "Quinta-feira", short: "Qui" },
+    { key: "friday", label: "Sexta-feira", short: "Sex" },
+    { key: "saturday", label: "Sábado", short: "Sáb" },
+    { key: "sunday", label: "Domingo", short: "Dom" },
   ];
 
   const [hours, setHours] = useState<
@@ -994,13 +1822,7 @@ function HorariosContent({
       DIAS.map(({ key }) => [
         key,
         {
-          enabled: [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-          ].includes(key),
+          enabled: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(key),
           open: "09:00",
           close: "18:00",
         },
@@ -1008,9 +1830,9 @@ function HorariosContent({
     );
     if (petshop?.businessHours) {
       Object.entries(petshop.businessHours).forEach(([key, val]) => {
-        if (val?.open && val?.close) {
+        if (val && typeof val === "object" && val.open && val.close) {
           defaults[key] = { enabled: true, open: val.open, close: val.close };
-        } else if (val?.closed) {
+        } else if (val && typeof val === "object" && val.closed) {
           defaults[key] = { ...defaults[key], enabled: false };
         }
       });
@@ -1018,112 +1840,13 @@ function HorariosContent({
     return defaults;
   });
 
-  const [defaultCapacity, setDefaultCapacity] = useState(
-    petshop?.defaultCapacityPerHour ?? 8,
-  );
-
-  const [hourlyCapacities, setHourlyCapacities] = useState<
-    { day: string; hour: string; capacity: number }[]
-  >([]);
-  const [hourlyModalOpen, setHourlyModalOpen] = useState(false);
-  const [hourlyDay, setHourlyDay] = useState("monday");
-  const [hourlyHour, setHourlyHour] = useState("");
-  const [hourlyCap, setHourlyCap] = useState("");
-
-  const dayLabelByKey = Object.fromEntries(
-    DIAS.map(({ key, label }) => [key, label]),
-  ) as Record<string, string>;
-
-  const sortHourlyCapacities = (
-    entries: { day: string; hour: string; capacity: number }[],
-  ) => {
-    const dayOrder = Object.fromEntries(
-      DIAS.map(({ key }, index) => [key, index]),
-    ) as Record<string, number>;
-
-    return [...entries].sort(
-      (left, right) =>
-        (dayOrder[left.day] ?? Number.MAX_SAFE_INTEGER) -
-          (dayOrder[right.day] ?? Number.MAX_SAFE_INTEGER) ||
-        left.hour.localeCompare(right.hour),
-    );
-  };
-
-  const parseTimeToMinutes = (value: string): number | null => {
-    const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-    if (!match) return null;
-
-    const hours = Number(match[1]);
-    const minutes = Number(match[2]);
-    if (
-      !Number.isInteger(hours) ||
-      !Number.isInteger(minutes) ||
-      hours < 0 ||
-      hours > 23 ||
-      minutes < 0 ||
-      minutes > 59
-    ) {
-      return null;
-    }
-
-    return hours * 60 + minutes;
-  };
-
-  const formatMinutesAsTime = (minutesFromMidnight: number) => {
-    const hours = Math.floor(minutesFromMidnight / 60);
-    const minutes = minutesFromMidnight % 60;
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-  };
-
-  const getHourlyOptionsForDay = (dayKey: string) => {
-    const dayConfig = hours[dayKey];
-    if (!dayConfig?.enabled) {
-      return [] as string[];
-    }
-
-    const openMinutes = parseTimeToMinutes(dayConfig.open);
-    const closeMinutes = parseTimeToMinutes(dayConfig.close);
-    if (
-      openMinutes === null ||
-      closeMinutes === null ||
-      openMinutes >= closeMinutes
-    ) {
-      return [] as string[];
-    }
-
-    const options: string[] = [];
-    for (
-      let startMinutes = openMinutes;
-      startMinutes < closeMinutes;
-      startMinutes += 60
-    ) {
-      options.push(formatMinutesAsTime(startMinutes));
-    }
-
-    return options;
-  };
-
-  const getFirstAvailableHourlyDay = () => {
-    return (
-      DIAS.find(({ key }) => getHourlyOptionsForDay(key).length > 0)?.key ??
-      DIAS[0]?.key ??
-      "monday"
-    );
-  };
-
   useEffect(() => {
     if (!petshop) return;
     const initial = Object.fromEntries(
       DIAS.map(({ key }) => [
         key,
         {
-          enabled: [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-          ].includes(key),
+          enabled: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(key),
           open: "09:00",
           close: "18:00",
         },
@@ -1131,47 +1854,14 @@ function HorariosContent({
     );
     if (petshop.businessHours) {
       Object.entries(petshop.businessHours).forEach(([key, val]) => {
-        if (val?.open && val?.close) {
+        if (val && typeof val === "object" && val.open && val.close)
           initial[key] = { enabled: true, open: val.open, close: val.close };
-        } else if (val?.closed) {
+        else if (val && typeof val === "object" && val.closed)
           initial[key] = { ...initial[key], enabled: false };
-        }
       });
     }
     setHours(initial);
-    setDefaultCapacity(petshop.defaultCapacityPerHour ?? 8);
-
-    const custom =
-      petshop.customCapacityHours as PetshopCustomCapacityHours | null;
-    if (custom?.hourly) {
-      const hourly: { day: string; hour: string; capacity: number }[] = [];
-      for (const [day, hours] of Object.entries(custom.hourly)) {
-        for (const [hour, capacity] of Object.entries(
-          hours as Record<string, number>,
-        )) {
-          hourly.push({ day, hour, capacity });
-        }
-      }
-      setHourlyCapacities(sortHourlyCapacities(hourly));
-    } else {
-      setHourlyCapacities([]);
-    }
   }, [petshop]);
-
-  useEffect(() => {
-    const availableHours = getHourlyOptionsForDay(hourlyDay);
-
-    if (availableHours.length === 0) {
-      if (hourlyHour) {
-        setHourlyHour("");
-      }
-      return;
-    }
-
-    if (!availableHours.includes(hourlyHour)) {
-      setHourlyHour(availableHours[0]);
-    }
-  }, [hours, hourlyDay, hourlyHour]);
 
   const handleToggle = (key: string) => {
     setHours((prev) => ({
@@ -1180,88 +1870,41 @@ function HorariosContent({
     }));
   };
 
-  const handleTimeChange = (
-    key: string,
-    field: "open" | "close",
-    value: string,
-  ) => {
+  const handleTimeChange = (key: string, field: "open" | "close", value: string) => {
     setHours((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
-  };
-
-  const handleAddHourlyCapacity = () => {
-    const availableHours = getHourlyOptionsForDay(hourlyDay);
-    const selectedHour = hourlyHour || availableHours[0];
-    const cap = parseInt(hourlyCap, 10);
-
-    if (!selectedHour || !availableHours.includes(selectedHour)) {
-      toast.warning(
-        "Horário indisponível",
-        "Escolha um dia com horário configurado para adicionar uma capacidade customizada.",
-      );
-      return;
-    }
-
-    if (!Number.isInteger(cap) || cap < 1) {
-      toast.warning(
-        "Capacidade inválida",
-        "Informe uma capacidade maior que zero para esse horário.",
-      );
-      return;
-    }
-
-    setHourlyCapacities((prev) => {
-      const without = prev.filter(
-        (h) => !(h.day === hourlyDay && h.hour === selectedHour),
-      );
-      return sortHourlyCapacities([
-        ...without,
-        { day: hourlyDay, hour: selectedHour, capacity: cap },
-      ]);
-    });
-    setHourlyModalOpen(false);
-    setHourlyDay(getFirstAvailableHourlyDay());
-    setHourlyHour("");
-    setHourlyCap("");
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const business_hours: Record<
-        string,
-        { open: string; close: string } | { closed: boolean }
-      > = {};
+      const business_hours: Record<string, { open: string; close: string } | { closed: boolean }> = {};
       Object.entries(hours).forEach(([key, val]) => {
-        if (val.enabled) {
-          business_hours[key] = { open: val.open, close: val.close };
-        } else {
-          business_hours[key] = { closed: true };
-        }
+        if (val.enabled) business_hours[key] = { open: val.open, close: val.close };
+        else business_hours[key] = { closed: true };
       });
-      const custom_capacity_hours: PetshopCustomCapacityHours = {
-        hourly: hourlyCapacities.reduce<Record<string, Record<string, number>>>(
-          (acc, h) => {
-            if (!getHourlyOptionsForDay(h.day).includes(h.hour)) {
-              return acc;
-            }
-            if (!acc[h.day]) acc[h.day] = {};
-            acc[h.day][h.hour] = h.capacity;
-            return acc;
-          },
-          {},
-        ),
-      };
-      await onSave({
-        business_hours,
-        default_capacity_per_hour: defaultCapacity,
-        custom_capacity_hours,
-      });
+      await onSave({ business_hours });
       toast.success("Horários salvos!", "As configurações foram atualizadas.");
     } catch {
       toast.error("Erro ao salvar", "Não foi possível salvar os horários.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCancel = () => {
+    if (!petshop) return;
+    const initial = Object.fromEntries(
+      DIAS.map(({ key }) => [key, { enabled: ["monday","tuesday","wednesday","thursday","friday"].includes(key), open: "09:00", close: "18:00" }])
+    );
+    if (petshop.businessHours) {
+      Object.entries(petshop.businessHours).forEach(([key, val]) => {
+        if (val && typeof val === "object" && val.open && val.close)
+          initial[key] = { enabled: true, open: val.open, close: val.close };
+        else if (val && typeof val === "object" && val.closed)
+          initial[key] = { ...initial[key], enabled: false };
+      });
+    }
+    setHours(initial);
   };
 
   if (loading) {
@@ -1274,191 +1917,72 @@ function HorariosContent({
   }
 
   return (
-    <div className="flex flex-col gap-8 pb-8">
-      <section>
-        <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+    <div className="flex flex-col gap-6 pb-8">
+      <div>
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#727B8E] dark:text-[#8a94a6]">
           Horário de Funcionamento
-        </h3>
-        <div className="space-y-3">
-          {DIAS.map(({ key, label }) => (
-            <div
-              key={key}
-              className="flex flex-col gap-3 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4"
-            >
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={hours[key]?.enabled ?? false}
-                  onChange={() => handleToggle(key)}
-                  className="h-4 w-4 rounded border-[#727B8E]/30 text-[#1E62EC] focus:ring-2 focus:ring-[#1E62EC]/20"
-                />
-                <span className="flex-1 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-                  {label}
-                </span>
-                {!hours[key]?.enabled && (
-                  <span className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
-                    Fechado
-                  </span>
-                )}
-              </div>
-              {hours[key]?.enabled && (
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    label="Abertura"
-                    type="time"
-                    value={hours[key].open}
-                    onChange={(e) =>
-                      handleTimeChange(key, "open", e.target.value)
-                    }
-                  />
-                  <Input
-                    label="Fechamento"
-                    type="time"
-                    value={hours[key].close}
-                    onChange={(e) =>
-                      handleTimeChange(key, "close", e.target.value)
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-          Capacidade Padrão por Hora
-        </h3>
-        <div className="max-w-xs">
-          <Input
-            type="number"
-            label="Atendimentos simultâneos"
-            placeholder="8"
-            value={defaultCapacity}
-            onChange={(e) => setDefaultCapacity(parseInt(e.target.value) || 1)}
-            min="1"
-          />
-          <p className="mt-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-            Número máximo de agendamentos por hora
-          </p>
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-          Capacidades Customizadas por Hora
-        </h3>
-        <p className="mb-4 text-sm text-[#727B8E] dark:text-[#8a94a6]">
-          A capacidade padrão será aplicada a todos os horários abertos do
-          petshop. Se necessário, você pode sobrescrever horários específicos de
-          um weekday.
         </p>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              const nextDay = getFirstAvailableHourlyDay();
-              const nextHours = getHourlyOptionsForDay(nextDay);
-              setHourlyDay(nextDay);
-              setHourlyHour(nextHours[0] ?? "");
-              setHourlyCap("");
-              setHourlyModalOpen(true);
-            }}
-            className="flex items-center gap-2 rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 dark:bg-[#1E62EC]/20 px-4 py-2 text-sm text-[#1E62EC] hover:bg-[#1E62EC]/20 dark:hover:bg-[#1E62EC]/30 transition-colors"
-          >
-            + Adicionar Hora do Dia da Semana
-          </button>
-        </div>
-        {hourlyCapacities.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <p className="text-xs font-medium text-[#434A57] dark:text-[#f5f9fc]">
-              Capacidades por hora:
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {hourlyCapacities.map((h) => (
-                <div
-                  key={`${h.day}-${h.hour}`}
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#1E62EC]/20 bg-[#1E62EC]/10 px-2 py-1"
-                >
-                  <span className="text-xs font-medium text-[#1E62EC]">
-                    {dayLabelByKey[h.day] ?? h.day} {h.hour} • {h.capacity}{" "}
-                    serviços
+        <div className="space-y-2">
+          {DIAS.map(({ key, label }) => {
+            const day = hours[key];
+            const enabled = day?.enabled ?? false;
+            return (
+              <div
+                key={key}
+                className={cn(
+                  "rounded-xl border p-4 transition-all",
+                  enabled
+                    ? "border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D]"
+                    : "border-[#727B8E]/8 dark:border-[#40485A]/40 bg-[#F4F6F9] dark:bg-[#212225]/50",
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Toggle switch */}
+                  <label className="relative inline-flex shrink-0 cursor-pointer items-center">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={enabled}
+                      onChange={() => handleToggle(key)}
+                    />
+                    <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
+                  </label>
+                  <span className={cn(
+                    "w-28 text-sm font-medium",
+                    enabled ? "text-[#434A57] dark:text-[#f5f9fc]" : "text-[#727B8E] dark:text-[#8a94a6]",
+                  )}>
+                    {label}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setHourlyCapacities((prev) =>
-                        prev.filter(
-                          (x) => !(x.day === h.day && x.hour === h.hour),
-                        ),
-                      )
-                    }
-                    className="text-[#1E62EC] hover:text-red-600 transition-colors"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  {!enabled ? (
+                    <span className="rounded-full bg-[#727B8E]/10 px-2.5 py-0.5 text-[10px] font-medium text-[#727B8E]">
+                      Fechado
+                    </span>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="time"
+                        value={day?.open || "09:00"}
+                        onChange={(e) => handleTimeChange(key, "open", e.target.value)}
+                        className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] dark:bg-[#212225] px-2.5 py-1.5 text-sm text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none"
+                      />
+                      <span className="text-xs text-[#727B8E]">–</span>
+                      <input
+                        type="time"
+                        value={day?.close || "18:00"}
+                        onChange={(e) => handleTimeChange(key, "close", e.target.value)}
+                        className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] dark:bg-[#212225] px-2.5 py-1.5 text-sm text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none"
+                      />
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
-
-      <div className="flex justify-end gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={saving}
-          onClick={() => {
-            if (!petshop) return;
-            const initial = Object.fromEntries(
-              DIAS.map(({ key }) => [
-                key,
-                {
-                  enabled: [
-                    "monday",
-                    "tuesday",
-                    "wednesday",
-                    "thursday",
-                    "friday",
-                  ].includes(key),
-                  open: "09:00",
-                  close: "18:00",
-                },
-              ]),
+              </div>
             );
-            if (petshop.businessHours) {
-              Object.entries(petshop.businessHours).forEach(([key, val]) => {
-                if (val?.open && val?.close)
-                  initial[key] = {
-                    enabled: true,
-                    open: val.open,
-                    close: val.close,
-                  };
-                else if (val?.closed)
-                  initial[key] = { ...initial[key], enabled: false };
-              });
-            }
-            setHours(initial);
-            setDefaultCapacity(petshop.defaultCapacityPerHour ?? 8);
-            const custom =
-              petshop.customCapacityHours as PetshopCustomCapacityHours | null;
-            if (custom?.hourly) {
-              const hourly = Object.entries(custom.hourly).flatMap(
-                ([day, dayHours]) =>
-                  Object.entries(dayHours).map(([hour, capacity]) => ({
-                    day,
-                    hour,
-                    capacity,
-                  })),
-              );
-              setHourlyCapacities(sortHourlyCapacities(hourly));
-            } else {
-              setHourlyCapacities([]);
-            }
-          }}
-        >
+          })}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pt-2">
+        <Button type="button" variant="outline" disabled={saving} onClick={handleCancel}>
           Cancelar
         </Button>
         <Button type="button" onClick={handleSave} disabled={saving}>
@@ -1472,81 +1996,6 @@ function HorariosContent({
           )}
         </Button>
       </div>
-
-      {/* Modal - Adicionar Capacidade por Hora */}
-      <Modal
-        isOpen={hourlyModalOpen}
-        onClose={() => setHourlyModalOpen(false)}
-        title="Adicionar Capacidade por Hora"
-        className="max-w-[400px]"
-      >
-        <div className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-              Dia da semana
-            </label>
-            <select
-              value={hourlyDay}
-              onChange={(e) => setHourlyDay(e.target.value)}
-              className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
-            >
-              {DIAS.map(({ key, label }) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-              Hora
-            </label>
-            <select
-              value={hourlyHour}
-              onChange={(e) => setHourlyHour(e.target.value)}
-              disabled={getHourlyOptionsForDay(hourlyDay).length === 0}
-              className="w-full rounded-lg border border-[#727B8E]/20 bg-white px-3 py-2 text-sm text-[#434A57] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#40485A] dark:bg-[#1A1B1D] dark:text-[#f5f9fc]"
-            >
-              {getHourlyOptionsForDay(hourlyDay).length > 0 ? (
-                getHourlyOptionsForDay(hourlyDay).map((hour) => (
-                  <option key={hour} value={hour}>
-                    {hour}
-                  </option>
-                ))
-              ) : (
-                <option value="">Nenhum horário disponível</option>
-              )}
-            </select>
-            <p className="mt-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-              Apenas horários válidos para o weekday selecionado são enviados.
-            </p>
-          </div>
-          <Input
-            label="Capacidade (serviços/hora)"
-            type="number"
-            placeholder="10"
-            value={hourlyCap}
-            onChange={(e) => setHourlyCap(e.target.value)}
-            min="1"
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setHourlyModalOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={handleAddHourlyCapacity}
-              disabled={getHourlyOptionsForDay(hourlyDay).length === 0}
-            >
-              Adicionar
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
@@ -1747,6 +2196,463 @@ function IAPlaygroundContent() {
   );
 }
 
+// ─── Hospedagem ──────────────────────────────────────────────────────────────
+const LODGING_DAY_NAMES = [
+  { dayOfWeek: 1, key: "monday", label: "Segunda-feira" },
+  { dayOfWeek: 2, key: "tuesday", label: "Terça-feira" },
+  { dayOfWeek: 3, key: "wednesday", label: "Quarta-feira" },
+  { dayOfWeek: 4, key: "thursday", label: "Quinta-feira" },
+  { dayOfWeek: 5, key: "friday", label: "Sexta-feira" },
+  { dayOfWeek: 6, key: "saturday", label: "Sábado" },
+  { dayOfWeek: 0, key: "sunday", label: "Domingo" },
+] as const;
+
+function isLodgingDayClosed(
+  businessHours: Record<string, any> | undefined,
+  dayKey: string,
+): boolean {
+  if (!businessHours) return false;
+  const day = businessHours[dayKey];
+  if (!day) return false;
+  return day.closed === true || (!day.open && !day.close);
+}
+
+function HospedagemContent({ petshop }: { petshop: Petshop | null }) {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savingCapacity, setSavingCapacity] = useState(false);
+
+  const [hotelEnabled, setHotelEnabled] = useState(false);
+  const [hotelDailyRate, setHotelDailyRate] = useState("");
+  const [hotelCheckinTime, setHotelCheckinTime] = useState("08:00");
+  const [hotelCheckoutTime, setHotelCheckoutTime] = useState("18:00");
+  const [hotelCapacities, setHotelCapacities] = useState<
+    Record<number, number>
+  >({});
+
+  const [daycareEnabled, setDaycareEnabled] = useState(false);
+  const [daycareDailyRate, setDaycareDailyRate] = useState("");
+  const [daycareCheckinTime, setDaycareCheckinTime] = useState("07:00");
+  const [daycareCheckoutTime, setDaycareCheckoutTime] = useState("19:00");
+  const [daycareCapacities, setDaycareCapacities] = useState<
+    Record<number, number>
+  >({});
+  const [defaultHotelCap, setDefaultHotelCap] = useState(5);
+  const [defaultDaycareCap, setDefaultDaycareCap] = useState(5);
+
+  useEffect(() => {
+    lodgingConfigService
+      .get()
+      .then((cfg: LodgingConfig) => {
+        setHotelEnabled(cfg.hotel_enabled);
+        setHotelDailyRate(
+          cfg.hotel_daily_rate != null ? String(cfg.hotel_daily_rate) : "",
+        );
+        setHotelCheckinTime(cfg.hotel_checkin_time);
+        setHotelCheckoutTime(cfg.hotel_checkout_time);
+        setDaycareEnabled(cfg.daycare_enabled);
+        setDaycareDailyRate(
+          cfg.daycare_daily_rate != null ? String(cfg.daycare_daily_rate) : "",
+        );
+        setDaycareCheckinTime(cfg.daycare_checkin_time);
+        setDaycareCheckoutTime(cfg.daycare_checkout_time);
+        const hCap: Record<number, number> = {};
+        const dCap: Record<number, number> = {};
+        cfg.capacities.forEach((c) => {
+          if (c.type === "hotel") hCap[c.day_of_week] = c.max_capacity;
+          else dCap[c.day_of_week] = c.max_capacity;
+        });
+        setHotelCapacities(hCap);
+        setDaycareCapacities(dCap);
+      })
+      .catch(() =>
+        toast.error(
+          "Erro",
+          "Não foi possível carregar as configurações de hospedagem.",
+        ),
+      )
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSaveConfig = async () => {
+    setSaving(true);
+    try {
+      await lodgingConfigService.update({
+        hotel_enabled: hotelEnabled,
+        hotel_daily_rate: hotelDailyRate ? Number(hotelDailyRate) : undefined,
+        hotel_checkin_time: hotelCheckinTime,
+        hotel_checkout_time: hotelCheckoutTime,
+        daycare_enabled: daycareEnabled,
+        daycare_daily_rate: daycareDailyRate
+          ? Number(daycareDailyRate)
+          : undefined,
+        daycare_checkin_time: daycareCheckinTime,
+        daycare_checkout_time: daycareCheckoutTime,
+      });
+      toast.success(
+        "Configurações salvas!",
+        "As configurações de hospedagem foram atualizadas.",
+      );
+    } catch {
+      toast.error("Erro", "Não foi possível salvar as configurações.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveCapacities = async () => {
+    setSavingCapacity(true);
+    try {
+      const bh = petshop?.businessHours as Record<string, any> | undefined;
+      const capacities = LODGING_DAY_NAMES.flatMap(({ dayOfWeek, key }) => {
+        const closed = isLodgingDayClosed(bh, key);
+        return [
+          {
+            type: "hotel" as const,
+            day_of_week: dayOfWeek,
+            max_capacity: closed ? 0 : (hotelCapacities[dayOfWeek] ?? 0),
+            is_active: !closed,
+          },
+          {
+            type: "daycare" as const,
+            day_of_week: dayOfWeek,
+            max_capacity: closed ? 0 : (daycareCapacities[dayOfWeek] ?? 0),
+            is_active: !closed,
+          },
+        ];
+      });
+      await lodgingConfigService.upsertCapacities(capacities);
+      toast.success("Vagas salvas!", "A capacidade por dia foi atualizada.");
+    } catch {
+      toast.error("Erro", "Não foi possível salvar as vagas.");
+    } finally {
+      setSavingCapacity(false);
+    }
+  };
+
+  const applyDefaultCapacities = (type: "hotel" | "daycare") => {
+    const bh = petshop?.businessHours as Record<string, any> | undefined;
+    if (type === "hotel") {
+      const next: Record<number, number> = { ...hotelCapacities };
+      LODGING_DAY_NAMES.forEach(({ dayOfWeek, key }) => {
+        if (!isLodgingDayClosed(bh, key)) next[dayOfWeek] = defaultHotelCap;
+      });
+      setHotelCapacities(next);
+    } else {
+      const next: Record<number, number> = { ...daycareCapacities };
+      LODGING_DAY_NAMES.forEach(({ dayOfWeek, key }) => {
+        if (!isLodgingDayClosed(bh, key)) next[dayOfWeek] = defaultDaycareCap;
+      });
+      setDaycareCapacities(next);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[#727B8E] dark:text-[#8a94a6]">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Carregando...
+      </div>
+    );
+  }
+
+  const bh = petshop?.businessHours as Record<string, any> | undefined;
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* ─── Hotel ─── */}
+      <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+              Hotel
+            </p>
+            <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+              Hospedagem noturna para pets.
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={hotelEnabled}
+              onChange={(e) => setHotelEnabled(e.target.checked)}
+            />
+            <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
+          </label>
+        </div>
+        {hotelEnabled && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Diária (R$)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={hotelDailyRate}
+                onChange={(e) => setHotelDailyRate(e.target.value)}
+                placeholder="0,00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Horário de check-in
+              </label>
+              <Input
+                type="time"
+                value={hotelCheckinTime}
+                onChange={(e) => setHotelCheckinTime(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Horário de check-out
+              </label>
+              <Input
+                type="time"
+                value={hotelCheckoutTime}
+                onChange={(e) => setHotelCheckoutTime(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ─── Creche ─── */}
+      <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+              Creche
+            </p>
+            <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+              Cuidados diurnos e atividades para pets.
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={daycareEnabled}
+              onChange={(e) => setDaycareEnabled(e.target.checked)}
+            />
+            <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
+          </label>
+        </div>
+        {daycareEnabled && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Diária (R$)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={daycareDailyRate}
+                onChange={(e) => setDaycareDailyRate(e.target.value)}
+                placeholder="0,00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Horário de entrada
+              </label>
+              <Input
+                type="time"
+                value={daycareCheckinTime}
+                onChange={(e) => setDaycareCheckinTime(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Horário de saída
+              </label>
+              <Input
+                type="time"
+                value={daycareCheckoutTime}
+                onChange={(e) => setDaycareCheckoutTime(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <Button
+          onClick={handleSaveConfig}
+          disabled={saving}
+          size="sm"
+          className="flex items-center gap-2"
+        >
+          {saving ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Salvando...
+            </>
+          ) : (
+            "Salvar configurações"
+          )}
+        </Button>
+      </div>
+
+      {/* ─── Vagas por dia ─── */}
+      {(hotelEnabled || daycareEnabled) && (
+        <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                Vagas por dia
+              </p>
+              <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+                Dias fechados (conforme horário comercial) são desabilitados automaticamente.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick-fill defaults */}
+          <div className="flex flex-wrap gap-4 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] px-4 py-3">
+            <p className="w-full text-[11px] font-semibold uppercase tracking-wide text-[#727B8E]">Preenchimento rápido</p>
+            {hotelEnabled && (
+              <div className="flex items-end gap-2">
+                <div>
+                  <p className="mb-1 text-xs text-[#727B8E]">Padrão Hotel</p>
+                  <input
+                    type="number"
+                    min="0"
+                    value={defaultHotelCap}
+                    onChange={(e) => setDefaultHotelCap(Number(e.target.value))}
+                    className="w-20 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-2 py-1.5 text-sm text-center text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyDefaultCapacities("hotel")}
+                  className="rounded-lg border border-[#1E62EC]/25 bg-[#1E62EC]/10 px-3 py-1.5 text-xs font-medium text-[#1E62EC] hover:bg-[#1E62EC]/20 transition-colors"
+                >
+                  Aplicar nos abertos
+                </button>
+              </div>
+            )}
+            {daycareEnabled && (
+              <div className="flex items-end gap-2">
+                <div>
+                  <p className="mb-1 text-xs text-[#727B8E]">Padrão Creche</p>
+                  <input
+                    type="number"
+                    min="0"
+                    value={defaultDaycareCap}
+                    onChange={(e) => setDefaultDaycareCap(Number(e.target.value))}
+                    className="w-20 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-2 py-1.5 text-sm text-center text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyDefaultCapacities("daycare")}
+                  className="rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 py-1.5 text-xs font-medium text-[#8B5CF6] hover:bg-[#8B5CF6]/20 transition-colors"
+                >
+                  Aplicar nos abertos
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#727B8E]/10">
+                  <th className="text-left text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 pr-4">
+                    Dia
+                  </th>
+                  {hotelEnabled && (
+                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-2">
+                      Hotel
+                    </th>
+                  )}
+                  {daycareEnabled && (
+                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-2">
+                      Creche
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {LODGING_DAY_NAMES.map(({ dayOfWeek, key, label }) => {
+                  const closed = isLodgingDayClosed(bh, key);
+                  return (
+                    <tr
+                      key={dayOfWeek}
+                      className={cn("border-b border-[#727B8E]/5 last:border-0", closed && "opacity-40")}
+                    >
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("text-sm font-medium", closed ? "text-[#727B8E]" : "text-[#434A57] dark:text-[#f5f9fc]")}>
+                            {label}
+                          </span>
+                          {closed && (
+                            <span className="rounded-full bg-[#727B8E]/10 px-1.5 py-0.5 text-[10px] text-[#727B8E]">
+                              Fechado
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      {hotelEnabled && (
+                        <td className="py-2.5 px-2 text-center">
+                          <input
+                            type="number"
+                            min="0"
+                            disabled={closed}
+                            value={closed ? 0 : (hotelCapacities[dayOfWeek] ?? 0)}
+                            onChange={(e) => setHotelCapacities((p) => ({ ...p, [dayOfWeek]: Number(e.target.value) }))}
+                            className="w-20 mx-auto text-center rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-2 py-1.5 text-sm text-[#434A57] dark:text-[#f5f9fc] disabled:opacity-40 focus:border-[#1E62EC] focus:outline-none"
+                          />
+                        </td>
+                      )}
+                      {daycareEnabled && (
+                        <td className="py-2.5 px-2 text-center">
+                          <input
+                            type="number"
+                            min="0"
+                            disabled={closed}
+                            value={closed ? 0 : (daycareCapacities[dayOfWeek] ?? 0)}
+                            onChange={(e) => setDaycareCapacities((p) => ({ ...p, [dayOfWeek]: Number(e.target.value) }))}
+                            className="w-20 mx-auto text-center rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-2 py-1.5 text-sm text-[#434A57] dark:text-[#f5f9fc] disabled:opacity-40 focus:border-[#1E62EC] focus:outline-none"
+                          />
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              onClick={handleSaveCapacities}
+              disabled={savingCapacity}
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              {savingCapacity ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                "Salvar vagas"
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ConfiguracoesPage() {
   const { user, logout } = useAuthContext();
   const petshopId = user?.petshop_id ?? 0;
@@ -1754,6 +2660,23 @@ export default function ConfiguracoesPage() {
 
   const [activeTab, setActiveTab] = useState<SettingsTabId>("servicos");
   const contentScrollRef = useRef<HTMLDivElement>(null);
+  const [generatingSlots, setGeneratingSlots] = useState(false);
+  const [generateDays, setGenerateDays] = useState(30);
+
+  const handleGenerateSlots = useCallback(async () => {
+    setGeneratingSlots(true);
+    try {
+      const result = await settingsService.generateSlots(generateDays);
+      const msg = result.warning
+        ? `${result.slots_created} slots criados. ${result.warning}`
+        : `${result.slots_created} slots criados para ${result.days_generated} dia(s).`;
+      toast.success("Slots gerados", msg);
+    } catch {
+      toast.error("Erro", "Não foi possível gerar os slots.");
+    } finally {
+      setGeneratingSlots(false);
+    }
+  }, [generateDays, toast]);
   const [petshop, setPetshop] = useState<Petshop | null>(null);
   const [petshopError, setPetshopError] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -1770,12 +2693,15 @@ export default function ConfiguracoesPage() {
   } | null>(null);
   const [loadingPetshop, setLoadingPetshop] = useState(true);
   const [loadingServices, setLoadingServices] = useState(true);
+  const [loadingSpecialties, setLoadingSpecialties] = useState(false);
   const [loadingWhatsapp, setLoadingWhatsapp] = useState(true);
   const [loadingPayment, setLoadingPayment] = useState(true);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [editingData, setEditingData] = useState({
     name: "",
+    specialty_id: "",
     duration_minutes: 30,
     price: "",
     description: "",
@@ -1783,11 +2709,13 @@ export default function ConfiguracoesPage() {
     price_small: "",
     price_medium: "",
     price_large: "",
+    duration_multiplier_large: false,
   });
 
   const [newServiceModalOpen, setNewServiceModalOpen] = useState(false);
   const [newServiceData, setNewServiceData] = useState({
-    specialty: "",
+    name: "",
+    specialty_id: "",
     service_type: "",
     duration_minutes: 30,
     price: 0,
@@ -1796,6 +2724,7 @@ export default function ConfiguracoesPage() {
     price_small: 0,
     price_medium: 0,
     price_large: 0,
+    duration_multiplier_large: false,
   });
   const [priceDisplay, setPriceDisplay] = useState({
     price: "",
@@ -1845,50 +2774,85 @@ export default function ConfiguracoesPage() {
     }
   }, [petshopId]);
 
+  const fetchSpecialties = useCallback(async () => {
+    try {
+      setLoadingSpecialties(true);
+      const list = await specialtyService.list();
+      setSpecialties(list);
+    } catch (error) {
+      console.error("Erro ao carregar especialidades:", error);
+      setSpecialties([]);
+    } finally {
+      setLoadingSpecialties(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchPetshop();
   }, [fetchPetshop]);
 
-  useEffect(() => {
-    fetchServices();
-  }, [fetchServices]);
+  // Lazy-load: fetch data only when the relevant tab becomes active
+  const servicesLoadedRef = useRef(false);
+  const specialtiesLoadedRef = useRef(false);
+  const whatsappLoadedRef = useRef(false);
+  const paymentLoadedRef = useRef(false);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await whatsappService.getStatus();
-        setWhatsappStatus({
-          status: data.status,
-          phone: data.phone,
-          last_connected: (data as any).last_connected,
-          error_message: (data as any).error_message,
-        });
-      } catch {
-        setWhatsappStatus(null);
-      } finally {
-        setLoadingWhatsapp(false);
-      }
-    };
-    load();
-  }, []);
+    if (activeTab === "servicos" && !specialtiesLoadedRef.current) {
+      specialtiesLoadedRef.current = true;
+      fetchSpecialties();
+    }
+  }, [activeTab, fetchSpecialties]);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await paymentService.getStats();
-        setPaymentStats({
-          total_revenue: data.total_revenue,
-          total_payments: data.total_payments,
-          average_ticket: data.average_ticket,
-        });
-      } catch {
-        setPaymentStats(null);
-      } finally {
-        setLoadingPayment(false);
-      }
-    };
-    load();
-  }, []);
+    if (activeTab === "servicos" && !servicesLoadedRef.current) {
+      servicesLoadedRef.current = true;
+      fetchServices();
+    }
+  }, [activeTab, fetchServices]);
+
+  useEffect(() => {
+    if (activeTab === "whatsapp" && !whatsappLoadedRef.current) {
+      whatsappLoadedRef.current = true;
+      const load = async () => {
+        try {
+          const data = await whatsappService.getStatus();
+          setWhatsappStatus({
+            status: data.status,
+            phone: data.phone,
+            last_connected: (data as any).last_connected,
+            error_message: (data as any).error_message,
+          });
+        } catch {
+          setWhatsappStatus(null);
+        } finally {
+          setLoadingWhatsapp(false);
+        }
+      };
+      load();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "pagamento" && !paymentLoadedRef.current) {
+      paymentLoadedRef.current = true;
+      const load = async () => {
+        try {
+          const data = await paymentService.getStats();
+          setPaymentStats({
+            total_revenue: data.total_revenue,
+            total_payments: data.total_payments,
+            average_ticket: data.average_ticket,
+          });
+        } catch {
+          setPaymentStats(null);
+        } finally {
+          setLoadingPayment(false);
+        }
+      };
+      load();
+    }
+  }, [activeTab]);
 
   const handleSaveEmpresa = useCallback(
     async (data: {
@@ -1957,6 +2921,7 @@ export default function ConfiguracoesPage() {
     setSelectedService(null);
     setEditingData({
       name: "",
+      specialty_id: "",
       duration_minutes: 30,
       price: "",
       description: "",
@@ -1964,6 +2929,7 @@ export default function ConfiguracoesPage() {
       price_small: "",
       price_medium: "",
       price_large: "",
+      duration_multiplier_large: false,
     });
   };
 
@@ -1977,6 +2943,7 @@ export default function ConfiguracoesPage() {
       );
       setEditingData({
         name: selectedService.name,
+        specialty_id: selectedService.specialtyId || "",
         duration_minutes: selectedService.durationMin || 30,
         price: selectedService.price?.toString() || "",
         description: selectedService.description || "",
@@ -1984,6 +2951,8 @@ export default function ConfiguracoesPage() {
         price_small: selectedService.priceBySize?.small?.toString() || "",
         price_medium: selectedService.priceBySize?.medium?.toString() || "",
         price_large: selectedService.priceBySize?.large?.toString() || "",
+        duration_multiplier_large:
+          selectedService.durationMultiplierLarge === 2,
       });
     }
   }, [selectedService]);
@@ -2004,6 +2973,7 @@ export default function ConfiguracoesPage() {
     try {
       await serviceService.updateService(selectedService.id, {
         name: editingData.name,
+        specialty_id: editingData.specialty_id || null,
         duration_min: editingData.duration_minutes,
         price: editingData.price_varies_by_size
           ? null
@@ -2024,6 +2994,9 @@ export default function ConfiguracoesPage() {
                 : undefined,
             }
           : null,
+        duration_multiplier_large: editingData.duration_multiplier_large
+          ? 2
+          : 1,
       });
       toast.success("Sucesso!", "Serviço atualizado com sucesso.");
       handleCloseEditModal();
@@ -2034,14 +3007,40 @@ export default function ConfiguracoesPage() {
     }
   };
 
-  const handleOpenNewServiceModal = () => {
+  const handleCreateSpecialty = async (name: string, color?: string): Promise<string> => {
+    const sp = await specialtyService.create({ name, color });
+    specialtiesLoadedRef.current = false;
+    await fetchSpecialties();
+    return sp.id;
+  };
+
+  const handleDeleteSpecialty = async (id: string) => {
+    await specialtyService.delete(id);
+    specialtiesLoadedRef.current = false;
+    await fetchSpecialties();
+  };
+
+  const handleToggleSpecialty = async (id: string, active: boolean) => {
+    await specialtyService.update(id, { is_active: active });
+    specialtiesLoadedRef.current = false;
+    await fetchSpecialties();
+  };
+
+  const handleOpenNewServiceModal = (preselectedSpecialtyId?: string) => {
+    if (preselectedSpecialtyId) {
+      setNewServiceData((prev) => ({
+        ...prev,
+        specialty_id: preselectedSpecialtyId,
+      }));
+    }
     setNewServiceModalOpen(true);
   };
 
   const handleCloseNewServiceModal = () => {
     setNewServiceModalOpen(false);
     setNewServiceData({
-      specialty: "",
+      name: "",
+      specialty_id: "",
       service_type: "",
       duration_minutes: 30,
       price: 0,
@@ -2050,6 +3049,7 @@ export default function ConfiguracoesPage() {
       price_small: 0,
       price_medium: 0,
       price_large: 0,
+      duration_multiplier_large: false,
     });
     setPriceDisplay({
       price: "",
@@ -2100,10 +3100,17 @@ export default function ConfiguracoesPage() {
   }, [activeTab]);
 
   const handleCreateService = async () => {
-    if (!newServiceData.specialty) {
+    if (!newServiceData.name.trim()) {
       toast.warning(
         "Preencha os campos obrigatórios",
         "O nome do serviço é obrigatório.",
+      );
+      return;
+    }
+    if (!newServiceData.specialty_id) {
+      toast.warning(
+        "Especialidade obrigatória",
+        "Vincule o serviço a uma especialidade.",
       );
       return;
     }
@@ -2111,7 +3118,8 @@ export default function ConfiguracoesPage() {
     setCreatingService(true);
     try {
       await serviceService.createService({
-        name: newServiceData.specialty,
+        name: newServiceData.name,
+        specialty_id: newServiceData.specialty_id,
         duration_min: newServiceData.duration_minutes,
         price: newServiceData.price_varies_by_size
           ? undefined
@@ -2124,12 +3132,15 @@ export default function ConfiguracoesPage() {
               large: newServiceData.price_large || undefined,
             }
           : undefined,
+        duration_multiplier_large: newServiceData.duration_multiplier_large
+          ? 2
+          : 1,
       });
       handleCloseNewServiceModal();
       await fetchServices();
       toast.success(
         "Serviço criado!",
-        `O serviço "${newServiceData.specialty}" foi adicionado com sucesso.`,
+        `O serviço "${newServiceData.name}" foi adicionado com sucesso.`,
       );
     } catch (error) {
       console.error("Erro ao criar serviço:", error);
@@ -2148,12 +3159,21 @@ export default function ConfiguracoesPage() {
         return (
           <ServicosContent
             services={services}
+            specialties={specialties}
             loading={loadingServices}
+            loadingSpecialties={loadingSpecialties}
             petshopId={petshopId}
+            petshop={petshop}
             onEditService={handleEditService}
             onRefresh={fetchServices}
+            onCreateSpecialty={handleCreateSpecialty}
+            onDeleteSpecialty={handleDeleteSpecialty}
+            onNewService={handleOpenNewServiceModal}
+            onRefreshSpecialties={fetchSpecialties}
           />
         );
+      case "hospedagem":
+        return <HospedagemContent petshop={petshop} />;
       case "empresa":
         return (
           <EmpresaContent
@@ -2204,9 +3224,13 @@ export default function ConfiguracoesPage() {
                 petshop={petshop}
                 loading={loadingPetshop}
                 error={petshopError}
-                showNovoServico={activeTab === "servicos"}
+                showNovoServico={false}
                 onNovoServico={handleOpenNewServiceModal}
                 onLogout={logout}
+                onGenerateSlots={handleGenerateSlots}
+                generatingSlots={generatingSlots}
+                generateDays={generateDays}
+                onGenerateDaysChange={setGenerateDays}
               />
             </div>
 
@@ -2240,6 +3264,27 @@ export default function ConfiguracoesPage() {
             value={editingData.name}
             onChange={(e) => handleEditingDataChange("name", e.target.value)}
           />
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              Especialidade
+            </label>
+            <select
+              value={editingData.specialty_id}
+              onChange={(e) =>
+                handleEditingDataChange("specialty_id", e.target.value)
+              }
+              className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
+            >
+              <option value="">— Sem especialidade —</option>
+              {specialties.map((sp) => (
+                <option key={sp.id} value={sp.id}>
+                  {sp.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <Input
             label="Duração (minutos)"
             type="number"
@@ -2253,6 +3298,38 @@ export default function ConfiguracoesPage() {
             min="15"
             step="15"
           />
+
+          <div className="flex items-center justify-between rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] px-4 py-3">
+            <div className="flex-1">
+              <label
+                htmlFor="edit_duration_multiplier"
+                className="cursor-pointer text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                Pets de porte grande (G e GG) ocupam o dobro do tempo
+              </label>
+              <p className="text-xs font-normal text-[#727B8E]">
+                Reserva dois slots consecutivos para porte G/GG
+              </p>
+            </div>
+            <label
+              htmlFor="edit_duration_multiplier"
+              className="relative inline-flex cursor-pointer items-center"
+            >
+              <input
+                type="checkbox"
+                id="edit_duration_multiplier"
+                checked={editingData.duration_multiplier_large}
+                onChange={(e) =>
+                  handleEditingDataChange(
+                    "duration_multiplier_large",
+                    e.target.checked,
+                  )
+                }
+                className="peer sr-only"
+              />
+              <div className="peer h-6 w-11 rounded-full bg-[#727B8E]/30 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[#1E62EC] peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#1E62EC]/20"></div>
+            </label>
+          </div>
 
           <div className="flex items-center justify-between rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] px-4 py-3">
             <div className="flex-1">
@@ -2364,21 +3441,36 @@ export default function ConfiguracoesPage() {
       >
         <div className="flex flex-col gap-4">
           <Input
-            label="Nome do serviço"
+            label="Nome do serviço *"
             placeholder="Ex: Banho e Tosa"
-            value={newServiceData.specialty}
-            onChange={(e) =>
-              handleNewServiceChange("specialty", e.target.value)
-            }
+            value={newServiceData.name}
+            onChange={(e) => handleNewServiceChange("name", e.target.value)}
           />
-          <Input
-            label="Tipo de serviço"
-            placeholder="Ex: Estética"
-            value={newServiceData.service_type}
-            onChange={(e) =>
-              handleNewServiceChange("service_type", e.target.value)
-            }
-          />
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              Especialidade *
+            </label>
+            <select
+              value={newServiceData.specialty_id}
+              onChange={(e) =>
+                handleNewServiceChange("specialty_id", e.target.value)
+              }
+              className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
+            >
+              <option value="">— Selecione uma especialidade —</option>
+              {specialties.map((sp) => (
+                <option key={sp.id} value={sp.id}>
+                  {sp.name}
+                </option>
+              ))}
+            </select>
+            {specialties.length === 0 && (
+              <p className="mt-1 text-xs text-amber-600">
+                Crie uma especialidade antes de adicionar serviços.
+              </p>
+            )}
+          </div>
 
           <Input
             label="Duração (minutos)"
@@ -2398,7 +3490,7 @@ export default function ConfiguracoesPage() {
               Descrição
             </label>
             <TextArea
-              rows={4}
+              rows={3}
               placeholder="Descreva o serviço..."
               value={newServiceData.description}
               onChange={(e) =>
@@ -2410,8 +3502,40 @@ export default function ConfiguracoesPage() {
           <div className="flex items-center justify-between rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] px-4 py-3">
             <div className="flex-1">
               <label
+                htmlFor="new_duration_multiplier"
+                className="cursor-pointer text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                Pets G/GG ocupam o dobro do tempo
+              </label>
+              <p className="text-xs font-normal text-[#727B8E]">
+                Reserva dois slots consecutivos para porte G/GG
+              </p>
+            </div>
+            <label
+              htmlFor="new_duration_multiplier"
+              className="relative inline-flex cursor-pointer items-center"
+            >
+              <input
+                type="checkbox"
+                id="new_duration_multiplier"
+                checked={newServiceData.duration_multiplier_large}
+                onChange={(e) =>
+                  handleNewServiceChange(
+                    "duration_multiplier_large",
+                    e.target.checked,
+                  )
+                }
+                className="peer sr-only"
+              />
+              <div className="peer h-6 w-11 rounded-full bg-[#727B8E]/30 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[#1E62EC] peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#1E62EC]/20"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] px-4 py-3">
+            <div className="flex-1">
+              <label
                 htmlFor="price_varies_by_size"
-                className="cursor-pointer text-sm font-medium text-white"
+                className="cursor-pointer text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]"
               >
                 Preço varia por porte?
               </label>
@@ -2435,7 +3559,7 @@ export default function ConfiguracoesPage() {
                 }
                 className="peer sr-only"
               />
-              <div className="peer h-6 w-11 rounded-full bg-[#1A1B1D] after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[#1E62EC] peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#1E62EC]/20"></div>
+              <div className="peer h-6 w-11 rounded-full bg-[#727B8E]/30 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[#1E62EC] peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#1E62EC]/20"></div>
             </label>
           </div>
 
