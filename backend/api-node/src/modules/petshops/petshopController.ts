@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
+import { attachBusinessHoursToPetshopJson } from '../../lib/businessHoursTable'
 
 // GET /petshops - List all petshops
 export async function listPetshops(req: Request, res: Response) {
@@ -16,7 +17,8 @@ export async function listPetshops(req: Request, res: Response) {
       orderBy: { createdAt: 'desc' },
     })
 
-    res.json(petshops)
+    const withHours = await Promise.all(petshops.map((p) => attachBusinessHoursToPetshopJson(p)))
+    res.json(withHours)
   } catch (error) {
     console.error('Error listing petshops:', error)
     res.status(500).json({ error: 'Failed to list petshops' })
@@ -32,7 +34,7 @@ export async function getPetshop(req: Request, res: Response) {
       include: { company: true },
     })
     if (!petshop) return res.status(404).json({ error: 'Petshop not found' })
-    res.json(petshop)
+    res.json(await attachBusinessHoursToPetshopJson(petshop))
   } catch (error) {
     console.error('Error getting petshop:', error)
     res.status(500).json({ error: 'Failed to get petshop' })
@@ -42,17 +44,29 @@ export async function getPetshop(req: Request, res: Response) {
 // POST /petshops
 export async function createPetshop(req: Request, res: Response) {
   try {
-    const { company_id, address, cep, phone, latitude, longitude, owner_phone, emergency_contact, assistant_name, business_hours } = req.body
+    const { company_id, address, cep, phone, latitude, longitude, owner_phone, emergency_contact, assistant_name } = req.body
     if (!company_id || !phone) return res.status(400).json({ error: 'company_id and phone are required' })
 
     const existing = await prisma.petshopProfile.findUnique({ where: { companyId: company_id } })
     if (existing) return res.status(409).json({ error: 'Petshop already exists for this company' })
 
     const petshop = await prisma.petshopProfile.create({
-      data: { companyId: company_id, address, cep, phone, latitude, longitude, ownerPhone: owner_phone, emergencyContact: emergency_contact, assistantName: assistant_name, businessHours: business_hours, isActive: true },
+      data: {
+        companyId: company_id,
+        address,
+        cep,
+        phone,
+        latitude,
+        longitude,
+        ownerPhone: owner_phone,
+        emergencyContact: emergency_contact,
+        assistantName: assistant_name,
+        isActive: true,
+      },
+      include: { company: true },
     })
 
-    res.status(201).json(petshop)
+    res.status(201).json(await attachBusinessHoursToPetshopJson(petshop))
   } catch (error) {
     console.error('Error creating petshop:', error)
     res.status(500).json({ error: 'Failed to create petshop' })
@@ -63,7 +77,7 @@ export async function createPetshop(req: Request, res: Response) {
 export async function updatePetshop(req: Request, res: Response) {
   try {
     const { petshopId } = req.params
-    const { address, cep, phone, latitude, longitude, owner_phone, emergency_contact, assistant_name, business_hours, company_name, is_active } = req.body
+    const { address, cep, phone, latitude, longitude, owner_phone, emergency_contact, assistant_name, company_name, is_active } = req.body
 
     const existing = await prisma.petshopProfile.findUnique({ where: { id: parseInt(petshopId as any) } })
     if (!existing) return res.status(404).json({ error: 'Petshop not found' })
@@ -81,7 +95,6 @@ export async function updatePetshop(req: Request, res: Response) {
     if (owner_phone !== undefined) data.ownerPhone = owner_phone
     if (emergency_contact !== undefined) data.emergencyContact = emergency_contact
     if (assistant_name !== undefined) data.assistantName = assistant_name
-    if (business_hours !== undefined) data.businessHours = business_hours
     if (is_active !== undefined) data.isActive = is_active
 
     const petshop = await prisma.petshopProfile.update({
@@ -90,7 +103,7 @@ export async function updatePetshop(req: Request, res: Response) {
       include: { company: true },
     })
 
-    res.json(petshop)
+    res.json(await attachBusinessHoursToPetshopJson(petshop))
   } catch (error) {
     console.error('Error updating petshop:', error)
     res.status(500).json({ error: 'Failed to update petshop' })
@@ -106,7 +119,7 @@ export async function getPetshopInfo(req: Request, res: Response) {
       include: { company: true },
     })
     if (!petshop) return res.status(404).json({ error: 'Petshop not found' })
-    res.json(petshop)
+    res.json(await attachBusinessHoursToPetshopJson(petshop))
   } catch (error) {
     console.error('Error getting petshop info:', error)
     res.status(500).json({ error: 'Failed to get petshop info' })

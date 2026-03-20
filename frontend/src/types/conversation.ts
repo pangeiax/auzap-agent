@@ -14,6 +14,7 @@ export interface Conversation {
   client_id: string
   client_name?: string
   client_phone?: string
+  client_manual_phone?: string | null
   started_at: string
   last_message_at: string
   message_count: number
@@ -29,6 +30,7 @@ export interface ConversationDetail {
   client_id: string
   client_name?: string
   client_phone?: string
+  client_manual_phone?: string | null
   messages: ChatMessage[]
   stage?: string
   specialty_detected?: string

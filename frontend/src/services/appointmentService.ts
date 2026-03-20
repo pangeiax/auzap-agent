@@ -67,6 +67,16 @@ export const appointmentService = {
     return response.data
   },
 
+  async deleteAppointment(appointmentId: string): Promise<{
+    success: boolean
+    appointment_id: string
+  }> {
+    const response = await api.delete(
+      `/appointments/${appointmentId}/delete`,
+    )
+    return response.data
+  },
+
   async rescheduleAppointment(
     appointmentId: string,
     rescheduleData: RescheduleRequest
@@ -94,10 +104,12 @@ export const appointmentService = {
   async getAvailableSlots(params: {
     date: string
     service_id?: string
+    pet_id?: string
   }): Promise<AvailableSlotsResponse> {
+    // Evita cache de GET no browser/proxy; vagas mudam após cada agendamento
     const response = await api.get<AvailableSlotsResponse>(
       '/appointments/available-slots',
-      { params }
+      { params: { ...params, _t: Date.now() } },
     )
     return response.data
   },
@@ -105,6 +117,8 @@ export const appointmentService = {
   async getAvailableDates(params: {
     year: number
     month: number
+    service_id?: string
+    pet_id?: string
   }): Promise<{
     dates: string[]
     by_date: Record<string, 'closed' | 'full' | 'available'>

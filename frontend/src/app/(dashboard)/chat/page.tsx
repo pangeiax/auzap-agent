@@ -30,10 +30,18 @@ function getCurrentTime(): string {
 function mapApiConversation(conv: Conversation): MockConversation {
   const conversationId = conv.id || conv.conversation_id || "";
 
+  const manual = conv.client_manual_phone ?? null;
+  const shouldFallback =
+    !manual ||
+    manual.includes("@") ||
+    /[a-z]/i.test(manual.toString());
+  const displayPhone = shouldFallback ? "Numero nao identificado" : manual!;
+
   return {
     id: conversationId,
     name: conv.client_name || "Cliente",
-    phone: conv.client_phone || "",
+    phone: displayPhone,
+    whatsappPhone: conv.client_phone || "",
     pets: "",
     lastMessage: `${conv.message_count ?? 0} mensagens`,
     time: conv.last_message_at
@@ -295,6 +303,7 @@ function ChatPageContent() {
         unreadCount: 0,
         isOnline: false,
         phone: "",
+        whatsappPhone: "",
       };
       return [...prev, stub];
     });
@@ -375,10 +384,10 @@ function ChatPageContent() {
       ),
     );
 
-    if (selectedConversation.phone) {
+    if (selectedConversation.whatsappPhone) {
       try {
         await whatsappService.sendMessage({
-          to: selectedConversation.phone,
+          to: selectedConversation.whatsappPhone,
           message,
         });
       } catch (err) {

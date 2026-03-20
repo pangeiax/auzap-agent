@@ -4,6 +4,7 @@
 
 export interface CreateClientDTO {
   phone: string
+  manualPhone?: string
   name?: string
   email?: string
   companyName?: string
@@ -13,6 +14,7 @@ export interface CreateClientDTO {
 
 export interface UpdateClientDTO {
   phone?: string
+  manualPhone?: string
   name?: string
   email?: string
   companyName?: string

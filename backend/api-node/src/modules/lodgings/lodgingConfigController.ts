@@ -1,7 +1,6 @@
 import { Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
-
-const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+import { loadBusinessHourRows } from '../../lib/businessHoursTable'
 
 function formatTime(d: Date | null | undefined): string {
   if (!d) return '00:00'
@@ -139,12 +138,7 @@ export async function upsertLodgingCapacity(req: Request, res: Response) {
       return res.status(400).json({ error: 'capacities must be a non-empty array' })
     }
 
-    const profile = await prisma.petshopProfile.findUnique({
-      where: { companyId },
-      select: { businessHours: true },
-    })
-
-    const businessHours: Record<string, any> = (profile?.businessHours as Record<string, any>) ?? {}
+    const bhRows = await loadBusinessHourRows(companyId)
 
     const upsertPromises = capacities.map((entry: any) => {
       const { type, day_of_week, max_capacity, is_active } = entry
@@ -153,12 +147,9 @@ export async function upsertLodgingCapacity(req: Request, res: Response) {
         return Promise.reject(new Error('Each capacity entry must have type, day_of_week, and max_capacity'))
       }
 
-      const dayName = DAY_NAMES[day_of_week as number]
-      const dayConfig = dayName ? businessHours[dayName] : null
+      const row = bhRows.find((r) => r.day_of_week === day_of_week)
       const isDayClosed =
-        !dayConfig ||
-        dayConfig.closed === true ||
-        (!dayConfig.open && !dayConfig.close)
+        !row || row.is_closed || row.open_time == null || row.close_time == null
 
       const effectiveIsActive = isDayClosed ? false : (is_active ?? true)
       const effectiveMaxCapacity = isDayClosed ? 0 : Number(max_capacity)

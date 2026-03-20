@@ -1,4 +1,10 @@
-import React, { createContext, useCallback, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { petshopService, serviceService } from "@/services";
 import type { Petshop, Service } from "@/types";
 
@@ -139,23 +145,39 @@ export function SettingsProvider({
     }
   }, []);
 
-  const value: SettingsContextType = {
-    petshop,
-    services,
-    businessHours: petshop?.businessHours || null,
-    defaultCapacityPerHour: (petshop as any)?.defaultCapacityPerHour || null,
-    customCapacityHours: (petshop as any)?.customCapacityHours || null,
-    loadingPetshop,
-    loadingServices,
-    petshopError,
-    servicesError,
-    updatePetshop,
-    createService,
-    updateService,
-    deleteService,
-    refetchPetshop,
-    refetchServices,
-  };
+  const value = useMemo<SettingsContextType>(
+    () => ({
+      petshop,
+      services,
+      businessHours: petshop?.businessHours || null,
+      defaultCapacityPerHour: (petshop as any)?.defaultCapacityPerHour || null,
+      customCapacityHours: (petshop as any)?.customCapacityHours || null,
+      loadingPetshop,
+      loadingServices,
+      petshopError,
+      servicesError,
+      updatePetshop,
+      createService,
+      updateService,
+      deleteService,
+      refetchPetshop,
+      refetchServices,
+    }),
+    [
+      petshop,
+      services,
+      loadingPetshop,
+      loadingServices,
+      petshopError,
+      servicesError,
+      updatePetshop,
+      createService,
+      updateService,
+      deleteService,
+      refetchPetshop,
+      refetchServices,
+    ],
+  );
 
   return (
     <SettingsContext.Provider value={value}>

@@ -3,6 +3,7 @@ export interface Appointment {
   client_id: string
   client_name: string
   phone_client: string
+  phone_client_manual?: string | null
   pet_id?: string
   professional_id?: string
   professional_name?: string
@@ -110,6 +111,8 @@ export interface AvailableSlot {
   capacity: number
   remaining_capacity: number
   specialty_id?: string
+  uses_consecutive_slots?: boolean
+  paired_slot_time?: string
 }
 
 export interface AvailableSlotsResponse {

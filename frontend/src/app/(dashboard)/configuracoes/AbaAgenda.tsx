@@ -254,7 +254,7 @@ function DayRow({
                   const cap = local.capacity_by_specialty.find(
                     (c) => c.specialty_id === sp.id,
                   );
-                  const maxCap = cap?.max_capacity ?? 1;
+                  const maxCap = cap?.max_capacity ?? 0;
                   const totalVagas = slotCount * maxCap;
                   const spColor = sp.color || "#1E62EC";
 
@@ -277,7 +277,7 @@ function DayRow({
                       <div className="flex shrink-0 items-center gap-1">
                         <button
                           type="button"
-                          disabled={saving || maxCap <= 1}
+                          disabled={saving || maxCap <= 0}
                           onClick={() => onCapacityAdjust(sp.id, -1)}
                           className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] text-sm font-bold text-[#434A57] dark:text-[#f5f9fc] hover:border-[#727B8E]/40 transition-colors disabled:opacity-30"
                         >
@@ -396,7 +396,7 @@ export function AbaAgenda() {
           ...d,
           capacity_by_specialty: d.capacity_by_specialty.map((c) =>
             c.specialty_id === specialtyId
-              ? { ...c, max_capacity: Math.max(1, Math.min(50, c.max_capacity + delta)) }
+              ? { ...c, max_capacity: Math.max(0, Math.min(50, c.max_capacity + delta)) }
               : c,
           ),
         };
@@ -414,9 +414,10 @@ export function AbaAgenda() {
         close_time: d.close_time,
         capacity_by_specialty: d.capacity_by_specialty,
       }));
-      await settingsService.saveAgenda({ days: payload });
+      const agenda = await settingsService.saveAgenda({ days: payload });
+      setData(agenda);
+      setLocalDays(initLocalDays(agenda.days));
       toast.success("Agenda salva!", "Configurações atualizadas com sucesso.");
-      await loadData();
     } catch {
       toast.error("Erro", "Não foi possível salvar a agenda.");
     } finally {

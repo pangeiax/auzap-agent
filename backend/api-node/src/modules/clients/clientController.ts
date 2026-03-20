@@ -135,6 +135,8 @@ export async function createClient(req: Request, res: Response) {
     const companyId = req.user!.companyId
     const {
       phone,
+      manualPhone,
+      manual_phone,
       name,
       email,
       companyName,
@@ -144,6 +146,11 @@ export async function createClient(req: Request, res: Response) {
     } = req.body
 
     const phoneValue = String(phone ?? '').trim()
+    const manualPhoneValueRaw = manualPhone ?? manual_phone
+    const manualPhoneValue =
+      manualPhoneValueRaw === undefined || manualPhoneValueRaw === null
+        ? undefined
+        : String(manualPhoneValueRaw).trim()
 
     if (!phoneValue) {
       return res.status(400).json({ error: 'Phone is required' })
@@ -153,6 +160,7 @@ export async function createClient(req: Request, res: Response) {
       data: {
         companyId,
         phone: phoneValue,
+        ...(manualPhoneValue ? { manualPhone: manualPhoneValue } : {}),
         name,
         email,
         companyName,
@@ -177,11 +185,16 @@ export async function updateClient(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const { clientId } = req.params as { clientId: string }
-    const updateData = { ...req.body }
+    const updateData: any = { ...req.body }
 
     if (updateData.is_active !== undefined) {
       updateData.isActive = Boolean(updateData.is_active)
       delete updateData.is_active
+    }
+
+    if (updateData.manual_phone !== undefined) {
+      updateData.manualPhone = String(updateData.manual_phone).trim()
+      delete updateData.manual_phone
     }
 
     const existing = await prisma.client.findUnique({ where: { id: clientId } })
@@ -315,6 +328,7 @@ export async function getClientContext(req: Request, res: Response) {
       client_id: clientId,
       name: client.name,
       phone: client.phone,
+      manual_phone: (client as any).manualPhone ?? undefined,
       email: client.email,
       conversation_stage: client.conversationStage,
       specialty_identified: client.specialtyIdentified,

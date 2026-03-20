@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from config import OPENAI_MODEL
@@ -13,6 +14,14 @@ from agents.team.lodging_agent import build_lodging_agent
 from agents.team.health_agent import build_health_agent
 
 logger = logging.getLogger("ai-service.router")
+
+# Remove falas de "processamento" que ainda vazam do modelo (booking)
+_BOOKING_LEADING_NOISE = re.compile(
+    r"(?is)"
+    r"^(?:\s*"
+    r"(?:deixa eu (?:confirmar|ver)|estou verificando|vou verificar|só um instante|"
+    r"aguarde (?:um instante|só um momento)|deixa eu ver se)[^.?!\n]*[.?!\n]\s*)+"
+)
 
 VALID_AGENTS = {
     "onboarding_agent",
@@ -74,8 +83,14 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     specialist_response = specialist.run(specialist_input)
     logger.info("Especialista %s concluiu", agent_name)
 
+    reply = (specialist_response.content or "").strip()
+    if agent_name == "booking_agent" and reply:
+        cleaned = _BOOKING_LEADING_NOISE.sub("", reply).strip()
+        if cleaned:
+            reply = cleaned
+
     return {
-        "reply": specialist_response.content.strip(),
+        "reply": reply,
         "agent_used": agent_name,
         "router_ctx": router_ctx,
     }

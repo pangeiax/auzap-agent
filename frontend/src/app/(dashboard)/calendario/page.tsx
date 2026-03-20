@@ -7,6 +7,7 @@ import {
   type CalendarEvent,
 } from "@/components/molecules/CalendarGrid";
 import { CalendarSidebar } from "@/components/molecules/CalendarSidebar";
+import { ClientCombobox } from "@/components/molecules/ClientCombobox";
 import {
   CalendarWeekView,
   type WeekDay,
@@ -24,7 +25,7 @@ import {
   serviceService,
 } from "@/services";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { maskPhone, maskDate, dateToISO, dateFromISO } from "@/lib/masks";
+import { maskPhone, dateToISO, dateFromISO } from "@/lib/masks";
 import { normalizePetSize, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
 import { UserPlus, PawPrint, Plus, Loader2 } from "lucide-react";
 import type { Appointment, Client, Pet, Service } from "@/types";
@@ -33,6 +34,12 @@ import {
   appointmentStatusToApi,
   type UiAppointmentStatus,
 } from "@/lib/appointmentStatus";
+import { MiniDatePicker } from "@/components/molecules/MiniDatePicker/MiniDatePicker";
+import {
+  extractPairedAppointmentId,
+  mergePairedByTime,
+  resolveSymmetricPairIds,
+} from "@/lib/appointmentPair";
 
 type CalendarStatus = UiAppointmentStatus;
 
@@ -73,6 +80,14 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
     timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
   const petName = a.pet_name || a.client_name || "Agendamento";
+  const manualPhone = a.phone_client_manual ?? null;
+  const shouldFallback =
+    !manualPhone ||
+    manualPhone.includes("@") ||
+    /[a-z]/i.test(manualPhone.toString());
+  const clientPhoneDisplay = shouldFallback
+    ? "Numero nao identificado"
+    : manualPhone!.toString();
   return {
     id: a.id,
     petName,
@@ -81,6 +96,10 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
     time: timeStr,
     date: dateStr,
     status: normalizeStatus(a.status),
+    clientName: a.client_name || undefined,
+    clientPhone: clientPhoneDisplay,
+    pairedAppointmentId:
+      extractPairedAppointmentId(a.notes) ?? undefined,
   };
 }
 
@@ -128,6 +147,25 @@ function formatDateKey(d: Date) {
 
 function formatDateBR(d: Date) {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+}
+
+/** Converte YYYY-MM-DD (data do agendamento) para DD/MM/AAAA sem usar timezone (evita deslocar um dia na semana). */
+function dateKeyToBR(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+}
+
+function getTodayYmd(): string {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function brDateToYmdSafe(br: string): string {
+  if (!br) return "";
+  const iso = dateToISO(br);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : "";
 }
 
 function getWeekDays(
@@ -194,56 +232,65 @@ export default function CalendarioPage() {
   const [newPetSize, setNewPetSize] = useState("");
   const [isCreatingPet, setIsCreatingPet] = useState(false);
 
+  /** Evita tela cheia de "Carregando..." se um re-fetch acontecer após já termos dados. */
+  const hasLoadedEventsRef = useRef(false);
+
+  /** Agenda + clientes + serviços em paralelo (mesmo comportamento de erro/toast que antes). */
   useEffect(() => {
-    const fetchAppointments = async () => {
-      try {
+    let cancelled = false;
+
+    const loadCalendarPageData = async () => {
+      if (!hasLoadedEventsRef.current) {
         setEventsLoading(true);
-        const list = await appointmentService.listAppointments();
-        setEvents(list.map(appointmentToCalendarEvent));
-      } catch (error) {
-        console.error("Erro ao buscar agendamentos:", error);
-        setEvents(initialEventsFallback);
-        toast.error(
-          "Erro ao carregar agenda",
-          "Não foi possível carregar os agendamentos do calendário.",
-        );
+      }
+      try {
+        const [apRes, clRes, svRes] = await Promise.allSettled([
+          appointmentService.listAppointments(),
+          clientService.listClients(),
+          serviceService.listServices(),
+        ]);
+        if (cancelled) return;
+
+        if (apRes.status === "fulfilled") {
+          setEvents(apRes.value.map(appointmentToCalendarEvent));
+          hasLoadedEventsRef.current = true;
+        } else {
+          console.error("Erro ao buscar agendamentos:", apRes.reason);
+          setEvents(initialEventsFallback);
+          toast.error(
+            "Erro ao carregar agenda",
+            "Não foi possível carregar os agendamentos do calendário.",
+          );
+        }
+
+        if (clRes.status === "fulfilled") {
+          setClients(clRes.value);
+        } else {
+          console.error("Erro ao buscar clientes:", clRes.reason);
+          toast.error(
+            "Erro ao carregar clientes",
+            "Não foi possível carregar a lista de clientes.",
+          );
+        }
+
+        if (svRes.status === "fulfilled") {
+          setServices(svRes.value);
+        } else {
+          console.error("Erro ao buscar serviços:", svRes.reason);
+          toast.error(
+            "Erro ao carregar serviços",
+            "Não foi possível carregar os serviços disponíveis.",
+          );
+        }
       } finally {
-        setEventsLoading(false);
+        if (!cancelled) setEventsLoading(false);
       }
     };
-    fetchAppointments();
-  }, [toast]);
 
-  useEffect(() => {
-    const fetchClients = async () => {
-      try {
-        const list = await clientService.listClients();
-        setClients(list);
-      } catch (error) {
-        console.error("Erro ao buscar clientes:", error);
-        toast.error(
-          "Erro ao carregar clientes",
-          "Não foi possível carregar a lista de clientes.",
-        );
-      }
+    void loadCalendarPageData();
+    return () => {
+      cancelled = true;
     };
-    fetchClients();
-  }, [toast]);
-
-  useEffect(() => {
-    const fetchServices = async () => {
-      try {
-        const list = await serviceService.listServices();
-        setServices(list);
-      } catch (error) {
-        console.error("Erro ao buscar serviços:", error);
-        toast.error(
-          "Erro ao carregar serviços",
-          "Não foi possível carregar os serviços disponíveis.",
-        );
-      }
-    };
-    fetchServices();
   }, [toast]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -255,6 +302,10 @@ export default function CalendarioPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
     null,
   );
+  const [statusActionLoadingId, setStatusActionLoadingId] = useState<
+    string | null
+  >(null);
+  const [clientPetsLoading, setClientPetsLoading] = useState(false);
   const [availableDates, setAvailableDates] = useState<Set<string>>(
     new Set(),
   );
@@ -269,6 +320,7 @@ export default function CalendarioPage() {
   const availabilityCache = useRef<Map<string, MonthAvailabilityCache>>(
     new Map(),
   );
+  const clientPetsCache = useRef<Map<string, Pet[]>>(new Map());
 
   // Only fetch slots when both date AND service are selected
   const {
@@ -279,24 +331,45 @@ export default function CalendarioPage() {
     formData.serviceId ? formData.date : "",
     formData.serviceId || undefined,
     isModalOpen,
+    formData.petId || undefined,
+  );
+
+  const mergedEvents = useMemo(
+    () =>
+      mergePairedByTime(events, (first, second) => ({
+        ...first,
+        pairedAppointmentId: second.id,
+        timeEnd: second.time,
+      })),
+    [events],
   );
 
   const visibleEvents = useMemo(
-    () => events.filter((event) => event.status !== "cancelado"),
-    [events],
+    () => mergedEvents.filter((event) => event.status !== "cancelado"),
+    [mergedEvents],
   );
 
   useEffect(() => {
     const fetchClientPets = async () => {
       if (!formData.clientId) {
         setClientPets([]);
+        setClientPetsLoading(false);
         return;
       }
+      const cacheKey = `${formData.clientId}|${petshopId || 0}`;
+      const cachedPets = clientPetsCache.current.get(cacheKey);
+      if (cachedPets) {
+        setClientPets(cachedPets);
+        setClientPetsLoading(false);
+        return;
+      }
+      setClientPetsLoading(true);
       try {
         const pets = await clientService.getClientPets(
           formData.clientId,
           petshopId || undefined,
         );
+        clientPetsCache.current.set(cacheKey, pets);
         setClientPets(pets);
       } catch (error) {
         console.error("Erro ao buscar pets do cliente:", error);
@@ -305,10 +378,20 @@ export default function CalendarioPage() {
           "Erro ao carregar pets",
           "Não foi possível carregar os pets do cliente selecionado.",
         );
+      } finally {
+        setClientPetsLoading(false);
       }
     };
     fetchClientPets();
   }, [formData.clientId, petshopId, toast]);
+
+  const bookableServices = useMemo(
+    () =>
+      services.filter(
+        (s) => s.specialty?.name !== "Hospedagem" && s.name !== "Hospedagem",
+      ),
+    [services],
+  );
 
   useEffect(() => {
     setFormData((prev) => {
@@ -329,6 +412,31 @@ export default function CalendarioPage() {
   const weekDays = useMemo(
     () => getWeekDays(year, month, selectedDay),
     [year, month, selectedDay],
+  );
+
+  /** Na visão mês, ignora mudança de dia selecionado (evita reprocessar disponibilidade ao clicar em outro dia). */
+  const weekDaysAvailabilityKey = useMemo(
+    () => weekDays.map((wd) => wd.dateKey).join(","),
+    [weekDays],
+  );
+  /** Com modal aberto + serviço/pet, o mês reflete par de slots (G/GG + multiplier). */
+  const monthAvailabilityContext = useMemo(() => {
+    if (!isModalOpen) return "";
+    return `${formData.serviceId ?? ""}|${formData.petId ?? ""}`;
+  }, [isModalOpen, formData.serviceId, formData.petId]);
+
+  const availabilityEffectKey = useMemo(
+    () =>
+      activeView === "week"
+        ? `week:${weekDaysAvailabilityKey}|${monthAvailabilityContext}`
+        : `month:${year}-${String(month + 1).padStart(2, "0")}|${monthAvailabilityContext}`,
+    [
+      activeView,
+      weekDaysAvailabilityKey,
+      year,
+      month,
+      monthAvailabilityContext,
+    ],
   );
 
   useEffect(() => {
@@ -368,6 +476,12 @@ export default function CalendarioPage() {
               const result = await appointmentService.getAvailableDates({
                 year: y,
                 month: m,
+                ...(isModalOpen && formData.serviceId
+                  ? { service_id: formData.serviceId }
+                  : {}),
+                ...(isModalOpen && formData.petId
+                  ? { pet_id: formData.petId }
+                  : {}),
               });
               availabilityCache.current.set(key, {
                 dates: new Set(result.dates),
@@ -392,7 +506,10 @@ export default function CalendarioPage() {
       const mergedDates = new Set<string>();
       const mergedByDate: Record<string, "closed" | "full" | "available"> = {};
       for (const { y, m } of monthSpecs) {
-        const key = `${y}-${String(m).padStart(2, "0")}`;
+        const base = `${y}-${String(m).padStart(2, "0")}`;
+        const key = monthAvailabilityContext
+          ? `${base}|ctx:${monthAvailabilityContext}`
+          : base;
         const c = availabilityCache.current.get(key);
         if (!c) continue;
         for (const d of c.dates) mergedDates.add(d);
@@ -409,10 +526,11 @@ export default function CalendarioPage() {
       cancelled = true;
     };
   }, [
-    currentDate.getFullYear(),
-    currentDate.getMonth(),
-    activeView,
-    weekDays,
+    availabilityEffectKey,
+    isModalOpen,
+    formData.serviceId,
+    formData.petId,
+    monthAvailabilityContext,
   ]);
 
   const handlePrev = useCallback(() => {
@@ -501,6 +619,8 @@ export default function CalendarioPage() {
       const newClient = await clientService.createClient({
         name: newClientName,
         phone: newClientPhone,
+        // Visualizacao: numero "manual" separado para o frontend.
+        manualPhone: newClientPhone,
       });
       setClients((prev) => [...prev, newClient]);
       setFormData((prev) => ({ ...prev, clientId: newClient.id }));
@@ -546,6 +666,9 @@ export default function CalendarioPage() {
         size: normalizePetSize(newPetSize),
       });
       setClientPets((prev) => [...prev, newPet]);
+      const cacheKey = `${formData.clientId}|${petshopId || 0}`;
+      const currentCached = clientPetsCache.current.get(cacheKey) ?? [];
+      clientPetsCache.current.set(cacheKey, [...currentCached, newPet]);
       setFormData((prev) => ({ ...prev, petId: newPet.id }));
       setShowNewPetForm(false);
       setNewPetName("");
@@ -585,36 +708,71 @@ export default function CalendarioPage() {
 
   const handleStatusChange = async (
     eventId: string,
-    newStatus: "pendente" | "confirmado" | "concluido",
+    newStatus: "pendente" | "confirmado" | "concluido" | "cancelado",
   ) => {
+    setStatusActionLoadingId(eventId);
+    const ids = resolveSymmetricPairIds(events, eventId);
     try {
-      if (newStatus === "confirmado") {
-        const updated = await appointmentService.confirmAppointment(
-          eventId,
-          {},
-        );
-        const nextStatus = normalizeStatus(updated.status);
+      if (newStatus === "cancelado") {
+        await appointmentService.cancelAppointment(ids[0]!);
         setEvents((prev) =>
           prev.map((event) =>
-            event.id === eventId ? { ...event, status: nextStatus } : event,
+            ids.includes(event.id)
+              ? { ...event, status: "cancelado" as CalendarStatus }
+              : event,
           ),
         );
-        toast.success("Status atualizado", "O agendamento foi confirmado.");
-      } else {
-        const updated = await appointmentService.updateAppointment(eventId, {
-          status: appointmentStatusToApi(newStatus),
-        });
-        const nextStatus = normalizeStatus(updated.status);
-        setEvents((prev) =>
-          prev.map((event) =>
-            event.id === eventId ? { ...event, status: nextStatus } : event,
-          ),
+        setSelectedEvent((prev) =>
+          prev && ids.includes(prev.id)
+            ? { ...prev, status: "cancelado" }
+            : prev,
         );
         toast.success(
-          "Status atualizado",
-          "O status do agendamento foi alterado.",
+          "Cancelado",
+          ids.length > 1
+            ? "Os dois horários do serviço foram cancelados."
+            : "O agendamento foi cancelado.",
         );
+        return;
       }
+
+      if (newStatus === "confirmado") {
+        for (const id of ids) {
+          await appointmentService.confirmAppointment(id, {});
+        }
+        const nextStatus: CalendarStatus = "confirmado";
+        setEvents((prev) =>
+          prev.map((event) =>
+            ids.includes(event.id) ? { ...event, status: nextStatus } : event,
+          ),
+        );
+        setSelectedEvent((prev) =>
+          prev && ids.includes(prev.id)
+            ? { ...prev, status: nextStatus }
+            : prev,
+        );
+        toast.success("Status atualizado", "O agendamento foi confirmado.");
+        return;
+      }
+
+      for (const id of ids) {
+        await appointmentService.updateAppointment(id, {
+          status: appointmentStatusToApi(newStatus),
+        });
+      }
+      const nextStatus = newStatus;
+      setEvents((prev) =>
+        prev.map((event) =>
+          ids.includes(event.id) ? { ...event, status: nextStatus } : event,
+        ),
+      );
+      setSelectedEvent((prev) =>
+        prev && ids.includes(prev.id) ? { ...prev, status: nextStatus } : prev,
+      );
+      toast.success(
+        "Status atualizado",
+        "O status do agendamento foi alterado.",
+      );
     } catch (error) {
       console.error("Erro ao atualizar status:", error);
       toast.error(
@@ -623,6 +781,8 @@ export default function CalendarioPage() {
           (error as any)?.response?.data?.error ||
           "Não foi possível atualizar o status do agendamento.",
       );
+    } finally {
+      setStatusActionLoadingId(null);
     }
   };
 
@@ -659,11 +819,10 @@ export default function CalendarioPage() {
     setIsSubmitting(true);
 
     try {
-      const selectedService = services.find((s) => String(s.id) === formData.serviceId);
       const selectedPet = clientPets.find((p) => p.id === formData.petId);
       const scheduledAt = `${dateISO}T${selectedSlot.time}:00`;
 
-      const appointment = await appointmentService.scheduleAppointment({
+      await appointmentService.scheduleAppointment({
         client_id: formData.clientId,
         pet_id: formData.petId,
         service_id: formData.serviceId,
@@ -680,26 +839,21 @@ export default function CalendarioPage() {
         pet_age: selectedPet?.age?.toString() ?? undefined,
       });
 
-      const newEvent: CalendarEvent = {
-        id: appointment.id,
-        petName: selectedPet?.name || "Pet",
-        petInitials: getInitials(selectedPet?.name || "Pet"),
-        type: selectedService?.name || "Serviço",
-        time: selectedSlot.time,
-        date: dateISO,
-        status: normalizeStatus(formData.status),
-      };
-
-      setEvents((prev) => [...prev, newEvent]);
+      const refreshed = await appointmentService.listAppointments();
+      setEvents(refreshed.map(appointmentToCalendarEvent));
       handleCloseModal();
 
       const [y, m, d] = dateISO.split("-").map(Number);
       availabilityCache.current.clear();
       setCurrentDate(new Date(y, m - 1, 1));
       setSelectedDate(new Date(y, m - 1, d));
+      const timeMsg =
+        selectedSlot.uses_consecutive_slots && selectedSlot.paired_slot_time
+          ? `${selectedSlot.time} e ${selectedSlot.paired_slot_time} (dois horários seguidos)`
+          : selectedSlot.time;
       toast.success(
         "Agendamento criado",
-        `${selectedPet?.name ?? "O pet"} foi agendado para ${selectedSlot.time}.`,
+        `${selectedPet?.name ?? "O pet"} foi agendado para ${timeMsg}.`,
       );
     } catch (error) {
       console.error("Erro ao criar agendamento:", error);
@@ -725,25 +879,19 @@ export default function CalendarioPage() {
   );
 
   const weekAppointments = useMemo(() => {
-    const weekFullDates = weekDays.map((d) => d.fullDate);
+    const weekFullDates = new Set(weekDays.map((d) => d.fullDate));
     return visibleEvents
-      .filter((e) => {
-        const eventDate = new Date(e.date);
-        const formatted = formatDateBR(eventDate);
-        return weekFullDates.includes(formatted);
-      })
-      .map((e) => {
-        const eventDate = new Date(e.date);
-        return {
-          id: e.id,
-          initials: e.petInitials,
-          name: e.petName,
-          service: e.type,
-          date: formatDateBR(eventDate),
-          time: e.time,
-          status: e.status,
-        };
-      });
+      .filter((e) => weekFullDates.has(dateKeyToBR(e.date)))
+      .map((e) => ({
+        id: e.id,
+        initials: e.petInitials,
+        name: e.petName,
+        service: e.type,
+        date: dateKeyToBR(e.date),
+        time: e.time,
+        timeEnd: e.timeEnd,
+        status: e.status,
+      }));
   }, [weekDays, visibleEvents]);
 
   return (
@@ -775,7 +923,7 @@ export default function CalendarioPage() {
               </div>
             ) : (
               <>
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-auto overflow-y-hidden rounded-xl border border-[rgba(114,123,142,0.1)] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] lg:rounded-bl-xl lg:rounded-br-none">
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-auto overflow-y-auto rounded-xl border border-[rgba(114,123,142,0.1)] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] lg:rounded-bl-xl lg:rounded-br-none">
                   {activeView === "month" && (
                     <CalendarGrid
                       currentDate={currentDate}
@@ -793,26 +941,29 @@ export default function CalendarioPage() {
                     />
                   )}
                   {activeView === "week" && (
-                    <CalendarWeekView
-                      weekDays={weekDays}
-                      appointments={weekAppointments}
-                      onDayClick={handleDayClick}
-                      selectedDay={selectedDay}
-                      dayAvailability={
-                        availableDatesLoading
-                          ? undefined
-                          : dayAvailabilityByDate
-                      }
-                    />
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-auto">
+                      <CalendarWeekView
+                        weekDays={weekDays}
+                        appointments={weekAppointments}
+                        onDayClick={handleDayClick}
+                        selectedDay={selectedDay}
+                        dayAvailability={
+                          availableDatesLoading
+                            ? undefined
+                            : dayAvailabilityByDate
+                        }
+                      />
+                    </div>
                   )}
                 </div>
 
                 <CalendarSidebar
                   selectedDate={selectedDate}
-                  events={events}
+                  events={visibleEvents}
                   onNewClick={handleOpenModal}
                   onEventClick={handleEventClick}
                   onStatusChange={handleStatusChange}
+                  statusActionLoadingId={statusActionLoadingId}
                 />
               </>
             )}
@@ -900,19 +1051,16 @@ export default function CalendarioPage() {
                 </button>
               </div>
             ) : (
-              <div>
-                <Select
-                  placeholder="Selecione o cliente"
+              <div className="relative overflow-visible">
+                <ClientCombobox
+                  clients={clients}
                   value={formData.clientId}
-                  onChange={(e) => {
+                  onChange={(clientId) => {
                     setFormErrors((prev) => ({ ...prev, clientId: undefined }));
-                    handleFormChange("clientId", e.target.value);
+                    handleFormChange("clientId", clientId);
                     handleFormChange("petId", "");
                   }}
-                  options={clients.map((c) => ({
-                    value: c.id,
-                    label: c.name ?? "",
-                  }))}
+                  placeholder="Buscar ou selecionar cliente…"
                 />
                 {formErrors.clientId && (
                   <p className="mt-1 text-xs text-red-500">{formErrors.clientId}</p>
@@ -1019,6 +1167,13 @@ export default function CalendarioPage() {
                     )}
                   </button>
                 </div>
+              ) : clientPetsLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#1E62EC] dark:text-[#2172e5]" />
+                  <span className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+                    Carregando pets do cliente...
+                  </span>
+                </div>
               ) : (
                 <div>
                   <Select
@@ -1044,21 +1199,19 @@ export default function CalendarioPage() {
           {/* Data e Serviço */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Input
+              <MiniDatePicker
                 label="Data *"
-                placeholder="DD/MM/AAAA"
-                value={formData.date}
-                onChange={(e) => {
-                  const nextDate = maskDate(e.target.value);
+                value={brDateToYmdSafe(formData.date)}
+                minYmd={getTodayYmd()}
+                onChange={(ymd) => {
                   setFormErrors((prev) => ({ ...prev, date: undefined, slotId: undefined }));
                   setFormData((prev) => ({
                     ...prev,
-                    date: nextDate,
+                    date: dateFromISO(ymd),
                     time: "",
                     slotId: "",
                   }));
                 }}
-                maxLength={10}
               />
               {formErrors.date && (
                 <p className="mt-1 text-xs text-red-500">{formErrors.date}</p>
@@ -1068,7 +1221,7 @@ export default function CalendarioPage() {
               <Select
                 label="Serviço *"
                 placeholder="Selecione o serviço"
-                options={services.map((s) => ({
+                options={bookableServices.map((s) => ({
                   value: String(s.id),
                   label: s.name ?? "",
                 }))}
@@ -1210,6 +1363,26 @@ export default function CalendarioPage() {
             </div>
 
             <div className="space-y-3 rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-4">
+              {selectedEvent.clientName && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+                    Tutor
+                  </span>
+                  <span className="text-right text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedEvent.clientName}
+                  </span>
+                </div>
+              )}
+              {selectedEvent.clientPhone && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+                    Telefone
+                  </span>
+                  <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedEvent.clientPhone}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
                   Serviço
@@ -1234,7 +1407,9 @@ export default function CalendarioPage() {
                   Horário
                 </span>
                 <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-                  {selectedEvent.time}
+                  {selectedEvent.timeEnd
+                    ? `${selectedEvent.time} – ${selectedEvent.timeEnd} (dois horários seguidos)`
+                    : selectedEvent.time}
                 </span>
               </div>
             </div>

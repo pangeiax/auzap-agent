@@ -72,8 +72,11 @@ export const settingsService = {
     return res.data
   },
 
-  async saveAgenda(body: { days: SaveAgendaDay[] }): Promise<void> {
-    await api.put('/settings/agenda', body)
+  /** Retorna a agenda atualizada (mesmo formato do GET) para evitar novo request após salvar. */
+  async saveAgenda(body: { days: SaveAgendaDay[] }): Promise<AgendaData> {
+    const res = await api.put<{ success: boolean } & AgendaData>('/settings/agenda', body)
+    const { success: _s, ...agenda } = res.data
+    return agenda as AgendaData
   },
 
   async blockSlot(slotId: string, isBlocked: boolean, force = false): Promise<void> {

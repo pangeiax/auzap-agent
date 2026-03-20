@@ -79,7 +79,6 @@ model PetshopProfile {
   emergencyContact String?   @map("emergency_contact") @db.VarChar(20)
   assistantName    String?   @map("assistant_name") @db.VarChar(50)
   features         Json?     @default("{}")
-  businessHours    Json?     @default("{}") @map("business_hours")
   isActive         Boolean?  @default(true) @map("is_active")
   createdAt        DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -99,6 +98,9 @@ model Client {
   companyId              Int       @map("company_id")
   sessionId              String?   @map("session_id") @db.VarChar(256)
   phone                  String    @db.VarChar(20)
+  // Apenas visualizacao no frontend. Nao interfere no envio/recepcao de mensagens,
+  // que continuam usando `phone`.
+  manualPhone           String?   @map("manual_phone") @db.VarChar(30)
   name                   String?   @db.VarChar(255)
   companyName            String?   @map("company") @db.VarChar(255)
   email                  String?   @db.VarChar(255)

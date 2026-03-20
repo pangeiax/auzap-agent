@@ -1,6 +1,7 @@
 export interface Client {
   id: string
   phone: string
+  manualPhone?: string
   name?: string
   email?: string
   company?: string
@@ -27,6 +28,7 @@ export interface Client {
 
 export interface ClientCreate {
   phone: string
+  manualPhone?: string
   name?: string
   email?: string
   company?: string
@@ -36,6 +38,7 @@ export interface ClientCreate {
 
 export interface ClientUpdate {
   phone?: string
+  manualPhone?: string
   name?: string
   email?: string
   company?: string

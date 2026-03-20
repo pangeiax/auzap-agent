@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -16,16 +16,22 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { normalizePetSize, petSizeAbbrev, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
-import { formatPhoneForDisplay, maskPhone, maskDate } from "@/lib/masks";
-import { useAddressByCep, useAvailableScheduleSlots, useToast } from "@/hooks";
+import { normalizePetSize, petSizeAbbrev, PET_SIZE_OPTIONS, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
+import { formatPhoneForDisplay, maskPhone, dateFromISO, dateToISO } from "@/lib/masks";
+import { useAddressByCep, useToast } from "@/hooks";
 import { useAuthContext } from "@/contexts";
 import { appointmentService, clientService, petService } from "@/services";
 import { appointmentStatusFromApi } from "@/lib/appointmentStatus";
+import {
+  extractPairedAppointmentId,
+  idsForMergedDisplayRow,
+  mergePairedByTime,
+} from "@/lib/appointmentPair";
 import type {
   Appointment as ApiAppointment,
   Client,
   Pet as PetType,
+  Service,
 } from "@/types";
 
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
@@ -58,9 +64,12 @@ interface Appointment {
   petName: string;
   date: string;
   time: string;
+  /** Fim exibido quando o serviço usa dois slots (par). */
+  timeEnd?: string;
   service: string;
   status: "confirmado" | "pendente" | "cancelado" | "concluido";
   notes: string;
+  pairedAppointmentId?: string;
 }
 
 interface ConversationHistory {
@@ -76,6 +85,8 @@ interface Customer {
   name: string;
   email: string;
   phone: string;
+  // Apenas para visualizacao no frontend (nao usada para envio/recebimento).
+  manualPhone?: string;
   status: "ativo" | "inativo";
   address?: string;
   notes?: string;
@@ -85,6 +96,18 @@ interface Customer {
   pets: Pet[];
   appointments: Appointment[];
   conversations: ConversationHistory[];
+}
+
+function getTodayYmd(): string {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function brDateToYmdSafe(br: string): string {
+  if (!br) return "";
+  const iso = dateToISO(br);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : "";
 }
 
 function getInitials(name: string): string {
@@ -132,6 +155,23 @@ function getChannelIcon(channel: ConversationHistory["channel"]) {
   }
 }
 
+function formatClientPhoneForSidebar(phone: string): string {
+  // Quando o sistema envia um identificador tipo "@lid" (ou qualquer valor com letras),
+  // mostramos uma mensagem neutra apenas na UI.
+  if (!phone) return "—";
+  if (phone.includes("@") || /[a-z]/i.test(phone)) return "Numero nao identificado";
+  return phone;
+}
+
+function getClientPhoneDisplay(customer: Customer): string {
+  const manual = customer.manualPhone?.trim();
+  if (!manual) return "Numero nao identificado";
+  if (manual.includes("@") || /[a-z]/i.test(manual)) {
+    return "Numero nao identificado";
+  }
+  return manual;
+}
+
 function ClientsSidebar({
   customers,
   selectedId,
@@ -155,7 +195,8 @@ function ClientsSidebar({
     (customer) =>
       customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      customer.phone.includes(searchQuery),
+      customer.phone.includes(searchQuery) ||
+      getClientPhoneDisplay(customer).includes(searchQuery),
   );
 
   return (
@@ -243,7 +284,8 @@ function ClientsSidebar({
                   </div>
                   <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
                     {customer.petsCount} pet
-                    {customer.petsCount !== 1 ? "s" : ""} • {customer.phone}
+                    {customer.petsCount !== 1 ? "s" : ""} •{" "}
+                    {formatClientPhoneForSidebar(getClientPhoneDisplay(customer))}
                   </p>
                   <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
                     {customer.totalAppointments} agendamentos
@@ -287,8 +329,8 @@ function CustomerDetails({
   onDeleteCustomer,
   onDeletePet,
   onDeleteAppointment,
+  deletingAppointmentId,
   onSavePet,
-  onSaveAppointment,
   onOpenConversation,
   activeTab,
   onTabChange,
@@ -302,14 +344,11 @@ function CustomerDetails({
   onDeleteCustomer: (id: string) => void;
   onDeletePet: (petId: string) => void;
   onDeleteAppointment: (appointmentId: string) => void;
+  deletingAppointmentId?: string | null;
   onSavePet: (
     pet: Omit<Pet, "id" | "customerId">,
     petId?: string,
   ) => Promise<void>;
-  onSaveAppointment: (
-    appointment: Omit<Appointment, "id" | "customerId">,
-    appointmentId?: string,
-  ) => void;
   onOpenConversation: (conversationId: string) => void;
   activeTab: "pets" | "agendamentos" | "conversas";
   onTabChange: (tab: "pets" | "agendamentos" | "conversas") => void;
@@ -326,52 +365,7 @@ function CustomerDetails({
     size?: string;
   }>({});
   const [savingPet, setSavingPet] = useState(false);
-  const [appointmentModalOpen, setAppointmentModalOpen] = useState(false);
-  const [editingAppointment, setEditingAppointment] =
-    useState<Appointment | null>(null);
-  const [appointmentForm, setAppointmentForm] = useState({
-    petId: "",
-    scheduleId: "",
-    petName: "",
-    date: "",
-    time: "",
-    service: "",
-    status: "pendente" as Appointment["status"],
-    notes: "",
-  });
   const [menuOpen, setMenuOpen] = useState(false);
-  const {
-    slots: appointmentSlots,
-    loading: appointmentSlotsLoading,
-    error: appointmentSlotsError,
-  } = useAvailableScheduleSlots(
-    appointmentForm.date,
-    appointmentModalOpen && Boolean(customer),
-  );
-
-  const hasCustomSelectedTime =
-    Boolean(appointmentForm.time) &&
-    !appointmentSlots.some((slot) => slot.time === appointmentForm.time);
-  const appointmentTimeOptions = [
-    ...(hasCustomSelectedTime
-      ? [
-          {
-            value: appointmentForm.time,
-            label: `${appointmentForm.time} • horário atual`,
-          },
-        ]
-      : []),
-    ...appointmentSlots.map((slot) => ({
-      value: String(slot.schedule_id),
-      label:
-        slot.remaining_capacity === 1
-          ? `${slot.time} • 1 vaga`
-          : `${slot.time} • ${slot.remaining_capacity} vagas`,
-    })),
-  ];
-  const appointmentTimeValue = hasCustomSelectedTime
-    ? appointmentForm.time
-    : appointmentForm.scheduleId;
 
   if (!customer) {
     return (
@@ -438,49 +432,6 @@ function CustomerDetails({
     }
   };
 
-  const handleOpenAppointmentModal = (appointment?: Appointment) => {
-    setEditingAppointment(appointment || null);
-    if (appointment) {
-      setAppointmentForm({
-        petId: appointment.petId,
-        scheduleId: appointment.scheduleId || "",
-        petName: appointment.petName,
-        date: appointment.date,
-        time: appointment.time,
-        service: appointment.service,
-        status: appointment.status,
-        notes: appointment.notes,
-      });
-    } else {
-      setAppointmentForm({
-        petId: customer?.pets[0]?.id || "",
-        scheduleId: "",
-        petName: customer?.pets[0]?.name || "",
-        date: "",
-        time: "",
-        service: "",
-        status: "pendente",
-        notes: "",
-      });
-    }
-    setAppointmentModalOpen(true);
-  };
-
-  const handleSaveAppointment = () => {
-    if (
-      !appointmentForm.service.trim() ||
-      !appointmentForm.petId ||
-      !appointmentForm.date ||
-      !appointmentForm.time
-    ) {
-      return;
-    }
-
-    onSaveAppointment(appointmentForm, editingAppointment?.id);
-    setAppointmentModalOpen(false);
-    setEditingAppointment(null);
-  };
-
   return (
     <motion.div
       key={customer.id}
@@ -510,7 +461,7 @@ function CustomerDetails({
             <div className="flex items-center gap-3 text-sm text-[#727B8E] dark:text-[#8a94a6]">
               <span className="flex items-center gap-1">
                 <Phone className="h-3 w-3" />
-                {customer.phone}
+                {formatClientPhoneForSidebar(getClientPhoneDisplay(customer))}
               </span>
             </div>
           </div>
@@ -691,15 +642,6 @@ function CustomerDetails({
                 <h3 className="text-sm font-medium text-[#727B8E] dark:text-[#8a94a6]">
                   Histórico de agendamentos
                 </h3>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleOpenAppointmentModal()}
-                  disabled={customer.pets.length === 0}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Novo Agendamento
-                </Button>
               </div>
               {loadingAppointments ? (
                 <div className="flex h-32 items-center justify-center">
@@ -724,7 +666,10 @@ function CustomerDetails({
                               {apt.service}
                             </p>
                             <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
-                              {apt.petName} • {apt.date} às {apt.time}
+                              {apt.petName} • {apt.date} às{" "}
+                              {apt.timeEnd
+                                ? `${apt.time} – ${apt.timeEnd}`
+                                : apt.time}
                             </p>
                           </div>
                         </div>
@@ -736,17 +681,15 @@ function CustomerDetails({
                           </span>
                           <button
                             type="button"
-                            onClick={() => handleOpenAppointmentModal(apt)}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-[#727B8E] hover:bg-[#F4F6F9] dark:hover:bg-[#212225]"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => void onDeleteAppointment(apt.id)}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            disabled={deletingAppointmentId === apt.id}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:pointer-events-none disabled:opacity-60"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            {deletingAppointmentId === apt.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -850,14 +793,12 @@ function CustomerDetails({
           <div>
             <Select
               label="Espécie *"
-              placeholder="Selecione a espécie"
               value={petForm.species}
               onChange={(e) => {
                 setPetForm((prev) => ({ ...prev, species: e.target.value }));
                 if (e.target.value) setPetFormErrors((prev) => ({ ...prev, species: undefined }));
               }}
               options={[
-                { value: "", label: "Selecione a espécie" },
                 { value: "cachorro", label: "Cachorro" },
                 { value: "gato", label: "Gato" },
                 { value: "ave", label: "Ave" },
@@ -899,13 +840,12 @@ function CustomerDetails({
             <div>
               <Select
                 label="Porte *"
-                placeholder="Selecione o porte"
                 value={petForm.size}
                 onChange={(e) => {
                   setPetForm((prev) => ({ ...prev, size: e.target.value }));
                   if (e.target.value) setPetFormErrors((prev) => ({ ...prev, size: undefined }));
                 }}
-                options={[...PET_SIZE_OPTIONS_WITH_PLACEHOLDER]}
+                options={[...PET_SIZE_OPTIONS]}
               />
               {petFormErrors.size && (
                 <p className="mt-1 text-xs text-red-500">{petFormErrors.size}</p>
@@ -933,136 +873,6 @@ function CustomerDetails({
         </div>
       </Modal>
 
-      <Modal
-        isOpen={appointmentModalOpen}
-        onClose={() => {
-          setAppointmentModalOpen(false);
-          setEditingAppointment(null);
-        }}
-        title={editingAppointment ? "Editar agendamento" : "Novo agendamento"}
-        onSubmit={handleSaveAppointment}
-        submitText="Salvar"
-        className="max-w-[400px] max-h-[85vh] flex flex-col overflow-hidden"
-      >
-        <div className="flex flex-col gap-4 overflow-y-auto max-h-[320px]">
-          <Select
-            label="Pet"
-            placeholder="Selecione o pet"
-            value={appointmentForm.petId}
-            onChange={(e) => {
-              const pet = customer.pets.find((p) => p.id === e.target.value);
-              setAppointmentForm((prev) => ({
-                ...prev,
-                petId: e.target.value,
-                petName: pet?.name || "",
-              }));
-            }}
-            options={customer.pets.map((pet) => ({
-              value: pet.id,
-              label: pet.name,
-            }))}
-          />
-          <Input
-            label="Serviço"
-            placeholder="Serviço"
-            value={appointmentForm.service}
-            onChange={(e) =>
-              setAppointmentForm((prev) => ({
-                ...prev,
-                service: e.target.value,
-              }))
-            }
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Data"
-              placeholder="DD/MM/AAAA"
-              value={appointmentForm.date}
-              onChange={(e) =>
-                setAppointmentForm((prev) => ({
-                  ...prev,
-                  date: maskDate(e.target.value),
-                  scheduleId: "",
-                  time: "",
-                }))
-              }
-              maxLength={10}
-            />
-            <Select
-              label="Horário"
-              placeholder={
-                !appointmentForm.date
-                  ? "Informe a data primeiro"
-                  : appointmentSlotsLoading
-                    ? "Carregando horários..."
-                    : appointmentTimeOptions.length === 0
-                      ? "Nenhum horário disponível"
-                      : "Selecione o horário"
-              }
-              value={appointmentTimeValue}
-              onChange={(e) =>
-                setAppointmentForm((prev) => {
-                  const selectedSlot = appointmentSlots.find(
-                    (slot) => String(slot.schedule_id) === e.target.value,
-                  );
-
-                  if (!selectedSlot) {
-                    return {
-                      ...prev,
-                      scheduleId: "",
-                      time: e.target.value,
-                    };
-                  }
-
-                  return {
-                    ...prev,
-                    scheduleId: String(selectedSlot.schedule_id),
-                    time: selectedSlot.time,
-                  };
-                })
-              }
-              options={appointmentTimeOptions}
-              disabled={
-                !appointmentForm.date ||
-                appointmentSlotsLoading ||
-                appointmentTimeOptions.length === 0
-              }
-            />
-          </div>
-          {appointmentSlotsError && (
-            <p className="text-xs text-red-500 dark:text-red-400">
-              {appointmentSlotsError}
-            </p>
-          )}
-          <Select
-            label="Status"
-            placeholder="Selecione"
-            value={appointmentForm.status}
-            onChange={(e) =>
-              setAppointmentForm((prev) => ({
-                ...prev,
-                status: e.target.value as Appointment["status"],
-              }))
-            }
-            options={[
-              { value: "pendente", label: "Pendente" },
-              { value: "confirmado", label: "Confirmado" },
-              { value: "concluido", label: "Concluído" },
-              { value: "cancelado", label: "Cancelado" },
-            ]}
-          />
-          <TextAreaField
-            id="appointment-notes"
-            label="Observações"
-            placeholder="Observações"
-            value={appointmentForm.notes}
-            onChange={(e) =>
-              setAppointmentForm((prev) => ({ ...prev, notes: e.target.value }))
-            }
-            rows={3}
-          />
-        </div>
-      </Modal>
     </motion.div>
   );
 }
@@ -1124,7 +934,10 @@ function formatPetAge(pet: ApiPet): string {
 
 function formatPetWeight(pet: ApiPet): string {
   const value = pet.weight ?? pet.weightKg ?? pet.weight_kg;
-  if (value === undefined || value === null || value === "") {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (String(value).trim() === "") {
     return "";
   }
 
@@ -1214,6 +1027,8 @@ function mapAppointmentFromApi(
     service: appointment.specialty || "",
     status: normalizeAppointmentStatus(appointment.status),
     notes: appointment.notes || "",
+    pairedAppointmentId:
+      extractPairedAppointmentId(appointment.notes) ?? undefined,
   };
 }
 
@@ -1249,6 +1064,7 @@ function clientToCustomer(c: ApiClient): Customer {
     name: c.name ?? "",
     email: c.email ?? "",
     phone: phoneDisplay,
+    manualPhone: c.manualPhone ?? undefined,
     status: isActive ? "ativo" : "inativo",
     address: undefined,
     notes: c.notes ?? undefined,
@@ -1291,6 +1107,9 @@ export default function ClientesPage() {
   const [customersError, setCustomersError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingAppointmentId, setDeletingAppointmentId] = useState<
+    string | null
+  >(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
@@ -1351,7 +1170,8 @@ export default function ClientesPage() {
         setCustomerForm({
           name: editingCustomer.name,
           email: editingCustomer.email,
-          phone: editingCustomer.phone,
+          // Campo "manual" para visualizacao. O `phone` (mensagens) permanece intacto no backend.
+          phone: editingCustomer.manualPhone ?? "",
           status: editingCustomer.status,
           address: addrLine,
           notes: notesOnly,
@@ -1450,10 +1270,18 @@ export default function ClientesPage() {
         const mappedAppointments = appointments.map((appointment) =>
           mapAppointmentFromApi(appointment as ApiPetAppointment, customerId),
         );
+        const mergedAppointments = mergePairedByTime(
+          mappedAppointments,
+          (first, second) => ({
+            ...first,
+            pairedAppointmentId: second.id,
+            timeEnd: second.time,
+          }),
+        );
         setCustomers((prev) =>
           prev.map((c) =>
             c.id === customerId
-              ? { ...c, appointments: mappedAppointments }
+              ? { ...c, appointments: mergedAppointments }
               : c,
           ),
         );
@@ -1575,87 +1403,74 @@ export default function ClientesPage() {
 
     if (!appointment) return;
 
+    if (deletingAppointmentId === appointmentId) return;
+    setDeletingAppointmentId(appointmentId);
+
+    const removeIds = idsForMergedDisplayRow(appointment);
+
     if (appointmentId.startsWith("apt-")) {
-      setCustomers((prev) =>
-        prev.map((c) =>
-          c.id === selectedCustomer.id
-            ? {
-                ...c,
-                appointments: c.appointments.filter(
-                  (a) => a.id !== appointmentId,
-                ),
-                totalAppointments: Math.max(c.totalAppointments - 1, 0),
-              }
-            : c,
-        ),
-      );
-      toast.info(
-        "Agendamento removido",
-        "O registro local foi removido da visualização do cliente.",
-      );
+      try {
+        setCustomers((prev) =>
+          prev.map((c) =>
+            c.id === selectedCustomer.id
+              ? {
+                  ...c,
+                  appointments: c.appointments.filter(
+                    (a) => !removeIds.includes(a.id),
+                  ),
+                  totalAppointments: Math.max(
+                    c.totalAppointments - removeIds.length,
+                    0,
+                  ),
+                }
+              : c,
+          ),
+        );
+        toast.info(
+          "Agendamento removido",
+          "O registro local foi removido da visualização do cliente.",
+        );
+      } finally {
+        setDeletingAppointmentId(null);
+      }
       return;
     }
 
     try {
-      await appointmentService.cancelAppointment(appointmentId);
+      await appointmentService.deleteAppointment(appointmentId);
       setCustomers((prev) =>
         prev.map((c) =>
           c.id === selectedCustomer.id
             ? {
                 ...c,
                 appointments: c.appointments.filter(
-                  (a) => a.id !== appointmentId,
+                  (a) => !removeIds.includes(a.id),
                 ),
-                totalAppointments: Math.max(c.totalAppointments - 1, 0),
+                totalAppointments: Math.max(
+                  c.totalAppointments - removeIds.length,
+                  0,
+                ),
               }
             : c,
         ),
       );
       toast.success(
-        "Agendamento cancelado",
+        "Agendamento removido",
         appointment.service
-          ? `${appointment.service} foi cancelado com sucesso.`
-          : "O agendamento foi cancelado com sucesso.",
+          ? `${appointment.service} foi removido com sucesso.`
+          : "O agendamento foi removido com sucesso.",
       );
     } catch (error: any) {
       console.error("Erro ao cancelar agendamento:", error);
       toast.error(
-        "Erro ao cancelar agendamento",
+        "Erro ao remover agendamento",
         error.response?.data?.detail ||
           error.response?.data?.error ||
-          "Não foi possível cancelar o agendamento.",
+          "Não foi possível remover o agendamento.",
       );
+    } finally {
+      setDeletingAppointmentId(null);
     }
-  };
-
-  const updateCustomerAppointmentState = (
-    appointmentData: Omit<Appointment, "id" | "customerId">,
-    appointmentId?: string,
-  ) => {
-    setCustomers((prev) =>
-      prev.map((c) =>
-        c.id === selectedCustomer.id
-          ? {
-              ...c,
-              totalAppointments: appointmentId
-                ? c.totalAppointments
-                : c.totalAppointments + 1,
-              appointments: appointmentId
-                ? c.appointments.map((a) =>
-                    a.id === appointmentId ? { ...a, ...appointmentData } : a,
-                  )
-                : [
-                    ...c.appointments,
-                    {
-                      id: `apt-${Date.now()}`,
-                      customerId: selectedCustomer.id,
-                      ...appointmentData,
-                    },
-                  ],
-            }
-          : c,
-      ),
-    );
   };
 
   const handleSavePet = useCallback(
@@ -1738,24 +1553,6 @@ export default function ClientesPage() {
     [selectedCustomer, toast, user],
   );
 
-  const handleSaveAppointment = useCallback(
-    (
-      appointmentData: Omit<Appointment, "id" | "customerId">,
-      appointmentId?: string,
-    ) => {
-      if (!selectedCustomer) return;
-
-      updateCustomerAppointmentState(appointmentData, appointmentId);
-      toast.warning(
-        appointmentId
-          ? "Agendamento atualizado localmente"
-          : "Agendamento criado localmente",
-        "Este atalho da aba Clientes ainda não sincroniza criação ou edição com o backend.",
-      );
-    },
-    [selectedCustomer, toast],
-  );
-
   const handleOpenConversation = useCallback(
     (conversationId: string) => {
       navigate(`/chat?id=${encodeURIComponent(conversationId)}`);
@@ -1766,7 +1563,11 @@ export default function ClientesPage() {
   const handleSaveCustomer = useCallback(async () => {
     const { name, email, phone, status, notes } = customerForm;
     const phoneValue = phone.trim();
-    if (!name.trim() || !phoneValue) return;
+    const editing = Boolean(editingCustomer);
+
+    if (!name.trim()) return;
+    // Na criacao, `phone` continua obrigatorio (backend exige).
+    if (!editing && !phoneValue) return;
 
     const addr = address;
     const addressStr = [
@@ -1786,8 +1587,10 @@ export default function ClientesPage() {
     setIsSaving(true);
     try {
       if (editingCustomer) {
+        // Atualiza somente o numero "manual" de visualizacao.
+        // O campo `phone` (usado pela logica de envio/recepcao) permanece intacto.
         const updated = await clientService.updateClient(editingCustomer.id, {
-          phone: phoneValue,
+          ...(phoneValue ? { manualPhone: phoneValue } : {}),
           name: name.trim(),
           email: email.trim() || undefined,
           is_active: status === "ativo",
@@ -1806,6 +1609,7 @@ export default function ClientesPage() {
       } else {
         const newClient = await clientService.createClient({
           phone: phoneValue,
+          manualPhone: phoneValue,
           name: name.trim(),
           email: email.trim() || undefined,
           source: "manual",
@@ -1865,8 +1669,8 @@ export default function ClientesPage() {
           onDeleteCustomer={handleDeleteCustomer}
           onDeletePet={handleDeletePet}
           onDeleteAppointment={handleDeleteAppointment}
+          deletingAppointmentId={deletingAppointmentId}
           onSavePet={handleSavePet}
-          onSaveAppointment={handleSaveAppointment}
           onOpenConversation={handleOpenConversation}
           activeTab={activeTab}
           onTabChange={handleTabChange}
@@ -1936,10 +1740,12 @@ export default function ClientesPage() {
                 onChange={(e) =>
                   setCustomerForm((f) => ({
                     ...f,
-                    phone: maskPhone(e.target.value),
+                    // Evita letras (ex.: colar texto) no valor do telefone.
+                    // Mantemos '@' caso venha um identificador especial.
+                    phone: maskPhone(e.target.value.replace(/[a-z]/gi, "")),
                   }))
                 }
-                required
+                required={!editingCustomer}
               />
               <Input
                 label="E-mail"

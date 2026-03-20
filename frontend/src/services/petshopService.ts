@@ -10,7 +10,6 @@ type PetshopCreate = {
   owner_phone?: string
   emergency_contact?: string
   assistant_name?: string
-  business_hours?: Record<string, string | { open?: string; close?: string; closed?: boolean }>
 }
 
 export const petshopService = {

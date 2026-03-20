@@ -1,7 +1,68 @@
 import logging
 from db import get_connection
+from tools.booking_tools import _extract_double_pair_id
+from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
 logger = logging.getLogger("ai-service.tools.client")
+
+
+def _merge_upcoming_appointment_rows(rows: list) -> list:
+    """
+    Une pares __DOUBLE_PAIR__ em um único item com faixa de horário,
+    para o agente não confundir dois registros (ex.: 15h e 16h) com dois serviços.
+    """
+    by_id = {str(r["id"]): r for r in rows}
+    consumed: set[str] = set()
+    out: list = []
+    for r in rows:
+        rid = str(r["id"])
+        if rid in consumed:
+            continue
+        pid = _extract_double_pair_id(r.get("notes"))
+        partner = by_id.get(pid) if pid else None
+        if (
+            partner
+            and _extract_double_pair_id(partner.get("notes")) == rid
+        ):
+            consumed.add(rid)
+            consumed.add(str(partner["id"]))
+            t_a = slot_time_to_hhmm(r.get("start_time_raw"))
+            t_b = slot_time_to_hhmm(partner.get("start_time_raw"))
+            dur = int(r.get("duration_min") or 60)
+            first, second = (r, partner) if t_a <= t_b else (partner, r)
+            t1 = slot_time_to_hhmm(first.get("start_time_raw"))
+            t2 = slot_time_to_hhmm(second.get("start_time_raw"))
+            end_br = hhmm_after_minutes(t2, dur)
+            out.append(
+                {
+                    "id": str(first["id"]),
+                    "paired_appointment_id": str(second["id"]),
+                    "scheduled_date": first.get("scheduled_date"),
+                    "status": first.get("status"),
+                    "service_name": first.get("service_name"),
+                    "pet_name": first.get("pet_name"),
+                    "start_time": t1,
+                    "second_slot_start": t2,
+                    "service_end_time": end_br,
+                    "uses_double_slot": True,
+                }
+            )
+            continue
+        st = slot_time_to_hhmm(r.get("start_time_raw"))
+        dur = int(r.get("duration_min") or 60)
+        out.append(
+            {
+                "id": rid,
+                "scheduled_date": r.get("scheduled_date"),
+                "status": r.get("status"),
+                "service_name": r.get("service_name"),
+                "pet_name": r.get("pet_name"),
+                "start_time": st,
+                "service_end_time": hhmm_after_minutes(st, dur) if st else None,
+                "uses_double_slot": False,
+            }
+        )
+    return out
 
 
 def build_client_tools(company_id: int, client_id: str) -> list:
@@ -300,23 +361,27 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                     a.id,
                     a.scheduled_date,
                     a.status,
-                    sch.start_time,
+                    a.notes,
+                    COALESCE(sl.slot_time, sch.start_time) AS start_time_raw,
                     svc.name AS service_name,
-                    p.name   AS pet_name
+                    COALESCE(svc.duration_min, 60) AS duration_min,
+                    p.name AS pet_name
                 FROM petshop_appointments a
-                JOIN petshop_schedules sch ON sch.id = a.schedule_id
-                JOIN petshop_services  svc ON svc.id = a.service_id
-                JOIN petshop_pets      p   ON p.id   = a.pet_id
+                JOIN petshop_services svc ON svc.id = a.service_id
+                JOIN petshop_pets p ON p.id = a.pet_id
+                LEFT JOIN petshop_slots sl ON sl.id = a.slot_id
+                LEFT JOIN petshop_schedules sch ON sch.id = a.schedule_id
                 WHERE a.company_id = %s
-                  AND a.client_id  = %s
+                  AND a.client_id = %s
                   AND a.status IN ('pending', 'confirmed')
                   AND a.scheduled_date >= CURRENT_DATE
-                ORDER BY a.scheduled_date, sch.start_time
+                ORDER BY a.scheduled_date,
+                    COALESCE(sl.slot_time, sch.start_time) NULLS LAST
             """,
                 (company_id, client_id),
             )
-            rows = cur.fetchall()
-        return [dict(r) for r in rows]
+            rows = [dict(r) for r in cur.fetchall()]
+        return _merge_upcoming_appointment_rows(rows)
 
     return [
         get_client_pets,

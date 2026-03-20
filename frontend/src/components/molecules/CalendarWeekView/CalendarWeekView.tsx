@@ -10,6 +10,8 @@ export interface WeekAppointment {
   service: string;
   date: string;
   time: string;
+  /** Segundo horário quando o serviço usa dois slots seguidos. */
+  timeEnd?: string;
   status: AppointmentStatus;
 }
 
@@ -51,7 +53,8 @@ const STATUS_BG: Record<AppointmentStatus, string> = {
     "bg-[#FEF2F2] border-l-[#EF4444] dark:bg-[#3d1e1e] dark:border-l-[#EF4444]",
 };
 
-const HOURS = Array.from({ length: 12 }, (_, i) => i + 7);
+/** 07:00–21:00 — rolagem vertical no container pai */
+const HOURS = Array.from({ length: 15 }, (_, i) => i + 7);
 
 function formatHour(hour: number) {
   return `${String(hour).padStart(2, "0")}:00`;
@@ -75,8 +78,8 @@ export function CalendarWeekView({
   dayAvailability,
 }: CalendarWeekViewProps) {
   return (
-    <div className="flex flex-col">
-      <div className="grid grid-cols-[80px_repeat(7,1fr)]">
+    <div className="flex w-max min-w-full flex-col">
+      <div className="sticky top-0 z-20 grid grid-cols-[80px_repeat(7,1fr)] border-b border-[#727B8E]/10 bg-white shadow-[0_1px_0_rgba(114,123,142,0.08)] dark:border-[#40485A] dark:bg-[#1A1B1D]">
         <div className="border-b border-r border-[rgba(114,123,142,0.1)] bg-[#FAFBFC] dark:border-[#40485A] dark:bg-[#212225]" />
 
         {weekDays.map((day) => {
@@ -135,7 +138,7 @@ export function CalendarWeekView({
         })}
       </div>
 
-      <div className="flex flex-col">
+      <div className="flex min-h-0 flex-col pb-1">
         {HOURS.map((hour) => {
           const hourStr = formatHour(hour);
 
@@ -190,6 +193,9 @@ export function CalendarWeekView({
                           </span>
                           <span className="truncate text-[10px] text-[#727B8E] dark:text-[#8a94a6]">
                             {appt.service}
+                            {appt.timeEnd
+                              ? ` · ${appt.time}–${appt.timeEnd}`
+                              : ""}
                           </span>
                         </div>
                       </div>

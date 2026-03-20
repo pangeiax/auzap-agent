@@ -30,6 +30,7 @@ export async function listConversations(req: Request, res: Response) {
       client_id: conv.clientId,
       client_name: conv.client?.name ?? null,
       client_phone: conv.client?.phone ?? conv.whatsappNumber ?? null,
+      client_manual_phone: (conv.client as any)?.manualPhone ?? null,
       message_count: conv._count.messages,
       last_message_at: conv.lastMessageAt,
       started_at: conv.startedAt,

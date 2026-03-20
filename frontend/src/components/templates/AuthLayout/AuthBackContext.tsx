@@ -1,4 +1,11 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 
 interface AuthBackContextType {
   onBack: (() => void) | null
@@ -17,8 +24,10 @@ export function AuthBackProvider({ children }: { children: ReactNode }) {
     setOnBackState(() => fn)
   }, [])
 
+  const value = useMemo(() => ({ onBack, setOnBack }), [onBack, setOnBack])
+
   return (
-    <AuthBackContext.Provider value={{ onBack, setOnBack }}>
+    <AuthBackContext.Provider value={value}>
       {children}
     </AuthBackContext.Provider>
   )

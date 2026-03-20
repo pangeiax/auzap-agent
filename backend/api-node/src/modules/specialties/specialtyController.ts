@@ -1,6 +1,12 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
+import {
+  businessHoursMapFromRows,
+  isSlotWithinBusinessHoursFromMap,
+  loadBusinessHourRows,
+  type BusinessHourRow,
+} from '../../lib/businessHoursTable'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -9,24 +15,12 @@ function fmtTime(d: Date): string {
   return `${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
 }
 
-const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-
-function isSlotWithinBusinessHours(
-  businessHours: Record<string, any> | null,
-  dayOfWeek: number,
-  slotTime: Date,
-): boolean {
-  if (!businessHours || Object.keys(businessHours).length === 0) return true
-  const dayName = DAY_NAMES[dayOfWeek] as string | undefined
-  if (!dayName) return true
-  const dayConfig = businessHours[dayName]
-  if (!dayConfig || dayConfig.closed === true || !dayConfig.open || !dayConfig.close) return false
-  const [openH = 0, openM = 0] = String(dayConfig.open).split(':').map(Number)
-  const [closeH = 0, closeM = 0] = String(dayConfig.close).split(':').map(Number)
-  const openMinutes = openH * 60 + openM
-  const closeMinutes = closeH * 60 + closeM
-  const slotMinutes = slotTime.getUTCHours() * 60 + slotTime.getUTCMinutes()
-  return slotMinutes >= openMinutes && slotMinutes < closeMinutes
+function defaultOpenHmFromBhMap(bhByDow: Map<number, BusinessHourRow>, dayOfWeek: number): { hh: number; mm: number } {
+  const bh = bhByDow.get(dayOfWeek)
+  if (bh && !bh.is_closed && bh.open_time) {
+    return { hh: bh.open_time.getUTCHours(), mm: bh.open_time.getUTCMinutes() }
+  }
+  return { hh: 8, mm: 0 }
 }
 
 /**
@@ -37,7 +31,7 @@ function isSlotWithinBusinessHours(
 function buildSlotRows(
   companyId: number,
   specialtyId: string,
-  businessHours: Record<string, any> | null,
+  bhByDow: Map<number, BusinessHourRow>,
   rules: Array<{ dayOfWeek: number; slotTime: Date; maxCapacity: number }>,
   days: number,
 ): Prisma.Sql[] {
@@ -58,7 +52,7 @@ function buildSlotRows(
 
   const rows: Prisma.Sql[] = []
   for (const rule of rules) {
-    if (!isSlotWithinBusinessHours(businessHours, rule.dayOfWeek, rule.slotTime)) continue
+    if (!isSlotWithinBusinessHoursFromMap(bhByDow, rule.dayOfWeek, rule.slotTime)) continue
     const dates = datesByDay.get(rule.dayOfWeek) ?? []
     for (const slotDate of dates) {
       rows.push(
@@ -263,7 +257,7 @@ export async function upsertCapacityRule(req: Request, res: Response) {
 // ─── POST /specialties/:id/capacity-rules/bulk ────────────────────────────────
 // Accepts rules as { day_of_week, max_capacity, slot_time? }.
 // slot_time is OPTIONAL: when omitted the backend derives it automatically from
-// the petshop's business_hours opening time for that weekday (or "08:00" default).
+// petshop_business_hours opening time for that weekday (or "08:00" default).
 // This enforces 1 rule per day per specialty — the editor only configures capacity.
 //
 // Steps:
@@ -302,18 +296,18 @@ export async function bulkUpsertCapacityRules(req: Request, res: Response) {
       }
     }
 
-    // ── Parallel fetch: ownership + existing rules + business hours ──────────
-    const [specialty, existingRules, profile] = await Promise.all([
+    // ── Parallel fetch: ownership + existing rules + business hours (tabela) ──
+    const [specialty, existingRules, bhRows] = await Promise.all([
       prisma.petshopSpecialty.findUnique({ where: { id: specialtyId }, select: { companyId: true } }),
       prisma.specialtyCapacityRule.findMany({ where: { specialtyId, companyId } }),
-      prisma.petshopProfile.findUnique({ where: { companyId }, select: { businessHours: true } }),
+      loadBusinessHourRows(companyId),
     ])
 
     if (!specialty || specialty.companyId !== companyId) {
       return res.status(404).json({ error: 'Specialty not found' })
     }
 
-    const businessHours = profile?.businessHours as Record<string, any> | null
+    const bhByDow = businessHoursMapFromRows(bhRows)
 
     // ── Normalize rules (derive slot_time from business hours when missing) ───
     type NormalizedRule = { dayOfWeek: number; slotTime: Date; slotTimeKey: string; maxCapacity: number }
@@ -331,15 +325,9 @@ export async function bulkUpsertCapacityRules(req: Request, res: Response) {
         hh = Number(parts[0])
         mm = Number(parts[1])
       } else {
-        // Derive from business hours opening time for this weekday
-        const dayName = DAY_NAMES[dayOfWeek] as string
-        const dayBH = (businessHours && Object.keys(businessHours).length > 0) ? businessHours[dayName] : null
-        const openStr: string = dayBH?.open ?? '08:00'
-        const parts = openStr.split(':')
-        hh = Number(parts[0] ?? '8')
-        mm = Number(parts[1] ?? '0')
-        if (!Number.isInteger(hh) || hh < 0 || hh > 23) hh = 8
-        if (!Number.isInteger(mm) || mm < 0 || mm > 59) mm = 0
+        const { hh: dh, mm: dm } = defaultOpenHmFromBhMap(bhByDow, dayOfWeek)
+        hh = dh
+        mm = dm
       }
 
       const slotTime = new Date(Date.UTC(1970, 0, 1, hh, mm, 0))
@@ -417,7 +405,7 @@ export async function bulkUpsertCapacityRules(req: Request, res: Response) {
 
     // ── Step 3: Generate slots ONLY for changed rules (single SQL) ───────────
     const slotRows = changedRules.length > 0
-      ? buildSlotRows(companyId, specialtyId, businessHours, changedRules, 30)
+      ? buildSlotRows(companyId, specialtyId, bhByDow, changedRules, 30)
       : []
 
     if (slotRows.length > 0) {
@@ -465,10 +453,10 @@ export async function generateSlots(req: Request, res: Response) {
     const specialtyId = req.params.id!
     const { days = 30 } = req.body
 
-    const [specialty, rules, profile] = await Promise.all([
+    const [specialty, rules, bhRows] = await Promise.all([
       prisma.petshopSpecialty.findUnique({ where: { id: specialtyId }, select: { companyId: true } }),
       prisma.specialtyCapacityRule.findMany({ where: { specialtyId, companyId, isActive: true } }),
-      prisma.petshopProfile.findUnique({ where: { companyId }, select: { businessHours: true } }),
+      loadBusinessHourRows(companyId),
     ])
 
     if (!specialty || specialty.companyId !== companyId) {
@@ -479,11 +467,11 @@ export async function generateSlots(req: Request, res: Response) {
       return res.json({ success: true, slots_processed: 0 })
     }
 
-    const businessHours = profile?.businessHours as Record<string, any> | null
+    const bhByDow = businessHoursMapFromRows(bhRows)
     const slotRows = buildSlotRows(
       companyId,
       specialtyId,
-      businessHours,
+      bhByDow,
       rules.map((r) => ({ dayOfWeek: r.dayOfWeek, slotTime: r.slotTime, maxCapacity: r.maxCapacity })),
       Number(days),
     )
@@ -533,13 +521,10 @@ async function generateSlotsForRule(
   maxCapacity: number,
   days = 30,
 ) {
-  const profile = await prisma.petshopProfile.findUnique({
-    where: { companyId },
-    select: { businessHours: true },
-  })
-  const businessHours = profile?.businessHours as Record<string, any> | null
+  const bhRows = await loadBusinessHourRows(companyId)
+  const bhByDow = businessHoursMapFromRows(bhRows)
 
-  if (!isSlotWithinBusinessHours(businessHours, dayOfWeek, slotTime)) return
+  if (!isSlotWithinBusinessHoursFromMap(bhByDow, dayOfWeek, slotTime)) return
 
   const today = new Date()
   const slotDates: Date[] = []

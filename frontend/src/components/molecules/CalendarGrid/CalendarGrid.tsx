@@ -9,8 +9,15 @@ export interface CalendarEvent {
   petInitials: string;
   type: string;
   time: string;
+  /** Fim do serviço quando ocupa dois slots consecutivos (par G/GG). */
+  timeEnd?: string;
   date: string;
   status: "concluido" | "confirmado" | "pendente" | "cancelado";
+  /** Tutor / dono */
+  clientName?: string;
+  clientPhone?: string;
+  /** ID do outro agendamento do par (bruto da API ou segundo slot após merge). */
+  pairedAppointmentId?: string;
 }
 
 interface CalendarGridProps {
@@ -206,7 +213,10 @@ export function CalendarGrid({
                         key={ev.id}
                         className={`text-xs font-medium truncate ${statusColor[ev.status]}`}
                       >
-                        {ev.time} - {ev.petName}
+                        {ev.timeEnd
+                          ? `${ev.time}–${ev.timeEnd}`
+                          : ev.time}{" "}
+                        - {ev.petName}
                       </div>
                     ))}
                   </div>

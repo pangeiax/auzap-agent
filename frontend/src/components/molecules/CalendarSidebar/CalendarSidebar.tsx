@@ -1,4 +1,4 @@
-import { Crown, Check, CheckCircle2 } from "lucide-react";
+import { Crown, Check, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import type { CalendarEvent } from "../CalendarGrid";
 import { cn } from "@/lib/cn";
 
@@ -20,8 +20,10 @@ interface CalendarSidebarProps {
   onEventClick?: (event: CalendarEvent) => void;
   onStatusChange?: (
     eventId: string,
-    newStatus: "pendente" | "confirmado" | "concluido",
+    newStatus: "pendente" | "confirmado" | "concluido" | "cancelado",
   ) => void;
+  /** Evita cliques repetidos em Confirmar / Concluir */
+  statusActionLoadingId?: string | null;
 }
 
 export function CalendarSidebar({
@@ -30,6 +32,7 @@ export function CalendarSidebar({
   onNewClick,
   onEventClick,
   onStatusChange,
+  statusActionLoadingId,
 }: CalendarSidebarProps) {
   const monthNames = [
     "Janeiro",
@@ -79,7 +82,7 @@ export function CalendarSidebar({
           key={formatDateKey(selectedDate)}
           className="animate-slide-in-right flex min-h-0 flex-1 flex-col"
         >
-          <div className="mb-4 flex shrink-0 items-center justify-between animate-fade-in">
+          <div className="mb-4 flex shrink-0 animate-fade-in flex-col gap-2">
             <div>
               <h3 className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
                 {selectedDate.getDate()} de{" "}
@@ -91,11 +94,12 @@ export function CalendarSidebar({
               </p>
             </div>
             <button
+              type="button"
               onClick={onNewClick}
-              className="flex items-center gap-1.5 rounded-lg border border-[#727B8E]/10 px-3 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 dark:border-[#40485A] dark:bg-[#2172e5] bg-[#0e1629]"
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[#1E62EC]/30 bg-[#1E62EC]/95 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-[#1854c7] dark:border-[#2172e5]/40 dark:bg-[#2172e5] dark:hover:bg-[#1a6ad4]"
             >
-              <Crown className="h-3.5 w-3.5" />
-              Novo
+              <Crown className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+              Novo agendamento
             </button>
           </div>
 
@@ -137,37 +141,89 @@ export function CalendarSidebar({
                       {event.type}
                     </p>
                     <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
-                      {event.time}
+                      {event.timeEnd
+                        ? `${event.time} – ${event.timeEnd}`
+                        : event.time}
                     </p>
+                    {event.timeEnd && (
+                      <p className="text-[10px] text-[#727B8E]/80 dark:text-[#8a94a6]/80">
+                        Dois horários consecutivos
+                      </p>
+                    )}
 
-                    {}
                     {onStatusChange && (
                       <div className="mt-2 flex gap-2">
                         {event.status === "pendente" && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onStatusChange(event.id, "confirmado");
-                            }}
-                            className="flex items-center gap-1 rounded-md bg-[#3C6BD0] px-2 py-1 text-[10px] font-medium text-white hover:bg-[#3C6BD0]/90 transition-colors"
-                          >
-                            <Check className="h-3 w-3" />
-                            Confirmar
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              disabled={statusActionLoadingId === event.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStatusChange(event.id, "confirmado");
+                              }}
+                              className="flex items-center gap-1 rounded-md bg-[#3C6BD0] px-2 py-1 text-[10px] font-medium text-white hover:bg-[#3C6BD0]/90 transition-colors disabled:pointer-events-none disabled:opacity-60"
+                            >
+                              {statusActionLoadingId === event.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Check className="h-3 w-3" />
+                              )}
+                              Confirmar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={statusActionLoadingId === event.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStatusChange(event.id, "cancelado");
+                              }}
+                              className="flex items-center gap-1 rounded-md bg-[#EF4444] px-2 py-1 text-[10px] font-medium text-white hover:bg-[#EF4444]/90 transition-colors disabled:pointer-events-none disabled:opacity-60"
+                            >
+                              {statusActionLoadingId === event.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <XCircle className="h-3 w-3" />
+                              )}
+                              Cancelar
+                            </button>
+                          </>
                         )}
                         {event.status === "confirmado" && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onStatusChange(event.id, "concluido");
-                            }}
-                            className="flex items-center gap-1 rounded-md bg-[#3CD057] px-2 py-1 text-[10px] font-medium text-white hover:bg-[#3CD057]/90 transition-colors"
-                          >
-                            <CheckCircle2 className="h-3 w-3" />
-                            Concluir
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              disabled={statusActionLoadingId === event.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStatusChange(event.id, "concluido");
+                              }}
+                              className="flex items-center gap-1 rounded-md bg-[#3CD057] px-2 py-1 text-[10px] font-medium text-white hover:bg-[#3CD057]/90 transition-colors disabled:pointer-events-none disabled:opacity-60"
+                            >
+                              {statusActionLoadingId === event.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3" />
+                              )}
+                              Concluir
+                            </button>
+                            <button
+                              type="button"
+                              disabled={statusActionLoadingId === event.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStatusChange(event.id, "cancelado");
+                              }}
+                              className="flex items-center gap-1 rounded-md bg-[#EF4444] px-2 py-1 text-[10px] font-medium text-white hover:bg-[#EF4444]/90 transition-colors disabled:pointer-events-none disabled:opacity-60"
+                            >
+                              {statusActionLoadingId === event.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <XCircle className="h-3 w-3" />
+                              )}
+                              Cancelar
+                            </button>
+                          </>
                         )}
                         {event.status === "concluido" && (
                           <span className="flex items-center gap-1 text-[10px] text-[#3CD057]">

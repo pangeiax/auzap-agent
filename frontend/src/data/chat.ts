@@ -18,6 +18,8 @@ export interface ChatConversation {
   unreadCount: number
   isOnline: boolean
   phone: string
+  // Numero do cliente (usado para envio no WhatsApp) - deve continuar vindo do `client_phone`.
+  whatsappPhone?: string
   isAiPaused?: boolean
 }
 
@@ -40,6 +42,7 @@ export const MOCK_CONVERSATIONS: ChatConversation[] = [
     unreadCount: 2,
     isOnline: true,
     phone: '(11) 99999-9999',
+    whatsappPhone: '(11) 99999-9999',
   },
   {
     id: '2',
@@ -50,6 +53,7 @@ export const MOCK_CONVERSATIONS: ChatConversation[] = [
     unreadCount: 0,
     isOnline: false,
     phone: '(11) 88888-8888',
+    whatsappPhone: '(11) 88888-8888',
   },
   {
     id: '3',
@@ -60,6 +64,7 @@ export const MOCK_CONVERSATIONS: ChatConversation[] = [
     unreadCount: 1,
     isOnline: true,
     phone: '(11) 77777-7777',
+    whatsappPhone: '(11) 77777-7777',
   },
 ]
 

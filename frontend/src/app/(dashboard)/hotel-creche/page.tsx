@@ -1,11 +1,12 @@
 'use client'
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { DashboardLayout } from '@/components/templates/DashboardLayout'
 import { Modal } from '@/components/molecules/Modal'
 import { Button } from '@/components/atoms/Button'
 import { Input } from '@/components/atoms/Input'
-import { PawPrint, Clock, LogIn, LogOut, Home, Loader2, AlertTriangle, Plus, Search, ChevronDown } from 'lucide-react'
+import { ClientCombobox } from '@/components/molecules/ClientCombobox'
+import { PawPrint, Clock, LogIn, LogOut, Home, Loader2, AlertTriangle, Plus, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { lodgingConfigService, lodgingReservationService } from '@/services/lodgingService'
 import type { LodgingReservation, LodgingType, LodgingConfig } from '@/services/lodgingService'
@@ -24,9 +25,302 @@ function getInitials(name: string): string {
 }
 
 function daysFromNow(isoDate: string): number {
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const d = new Date(isoDate); d.setHours(0, 0, 0, 0)
-  return Math.ceil((d.getTime() - today.getTime()) / 86400000)
+  // Evita problemas de timezone ao parsear YYYY-MM-DD
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const d = ymdToLocalDate(isoDate)
+  d.setHours(12, 0, 0, 0)
+  const diff = d.getTime() - today.getTime()
+  return Math.ceil(diff / 86400000)
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function ymdToLocalDate(ymd: string): Date {
+  const s = String(ymd)
+  // Normaliza entradas do tipo "YYYY-MM-DD" ou "YYYY-MM-DDTHH:mm:ss..."
+  const normalized = s.match(/^(\d{4}-\d{2}-\d{2})/)?.[1]
+  if (normalized) {
+    const [y, m, d] = normalized.split('-').map(Number)
+    const safeY = Number.isFinite(y) ? y : 1970
+    const safeM = Number.isFinite(m) ? m : 1
+    const safeD = Number.isFinite(d) ? d : 1
+    return new Date(safeY, safeM - 1, safeD, 12, 0, 0, 0)
+  }
+
+  const parsed = new Date(s)
+  if (isNaN(parsed.getTime())) return new Date(1970, 0, 1, 12, 0, 0, 0)
+  return new Date(
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate(),
+    12,
+    0,
+    0,
+    0,
+  )
+}
+
+function shiftYmd(ymd: string, deltaDays: number): string {
+  const dt = ymdToLocalDate(ymd)
+  dt.setDate(dt.getDate() + deltaDays)
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
+}
+
+// checkout_date é interpretado como data de saída (modelo fim exclusivo) pelo backend.
+// Nesta UI, exibimos exatamente o valor recebido do backend.
+
+function getTodayYmd(): string {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function formatYmdToBR(ymd: string): string {
+  const [y, m, d] = ymd.split('-')
+  if (!y || !m || !d) return '—'
+  return `${d}/${m}/${y}`
+}
+
+function MiniDatePicker({
+  label,
+  value,
+  minYmd,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  minYmd: string
+  onChange: (ymd: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [viewMonth, setViewMonth] = useState<Date>(() => ymdToLocalDate(value || getTodayYmd()))
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!rootRef.current) return
+      if (rootRef.current.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const selectedDate = value ? ymdToLocalDate(value) : null
+  const monthStart = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1, 12, 0, 0, 0)
+  const startWeekDay = monthStart.getDay() // 0..6 (Dom..Sáb)
+
+  const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0, 12, 0, 0, 0).getDate()
+  const grid = Array.from({ length: 42 }, (_, idx) => {
+    const dayNum = idx - startWeekDay + 1
+    const dt = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), dayNum, 12, 0, 0, 0)
+    const inMonth = dayNum >= 1 && dayNum <= daysInMonth
+    const ymd = `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
+    const isBeforeMin = ymd < minYmd
+    return { ymd, inMonth, isBeforeMin }
+  })
+
+  const monthLabel = viewMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+
+  return (
+    <div className="relative flex flex-col gap-3" ref={rootRef}>
+      <p className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">{label}</p>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return
+          setOpen((v) => !v)
+        }}
+        className="flex h-[47px] w-full items-center justify-between rounded-lg border border-[#727B8E]/20 bg-white px-3 text-sm text-[#434A57] dark:bg-[#212225] dark:border-[#40485A] dark:text-[#f5f9fc] hover:border-[#1E62EC]/40 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <span className="truncate">{value ? formatYmdToBR(value) : 'Selecione...'}</span>
+        <ChevronDown className={cn('h-4 w-4 text-[#727B8E] transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-2 w-full rounded-xl border border-[#727B8E]/15 bg-white p-3 shadow-lg dark:border-[#40485A] dark:bg-[#1A1B1D]">
+          <div className="mb-2 flex items-center justify-between px-1">
+            <button
+              type="button"
+              className="rounded-lg border border-[#727B8E]/20 px-2 py-1 text-xs text-[#727B8E] dark:border-[#40485A]"
+              onClick={() => setViewMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1, 12, 0, 0, 0))}
+            >
+              ←
+            </button>
+            <span className="text-xs font-semibold text-[#434A57] dark:text-[#f5f9fc]">{monthLabel}</span>
+            <button
+              type="button"
+              className="rounded-lg border border-[#727B8E]/20 px-2 py-1 text-xs text-[#727B8E] dark:border-[#40485A]"
+              onClick={() => setViewMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1, 12, 0, 0, 0))}
+            >
+              →
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 px-1">
+            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d) => (
+              <div key={d} className="text-center text-[10px] font-semibold text-[#727B8E]">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-2 grid grid-cols-7 gap-1 px-1">
+            {grid.map((cell) => {
+              const isSelected = value && cell.ymd === value
+              return (
+                <button
+                  key={cell.ymd}
+                  type="button"
+                  disabled={cell.isBeforeMin || !cell.inMonth}
+                  onClick={() => {
+                    if (cell.isBeforeMin) return
+                    onChange(cell.ymd)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    'h-8 rounded-lg border text-xs transition-colors',
+                    cell.inMonth
+                      ? 'border-[#727B8E]/10 bg-white dark:bg-[#212225]'
+                      : 'border-transparent bg-transparent',
+                    cell.isBeforeMin && 'opacity-40 cursor-not-allowed',
+                    isSelected
+                      ? 'border-[#1E62EC]/40 bg-[#1E62EC]/10 text-[#1E62EC]'
+                      : !cell.isBeforeMin && cell.inMonth
+                        ? 'text-[#434A57] hover:border-[#1E62EC]/40 hover:bg-[#1E62EC]/5 dark:text-[#f5f9fc]'
+                        : 'text-[#727B8E]',
+                  )}
+                >
+                  {Number(cell.ymd.split('-')[2])}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PetCombobox({
+  pets,
+  value,
+  onChange,
+  placeholder = 'Selecione um pet',
+  disabled,
+  loading,
+}: {
+  pets: Pet[]
+  value: string
+  onChange: (petId: string) => void
+  placeholder?: string
+  disabled?: boolean
+  loading?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const rootRef = useRef<HTMLDivElement | null>(null)
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return pets
+    return pets.filter((p) => {
+      const name = (p.name ?? '').toLowerCase()
+      const species = (p.species ?? '').toLowerCase()
+      const breed = (p.breed ?? '').toLowerCase()
+      const size = (p.size ?? '').toLowerCase()
+      const digits = q.replace(/\D/g, '')
+      return name.includes(q) || species.includes(q) || breed.includes(q) || size.includes(q) || (digits && name.includes(digits))
+    })
+  }, [pets, query])
+
+  const selected = useMemo(() => pets.find((p) => p.id === value) ?? null, [pets, value])
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!rootRef.current) return
+      if (rootRef.current.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const labelForPet = (p: Pet) => {
+    const bits = [p.name ?? 'Pet']
+    if (p.species) bits.push(p.species)
+    if (p.breed) bits.push(p.breed)
+    if (p.size) bits.push(p.size)
+    return bits.join(' · ')
+  }
+
+  return (
+    <div className="flex flex-col gap-3" ref={rootRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return
+          if (loading) return
+          setOpen((v) => !v)
+          if (!open) setQuery('')
+        }}
+        className="relative flex h-[47px] w-full items-center justify-between rounded-lg border border-[#727B8E]/20 bg-white px-3 text-sm text-[#434A57] dark:bg-[#212225] dark:border-[#40485A] dark:text-[#f5f9fc] hover:border-[#1E62EC]/40 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <span className="truncate">{value && selected ? labelForPet(selected) : placeholder}</span>
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin text-[#727B8E]" />
+        ) : (
+          <ChevronDown className={cn('h-4 w-4 text-[#727B8E] transition-transform', open && 'rotate-180')} />
+        )}
+      </button>
+
+      {open && !loading && (
+        <div className="relative z-50 rounded-xl border border-[#727B8E]/15 bg-white p-2 shadow-lg dark:border-[#40485A] dark:bg-[#1A1B1D]">
+          <input
+            type="text"
+            value={query}
+            placeholder="Buscar pet..."
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full rounded-lg border border-[#727B8E]/20 bg-white px-3 py-2 text-sm text-[#434A57] outline-none focus:border-[#1E62EC] focus:ring-1 focus:ring-[#1E62EC]/20 dark:bg-[#212225] dark:border-[#40485A] dark:text-[#f5f9fc]"
+          />
+          <div className="mt-2 max-h-60 overflow-y-auto rounded-lg border border-[#727B8E]/10">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-[#727B8E]">Nenhum pet encontrado</div>
+            ) : (
+              filtered.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={cn(
+                    'w-full px-3 py-2 text-left text-sm transition-colors hover:bg-[#F4F6F9] dark:hover:bg-[#212225]',
+                    p.id === value && 'bg-[#1E62EC]/10',
+                  )}
+                  onClick={() => {
+                    onChange(p.id)
+                    setOpen(false)
+                    setQuery('')
+                  }}
+                >
+                  {labelForPet(p)}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
@@ -74,7 +368,9 @@ function ReservadoCard({ res, onCheckin }: { res: LodgingReservation; onCheckin:
              : daysToCheckin > 0 ? <span className="ml-1">({daysToCheckin}d)</span>
              : <span className="ml-1 font-semibold text-red-500">({Math.abs(daysToCheckin)}d atraso)</span>}
           </span>
-          <span>Saída: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span></span>
+          <span>
+            Saída: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span>
+          </span>
         </div>
       </div>
       <button
@@ -172,12 +468,11 @@ export default function HotelCrechePage() {
 
   // Nova reserva manual
   const [newResOpen, setNewResOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Client[]>([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [showDropdown, setShowDropdown] = useState(false)
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [modalClients, setModalClients] = useState<Client[]>([])
+  const [modalClientsLoading, setModalClientsLoading] = useState(false)
+  const [selectedClientId, setSelectedClientId] = useState('')
   const [clientPets, setClientPets] = useState<Pet[]>([])
+  const [clientPetsLoading, setClientPetsLoading] = useState(false)
   const [selectedPetId, setSelectedPetId] = useState('')
   const [newCheckinDate, setNewCheckinDate] = useState('')
   const [newCheckoutDate, setNewCheckoutDate] = useState('')
@@ -185,7 +480,6 @@ export default function HotelCrechePage() {
   const [newEmergencyContact, setNewEmergencyContact] = useState('')
   const [newResLoading, setNewResLoading] = useState(false)
   const [newResError, setNewResError] = useState('')
-  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -246,10 +540,24 @@ export default function HotelCrechePage() {
     if (kennelMode === 'manual') {
       const conflict = reservations.find(
         (r) => r.kennel_id === kennelId && r.status === 'checked_in' && r.id !== checkinTarget.id && r.type === checkinTarget.type &&
-          new Date(r.checkin_date) < new Date(checkinTarget.checkout_date) &&
-          new Date(r.checkout_date) > new Date(checkinTarget.checkin_date)
+          ymdToLocalDate(r.checkin_date).getTime() < ymdToLocalDate(checkinTarget.checkout_date).getTime() &&
+          ymdToLocalDate(r.checkout_date).getTime() > ymdToLocalDate(checkinTarget.checkin_date).getTime()
       )
       if (conflict) { setCheckinError('Esta vaga já está ocupada neste período.'); return }
+    }
+
+    // Garante respeito à capacidade máxima (max_capacity) antes de marcar como hospedado.
+    try {
+      const availability = await lodgingReservationService.checkAvailability(
+        checkinTarget.type,
+        checkinTarget.checkin_date,
+        checkinTarget.checkout_date,
+      )
+      if (!availability.available || availability.min_available_capacity <= 0) {
+        setCheckinError('Sem vagas disponíveis para este período.'); return
+      }
+    } catch {
+      setCheckinError('Erro ao verificar disponibilidade.'); return
     }
 
     setCheckinLoading(true)
@@ -277,64 +585,90 @@ export default function HotelCrechePage() {
     }
   }
 
-  const handleSearchChange = (value: string) => {
-    setSearchQuery(value)
-    setSelectedClient(null)
-    setClientPets([])
-    setSelectedPetId('')
-    if (searchRef.current) clearTimeout(searchRef.current)
-    if (!value.trim()) { setSearchResults([]); setShowDropdown(false); return }
-    setSearchLoading(true)
-    searchRef.current = setTimeout(async () => {
-      try {
-        const results = await clientService.searchClients(value, 8)
-        setSearchResults(results)
-        setShowDropdown(true)
-      } catch { setSearchResults([]) } finally { setSearchLoading(false) }
-    }, 350)
-  }
-
-  const handleSelectClient = async (client: Client) => {
-    setSelectedClient(client)
-    setSearchQuery(client.name ?? '')
-    setShowDropdown(false)
-    setSelectedPetId('')
+  const fetchModalClients = useCallback(async () => {
     try {
-      const pets = await clientService.getClientPets(client.id)
+      setModalClientsLoading(true)
+      const list = await clientService.listClients({ is_active: true })
+      setModalClients(list)
+    } catch {
+      setModalClients([])
+    } finally {
+      setModalClientsLoading(false)
+    }
+  }, [])
+
+  const handleSelectClientId = async (clientId: string) => {
+    setSelectedClientId(clientId)
+    setSelectedPetId('')
+    setClientPets([])
+    if (!clientId) return
+
+    setClientPetsLoading(true)
+    try {
+      const pets = await clientService.getClientPets(clientId)
       setClientPets(pets)
       if (pets.length === 1) setSelectedPetId(pets[0].id)
-    } catch { setClientPets([]) }
+    } catch {
+      setClientPets([])
+    } finally {
+      setClientPetsLoading(false)
+    }
   }
 
   const handleOpenNewRes = () => {
-    setSearchQuery('')
-    setSearchResults([])
-    setShowDropdown(false)
-    setSelectedClient(null)
+    setSelectedClientId('')
     setClientPets([])
     setSelectedPetId('')
-    const today = new Date().toISOString().slice(0, 10)
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-    setNewCheckinDate(today)
-    setNewCheckoutDate(tomorrow)
-    const rate = activeTab === 'hotel' ? config?.hotel_daily_rate : config?.daycare_daily_rate
-    setNewDailyRate(rate ? String(Number(rate).toFixed(2)) : '')
+    setClientPetsLoading(false)
+    setNewDailyRate('')
     setNewEmergencyContact('')
     setNewResError('')
+    const today = getTodayYmd()
+    const tomorrow = shiftYmd(today, 1)
+    setNewCheckinDate(today)
+    setNewCheckoutDate(tomorrow)
+
+    const rate = activeTab === 'hotel' ? config?.hotel_daily_rate : config?.daycare_daily_rate
+    setNewDailyRate(rate ? String(Number(rate).toFixed(2)) : '')
+
     setNewResOpen(true)
+
+    // Lazy-load dos clientes apenas quando abrir o modal
+    if (modalClients.length === 0) fetchModalClients()
   }
 
   const handleCreateReservation = async () => {
-    if (!selectedClient) { setNewResError('Selecione um cliente.'); return }
+    if (!selectedClientId) { setNewResError('Selecione um cliente.'); return }
     if (!selectedPetId) { setNewResError('Selecione um pet.'); return }
     if (!newCheckinDate) { setNewResError('Informe a data de check-in.'); return }
     if (!newCheckoutDate) { setNewResError('Informe a data de check-out.'); return }
-    if (newCheckoutDate <= newCheckinDate) { setNewResError('A data de check-out deve ser após o check-in.'); return }
+
+    const today = getTodayYmd()
+    if (newCheckinDate < today) { setNewResError('Data de check-in não pode ser no passado.'); return }
+    if (newCheckoutDate < today) { setNewResError('Data de check-out não pode ser no passado.'); return }
+
+    // O backend exige checkout > checkin.
+    if (newCheckoutDate <= newCheckinDate) {
+      setNewResError('A data de check-out deve ser após o check-in.');
+      return
+    }
+
     setNewResLoading(true)
     setNewResError('')
     try {
+      const availability = await lodgingReservationService.checkAvailability(
+        activeTab,
+        newCheckinDate,
+        newCheckoutDate,
+      )
+
+      if (!availability.available || availability.min_available_capacity <= 0) {
+        setNewResError('Sem vagas disponíveis para este período. Tente novas datas.')
+        return
+      }
+
       await lodgingReservationService.create({
-        client_id: selectedClient.id,
+        client_id: selectedClientId,
         pet_id: selectedPetId,
         type: activeTab,
         checkin_date: newCheckinDate,
@@ -342,6 +676,7 @@ export default function HotelCrechePage() {
         ...(newDailyRate ? { daily_rate: Number(newDailyRate.replace(',', '.')) } : {}),
         ...(newEmergencyContact.trim() ? { emergency_contact: newEmergencyContact.trim() } : {}),
       })
+
       setNewResOpen(false)
       await fetchReservations()
     } catch (err: any) {
@@ -386,6 +721,7 @@ export default function HotelCrechePage() {
   const isHotel = activeTab === 'hotel'
   const accentBg = isHotel ? 'bg-[#8B5CF6]/10' : 'bg-amber-50 dark:bg-amber-950/20'
   const accentText = isHotel ? 'text-[#8B5CF6]' : 'text-amber-600 dark:text-amber-400'
+  const todayYmd = getTodayYmd()
 
   return (
     <DashboardLayout>
@@ -565,85 +901,72 @@ export default function HotelCrechePage() {
       {/* Nova Reserva Manual Modal */}
       <Modal isOpen={newResOpen} onClose={() => setNewResOpen(false)} title={`Nova Reserva — ${activeTab === 'hotel' ? 'Hotel' : 'Creche'}`} className="max-w-[480px]">
         <div className="flex flex-col gap-4">
-          {/* Busca de cliente */}
-          <div className="relative">
+          {/* Cliente */}
+          <div>
             <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Cliente</p>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#727B8E]" />
-              <input
-                type="text"
-                placeholder="Buscar cliente por nome ou telefone..."
-                value={searchQuery}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
-                onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-                className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#212225] py-2 pl-9 pr-3 text-sm text-[#434A57] dark:text-[#f5f9fc] placeholder-[#727B8E] focus:border-[#1E62EC] focus:outline-none focus:ring-1 focus:ring-[#1E62EC]/20"
-              />
-              {searchLoading && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[#727B8E]" />}
-            </div>
-            {showDropdown && searchResults.length > 0 && (
-              <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] shadow-lg">
-                {searchResults.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onMouseDown={() => handleSelectClient(c)}
-                    className="flex w-full flex-col px-3 py-2.5 text-left text-sm hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-colors"
-                  >
-                    <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{c.name}</span>
-                    {c.phone && <span className="text-xs text-[#727B8E]">{c.phone}</span>}
-                  </button>
-                ))}
+            {modalClientsLoading ? (
+              <div className="mt-3 flex items-center gap-2 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
+                <Loader2 className="h-4 w-4 animate-spin text-[#1E62EC]" />
+                <span className="text-sm text-[#727B8E]">Carregando clientes...</span>
               </div>
-            )}
-            {selectedClient && (
-              <p className="mt-1 text-xs text-green-600 dark:text-green-400">✓ {selectedClient.name} selecionado</p>
+            ) : (
+              <ClientCombobox
+                clients={modalClients}
+                value={selectedClientId}
+                onChange={handleSelectClientId}
+                placeholder="Buscar ou selecionar cliente…"
+                disabled={newResLoading}
+              />
             )}
           </div>
 
           {/* Pet */}
-          {selectedClient && (
-            <div>
-              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Pet</p>
-              {clientPets.length === 0 ? (
-                <p className="text-sm text-[#727B8E]">Nenhum pet cadastrado para este cliente.</p>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={selectedPetId}
-                    onChange={(e) => setSelectedPetId(e.target.value)}
-                    className="w-full appearance-none rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#212225] px-3 py-2 pr-8 text-sm text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none focus:ring-1 focus:ring-[#1E62EC]/20"
-                  >
-                    <option value="">Selecione um pet</option>
-                    {clientPets.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}{p.breed ? ` · ${p.breed}` : ''}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#727B8E]" />
-                </div>
-              )}
-            </div>
-          )}
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Pet</p>
+            {!selectedClientId ? (
+              <p className="mt-3 text-sm text-[#727B8E]">Selecione um cliente para ver os pets.</p>
+            ) : clientPetsLoading ? (
+              <div className="mt-3 flex items-center gap-2 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
+                <Loader2 className="h-4 w-4 animate-spin text-[#1E62EC]" />
+                <span className="text-sm text-[#727B8E]">Carregando pets do cliente...</span>
+              </div>
+            ) : clientPets.length === 0 ? (
+              <p className="mt-3 text-sm text-[#727B8E]">Nenhum pet cadastrado para este cliente.</p>
+            ) : (
+              <PetCombobox
+                pets={clientPets}
+                value={selectedPetId}
+                onChange={setSelectedPetId}
+                placeholder="Selecione um pet..."
+                disabled={newResLoading}
+              />
+            )}
+          </div>
 
           {/* Datas */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Check-in</p>
-              <Input
-                type="date"
-                value={newCheckinDate}
-                onChange={(e) => setNewCheckinDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Check-out</p>
-              <Input
-                type="date"
-                value={newCheckoutDate}
-                onChange={(e) => setNewCheckoutDate(e.target.value)}
-                min={newCheckinDate}
-              />
-            </div>
+            <MiniDatePicker
+              label="Check-in"
+              value={newCheckinDate}
+              minYmd={todayYmd}
+              disabled={newResLoading}
+              onChange={(ymd) => {
+                setNewCheckinDate(ymd)
+                // Garante checkout > checkin
+                setNewCheckoutDate((prev) => {
+                  if (!prev) return prev
+                  const minCheckout = shiftYmd(ymd, 1)
+                  return prev <= ymd ? minCheckout : prev
+                })
+              }}
+            />
+            <MiniDatePicker
+              label="Check-out"
+              value={newCheckoutDate}
+              minYmd={shiftYmd(newCheckinDate || todayYmd, 1)}
+              disabled={newResLoading}
+              onChange={setNewCheckoutDate}
+            />
           </div>
 
           {/* Diária */}

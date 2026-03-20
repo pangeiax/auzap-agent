@@ -1,4 +1,4 @@
-import { createContext, useCallback, useState } from 'react'
+import { createContext, useCallback, useMemo, useState } from 'react'
 import { Toast, ToastContainer, type ToastType } from '@/components/atoms/Toast'
 
 interface ToastItem {
@@ -63,8 +63,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     [showToast]
   )
 
+  const value = useMemo(
+    () => ({ showToast, success, error, warning, info, removeToast }),
+    [showToast, success, error, warning, info, removeToast]
+  )
+
   return (
-    <ToastContext.Provider value={{ showToast, success, error, warning, info, removeToast }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastContainer>
         {toasts.map((toast) => (
