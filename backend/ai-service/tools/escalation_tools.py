@@ -14,18 +14,12 @@ def build_escalation_tools(company_id: int, client_id: str) -> list:
 
     def escalate_to_human(summary: str, last_message: str) -> dict:
         """
-        OBRIGATÓRIO quando o cliente pede atendimento humano ou equivalente. Pausa a IA e avisa a equipe.
-
-        Acione SEMPRE que a mensagem pedir (ou deixar claro): falar com humano, atendente, pessoa real,
-        alguém da loja, dono, gerente, responsável, supervisor, operador, transferência para pessoa,
-        "me liga", atendimento presencial por staff, etc. — inclusive logo depois de preços, ofertas de
-        serviço ou listagem de horários no histórico.
-
-        Também use para: assunto fora do escopo do petshop; proposta comercial/spam de terceiros;
-        insatisfação grave com pedido explícito de falar com alguém.
+        Pausa a IA e registra escalonamento. Chame **apenas** quando o cliente pediu de forma **explícita**
+        falar com humano/atendente/pessoa da loja/dono/gerente, ser transferido, ou quando for B2B/spam
+        claro. **Não** chame para saudações ("oi", "olá", "olá pessoal"), conversa casual ou dúvidas normais.
 
         Args:
-            summary: Motivo em 1-3 frases (inclua contexto do histórico se ajudar a equipe)
+            summary: Motivo concreto (1-3 frases) — o que o cliente pediu, sem vaguidão
             last_message: Última mensagem do cliente, literal
         """
         if not summary or not summary.strip():
@@ -61,9 +55,9 @@ def build_escalation_tools(company_id: int, client_id: str) -> list:
             client_name = updated["name"] or "Cliente"
             client_phone = updated["phone"]
 
-            # 2. Busca o telefone do dono do petshop
+            # 2. Busca o telefone do dono do petshop (tabela renomeada de saas_petshops → petshop_profile)
             cur.execute(
-                "SELECT owner_phone FROM saas_petshops WHERE company_id = %s",
+                "SELECT owner_phone FROM petshop_profile WHERE company_id = %s",
                 (company_id,),
             )
             petshop_row = cur.fetchone()

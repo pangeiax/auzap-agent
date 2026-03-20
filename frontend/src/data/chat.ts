@@ -21,6 +21,7 @@ export interface ChatConversation {
   // Numero do cliente (usado para envio no WhatsApp) - deve continuar vindo do `client_phone`.
   whatsappPhone?: string
   isAiPaused?: boolean
+  clientId?: string
 }
 
 export const AI_RESPONSES = [

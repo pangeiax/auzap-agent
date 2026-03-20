@@ -11,7 +11,7 @@ function generateToken(payload: JwtPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES })
 }
 
-function formatUser(user: any, companyId: number, companyName?: string) {
+function formatUser(user: any, companyId: number, companyName?: string, companyPlan?: string | null) {
   return {
     id: user.id,
     email: user.email,
@@ -22,6 +22,7 @@ function formatUser(user: any, companyId: number, companyName?: string) {
     created_at: user.createdAt?.toISOString() ?? new Date().toISOString(),
     last_login: user.lastLogin?.toISOString() ?? null,
     petshop_name: companyName,
+    company_plan: companyPlan ?? 'free',
   }
 }
 
@@ -62,7 +63,7 @@ export async function login(req: Request, res: Response) {
     return res.json({
       access_token,
       token_type: 'bearer',
-      user: formatUser(user, user.companyId, company?.name),
+      user: formatUser(user, user.companyId, company?.name, company?.plan),
     })
   } catch (err) {
     console.error('[Auth] Erro no login:', err)
@@ -108,7 +109,7 @@ export async function register(req: Request, res: Response) {
       return { user, company }
     })
 
-    return res.status(201).json(formatUser(result.user, result.company.id, result.company.name))
+    return res.status(201).json(formatUser(result.user, result.company.id, result.company.name, result.company.plan))
   } catch (err) {
     console.error('[Auth] Erro no registro:', err)
     return res.status(500).json({ error: 'Erro interno do servidor' })
@@ -123,7 +124,7 @@ export async function me(req: Request, res: Response) {
 
     const company = await prisma.saasCompany.findUnique({ where: { id: user.companyId } })
 
-    return res.json(formatUser(user, user.companyId, company?.name))
+    return res.json(formatUser(user, user.companyId, company?.name, company?.plan))
   } catch (err) {
     console.error('[Auth] Erro ao buscar usuário:', err)
     return res.status(500).json({ error: 'Erro interno do servidor' })
@@ -144,7 +145,7 @@ export async function refreshToken(req: Request, res: Response) {
     return res.json({
       access_token,
       token_type: 'bearer',
-      user: user ? formatUser(user, companyId, company?.name) : null,
+      user: user ? formatUser(user, companyId, company?.name, company?.plan) : null,
     })
   } catch (err) {
     return res.status(500).json({ error: 'Erro interno do servidor' })

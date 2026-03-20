@@ -3,11 +3,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Star } from "lucide-react";
 import { DashboardChatInput } from "@/components/molecules/DashboardChatInput";
 import { SpeechVisualization } from "@/components/molecules/SpeechVisualization";
-import { StatCards } from "@/components/molecules/StatCards";
-import { RevenueChart } from "@/components/molecules/RevenueChart";
-import { CategoriesChart } from "@/components/molecules/CategoriesChart";
-import { VisitsChart } from "@/components/molecules/VisitsChart";
-import { SalesChart } from "@/components/molecules/SalesChart";
+import { DashboardKpiCards } from "@/components/molecules/DashboardKpiCards";
+import { MetricsRevenueChart } from "@/components/molecules/MetricsRevenueChart";
+import { AppointmentsWeekdayChart } from "@/components/molecules/AppointmentsWeekdayChart";
+import { TopServicesDonutChart } from "@/components/molecules/TopServicesDonutChart";
+import { RecurrenceDonutChart } from "@/components/molecules/RecurrenceDonutChart";
+import { LostClientsList } from "@/components/molecules/LostClientsList";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import { Markdown } from "@/components/atoms/Markdown";
 import { ScrollIndicator } from "@/components/atoms/ScrollIndicator";
@@ -18,8 +19,15 @@ import { cn } from "@/lib/cn";
 import type {
   ChatBusinessContext,
   ChatBusinessHistoryMessage,
-  DashboardStats,
 } from "@/types";
+import type {
+  DashboardKpis,
+  RevenueByMonth,
+  AppointmentByWeekday,
+  TopService,
+  ClientRecurrence,
+  LostClient,
+} from "@/services/dashboardService";
 
 interface DashboardMessage {
   id: string;
@@ -141,9 +149,6 @@ export default function DashboardPage() {
   const [chatHistory, setChatHistory] = useState<ChatBusinessHistoryMessage[]>(
     [],
   );
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(
-    null,
-  );
   const [showChat, setShowChat] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -151,56 +156,37 @@ export default function DashboardPage() {
 
   const firstName = user?.name?.split(" ")[0] || "usuário";
 
-  const [revenueChartData, setRevenueChartData] = useState<Array<{
-    date: string;
-    revenue: number;
-    appointments: number;
-  }> | null>(null);
-  const [categoriesChartData, setCategoriesChartData] = useState<Array<{
-    category: string;
-    value: number;
-    percentage: number;
-  }> | null>(null);
-  const [visitsChartData, setVisitsChartData] = useState<Array<{
-    date: string;
-    visits: number;
-    new_clients: number;
-    returning_clients: number;
-  }> | null>(null);
-  const [salesChartData, setSalesChartData] = useState<Array<{
-    service: string;
-    sales: number;
-    revenue: number;
-  }> | null>(null);
+  const [kpisData, setKpisData] = useState<DashboardKpis | null>(null);
+  const [revenueData, setRevenueData] = useState<RevenueByMonth[]>([]);
+  const [weekdayData, setWeekdayData] = useState<AppointmentByWeekday[]>([]);
+  const [topServicesData, setTopServicesData] = useState<TopService[]>([]);
+  const [recurrenceData, setRecurrenceData] = useState<ClientRecurrence | null>(null);
+  const [lostClientsData, setLostClientsData] = useState<LostClient[]>([]);
+  const [metricsLoading, setMetricsLoading] = useState(true);
 
   useEffect(() => {
     const fetchDashboard = async () => {
+      setMetricsLoading(true);
       try {
-        const [stats, revenueChart, categoriesChart, visitsChart, salesChart] =
+        const [kpis, revenue, weekday, topServices, recurrence, lostClients] =
           await Promise.allSettled([
-            dashboardService.getStats(),
-            dashboardService.getRevenueChart({
-              period: "month",
-              group_by: "day",
-            }),
-            dashboardService.getCategoriesChart(),
-            dashboardService.getVisitsChart({
-              period: "month",
-              group_by: "day",
-            }),
-            dashboardService.getSalesChart(),
+            dashboardService.getKpis(),
+            dashboardService.getRevenueByMonth(),
+            dashboardService.getAppointmentsByWeekday(),
+            dashboardService.getTopServices(),
+            dashboardService.getClientRecurrence(),
+            dashboardService.getLostClients(),
           ]);
-        if (stats.status === "fulfilled") setDashboardStats(stats.value);
-        if (revenueChart.status === "fulfilled")
-          setRevenueChartData(revenueChart.value);
-        if (categoriesChart.status === "fulfilled")
-          setCategoriesChartData(categoriesChart.value);
-        if (visitsChart.status === "fulfilled")
-          setVisitsChartData(visitsChart.value);
-        if (salesChart.status === "fulfilled")
-          setSalesChartData(salesChart.value);
+        if (kpis.status === "fulfilled") setKpisData(kpis.value);
+        if (revenue.status === "fulfilled") setRevenueData(revenue.value);
+        if (weekday.status === "fulfilled") setWeekdayData(weekday.value);
+        if (topServices.status === "fulfilled") setTopServicesData(topServices.value);
+        if (recurrence.status === "fulfilled") setRecurrenceData(recurrence.value);
+        if (lostClients.status === "fulfilled") setLostClientsData(lostClients.value);
       } catch (error) {
         console.error("Erro ao buscar dados do dashboard:", error);
+      } finally {
+        setMetricsLoading(false);
       }
     };
     fetchDashboard();
@@ -218,15 +204,15 @@ export default function DashboardPage() {
   const buildContext = useCallback((): ChatBusinessContext => {
     return {
       dashboard_stats: {
-        appointments_today: dashboardStats?.appointments_today ?? 0,
-        appointments_week: dashboardStats?.appointments_week ?? 0,
-        active_clients: dashboardStats?.total_clients ?? 0,
+        appointments_today: kpisData?.today?.total ?? 0,
+        appointments_week: 0,
+        active_clients: 0,
         messages_today: 0,
-        conversion_rate: dashboardStats?.conversion_rate ?? 0,
+        conversion_rate: kpisData?.conversion?.conversion_rate ?? 0,
       },
       payment_stats: {},
     };
-  }, [dashboardStats]);
+  }, [kpisData]);
 
   const handleSendMessage = async (text: string) => {
     if (!showChat) setShowChat(true);
@@ -352,7 +338,7 @@ export default function DashboardPage() {
           transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
           className="w-full space-y-4 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8 xl:px-10"
         >
-          <div className="mb-8 sm:mb-10 text-center">
+          <div className="mb-6 sm:mb-8 text-center">
             <h2 className="text-2xl sm:text-3xl font-semibold text-[#0F172A] dark:text-white mb-2">
               Métricas e Dashboards
             </h2>
@@ -361,18 +347,21 @@ export default function DashboardPage() {
               tome decisões informadas para impulsionar seu crescimento.
             </p>
           </div>
-          <StatCards dashboardStats={dashboardStats} />
-          <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <RevenueChart className="h-full" data={revenueChartData} />
-            </div>
-            <CategoriesChart className="h-full" data={categoriesChartData} />
+
+          {/* Linha 1: KPI cards */}
+          <DashboardKpiCards data={kpisData} loading={metricsLoading} />
+
+          {/* Linha 2: Receita + Agendamentos por dia */}
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:gap-6 lg:grid-cols-2">
+            <MetricsRevenueChart data={revenueData} className="h-full" />
+            <AppointmentsWeekdayChart data={weekdayData} className="h-full" />
           </div>
-          <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <VisitsChart className="h-full" data={visitsChartData} />
-            </div>
-            <SalesChart className="h-full" data={salesChartData} />
+
+          {/* Linha 3: Serviços (rosca) + Recorrência + Clientes sumidos */}
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:gap-6 lg:grid-cols-3">
+            <TopServicesDonutChart data={topServicesData} className="h-full" />
+            <RecurrenceDonutChart data={recurrenceData} className="h-full" />
+            <LostClientsList clients={lostClientsData} className="h-full" />
           </div>
         </motion.div>
       </div>

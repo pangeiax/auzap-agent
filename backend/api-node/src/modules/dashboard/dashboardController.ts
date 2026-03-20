@@ -1,5 +1,76 @@
 import { Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
+import { DashboardService } from './dashboard.service'
+import { SentimentService } from '../sentiment/sentiment.service'
+
+const dashboardSvc = new DashboardService()
+const sentimentSvc = new SentimentService()
+
+// ─── Novos endpoints baseados nas views do Supabase ──────────────────────────
+
+export async function getKpis(req: Request, res: Response) {
+  try {
+    const companyId = req.user!.companyId
+    const [aiTime, afterHours, today, conversion, topService, sentiment] = await Promise.all([
+      dashboardSvc.getAiTimeWorked(companyId),
+      dashboardSvc.getAfterHoursStats(companyId),
+      dashboardSvc.getAppointmentsToday(companyId),
+      dashboardSvc.getWhatsappConversion(companyId),
+      dashboardSvc.getTopServiceThisMonth(companyId),
+      sentimentSvc.getSentimentKpi(companyId),
+    ])
+    res.json({ aiTime, afterHours, today, conversion, topService, sentiment })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+export async function getRevenue(req: Request, res: Response) {
+  try {
+    const data = await dashboardSvc.getRevenueByMonth(req.user!.companyId)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+export async function getAppointmentsByWeekday(req: Request, res: Response) {
+  try {
+    const serviceId = req.query.service_id ? Number(req.query.service_id) : undefined
+    const data = await dashboardSvc.getAppointmentsByWeekday(req.user!.companyId, serviceId)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+export async function getTopServices(req: Request, res: Response) {
+  try {
+    const data = await dashboardSvc.getTopServices(req.user!.companyId)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+export async function getRecurrence(req: Request, res: Response) {
+  try {
+    const data = await dashboardSvc.getClientRecurrence(req.user!.companyId)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+export async function getLostClients(req: Request, res: Response) {
+  try {
+    const minDays = req.query.min_days ? Number(req.query.min_days) : 45
+    const data = await dashboardSvc.getLostClients(req.user!.companyId, minDays)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
 
 // Brasília timezone offset: UTC-3
 const BRASILIA_OFFSET_MS = -3 * 60 * 60 * 1000

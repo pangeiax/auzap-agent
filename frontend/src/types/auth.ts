@@ -8,6 +8,7 @@ export interface User {
   created_at: string
   last_login?: string
   petshop_name?: string
+  company_plan?: string
 }
 
 export interface UserCreate {

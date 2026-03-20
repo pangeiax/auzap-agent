@@ -27,6 +27,68 @@ logger = logging.getLogger("ai-service.tools.booking")
 DOUBLE_PAIR_PREFIX = "__DOUBLE_PAIR__:"
 
 
+def _price_key_for_pet_size(raw: str | None) -> str | None:
+    """
+    Converte porte do banco (P/M/G/GG ou texto em inglês) para chaves típicas de price_by_size
+    (small / medium / large).
+    """
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    low = s.lower()
+    if low in ("small", "medium", "large", "xlarge", "extra_large"):
+        return low
+    u = s.upper()
+    if u == "P":
+        return "small"
+    if u == "M":
+        return "medium"
+    if u == "G":
+        return "large"
+    if u == "GG":
+        return "xlarge"
+    if low in ("pequeno", "mini"):
+        return "small"
+    if low in ("médio", "medio"):
+        return "medium"
+    if low in ("grande",):
+        return "large"
+    if low in ("gigante", "gg"):
+        return "xlarge"
+    return None
+
+
+def _resolve_price_charged_from_service_and_pet(service_row: dict, pet_row: dict):
+    """Prioriza price_by_size alinhado ao porte do pet; fallback para price fixo."""
+    price_charged = service_row.get("price")
+    price_by_size = service_row.get("price_by_size")
+    if not price_by_size or not isinstance(price_by_size, dict):
+        return price_charged
+    raw = pet_row.get("size")
+    if not raw:
+        return price_charged
+    rs = str(raw).strip()
+    if rs in price_by_size:
+        return price_by_size[rs]
+    pk = _price_key_for_pet_size(rs)
+    if pk and pk in price_by_size:
+        return price_by_size[pk]
+    # GG: alguns catálogos só têm "large"
+    u = rs.upper()
+    if u == "GG":
+        for k in ("xlarge", "extra_large", "large"):
+            if k in price_by_size:
+                return price_by_size[k]
+    logger.warning(
+        "Porte '%s' não mapeado em price_by_size=%s — usando price fixo",
+        raw,
+        price_by_size,
+    )
+    return price_charged
+
+
 def _extract_double_pair_id(notes) -> str | None:
     if not notes:
         return None
@@ -718,25 +780,14 @@ def build_booking_tools(company_id: int, client_id) -> list:
                         ),
                     }
 
-            # Calcula preço cobrado: prioriza price_by_size se existir, fallback para price fixo
-            price_charged = service_row["price"]
-            price_by_size = service_row.get("price_by_size")
-            if price_by_size and isinstance(price_by_size, dict):
-                pet_size = pet_row.get("size")  # 'P', 'M', 'G', 'GG'
-                if pet_size and pet_size in price_by_size:
-                    price_charged = price_by_size[pet_size]
-                elif pet_size:
-                    logger.warning(
-                        "Porte '%s' não encontrado em price_by_size=%s — usando price fixo",
-                        pet_size,
-                        price_by_size,
-                    )
+            # Calcula preço cobrado: prioriza price_by_size (chaves EN) com porte P/M/G/GG do banco
+            price_charged = _resolve_price_charged_from_service_and_pet(service_row, pet_row)
 
             logger.info(
                 "price_charged calculado: %s (pet_size=%s, price_by_size=%s, price_fixo=%s)",
                 price_charged,
                 pet_row.get("size"),
-                price_by_size,
+                service_row.get("price_by_size"),
                 service_row["price"],
             )
 
@@ -961,3 +1012,27 @@ def build_booking_tools(company_id: int, client_id) -> list:
         create_appointment,
         cancel_appointment,
     ]
+
+
+def fetch_available_times_snapshot(
+    company_id: int,
+    client_id: str,
+    specialty_id: str,
+    target_date: str,
+    service_id=None,
+    pet_id: str | None = None,
+) -> dict:
+    """Mesma lógica da tool `get_available_times` — para pré-carga no router (sem depender do LLM)."""
+    tools = build_booking_tools(company_id, client_id)
+    get_at = next(
+        (t for t in tools if getattr(t, "__name__", "") == "get_available_times"),
+        None,
+    )
+    if not get_at:
+        return {"available": False, "message": "Ferramenta de horários indisponível."}
+    return get_at(
+        specialty_id=specialty_id or "",
+        target_date=target_date,
+        service_id=service_id,
+        pet_id=pet_id,
+    )

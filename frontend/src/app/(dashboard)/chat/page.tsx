@@ -53,6 +53,7 @@ function mapApiConversation(conv: Conversation): MockConversation {
     unreadCount: 0,
     isAiPaused: conv.ai_paused ?? conv.is_ai_paused ?? false,
     isOnline: false,
+    clientId: conv.client_id || undefined,
   };
 }
 
@@ -212,6 +213,8 @@ function ChatArea({
         pets={conversation.pets}
         isAiActive={isAiActive}
         onToggleAi={onToggleAi}
+        clientId={conversation.clientId}
+        conversationId={conversation.id}
       />
 
       <div

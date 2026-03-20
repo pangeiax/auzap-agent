@@ -1,4 +1,5 @@
 import { cn } from '@/lib/cn'
+import { SentimentButton } from '@/components/molecules/SentimentButton'
 
 export interface ChatHeaderProps {
   name: string
@@ -7,6 +8,8 @@ export interface ChatHeaderProps {
   isAiActive?: boolean
   onToggleAi?: () => void
   className?: string
+  clientId?: string
+  conversationId?: string
 }
 
 function getInitials(name: string): string {
@@ -16,23 +19,6 @@ function getInitials(name: string): string {
     .join('')
     .toUpperCase()
     .slice(0, 2)
-}
-
-function MoreIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      fill="none"
-      className={className}
-      aria-hidden="true"
-    >
-      <circle cx="10" cy="4" r="1.5" fill="currentColor" />
-      <circle cx="10" cy="10" r="1.5" fill="currentColor" />
-      <circle cx="10" cy="16" r="1.5" fill="currentColor" />
-    </svg>
-  )
 }
 
 function SparklesIcon({ className }: { className?: string }) {
@@ -63,6 +49,8 @@ export function ChatHeader({
   isAiActive = true,
   onToggleAi,
   className,
+  clientId,
+  conversationId,
 }: ChatHeaderProps) {
   return (
     <div
@@ -72,21 +60,28 @@ export function ChatHeader({
       )}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1E62EC] dark:bg-[#2172e5]">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1E62EC] dark:bg-[#2172e5]">
           <span className="text-sm font-medium text-white">
             {getInitials(name)}
           </span>
         </div>
 
         <div className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">{name}</span>
-          <span className="block truncate text-xs text-[#727B8E] dark:text-[#8a94a6]">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="min-w-0 max-w-[min(100%,12rem)] truncate text-sm font-medium text-[#434A57] sm:max-w-none dark:text-[#f5f9fc]">
+              {name}
+            </span>
+            {clientId && (
+              <SentimentButton clientId={clientId} conversationId={conversationId} />
+            )}
+          </div>
+          <span className="mt-0.5 block truncate text-xs text-[#727B8E] dark:text-[#8a94a6]">
             {[phone, pets].filter(Boolean).join(' • ')}
           </span>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center">
         <button
           type="button"
           onClick={onToggleAi}

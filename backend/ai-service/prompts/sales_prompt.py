@@ -1,3 +1,37 @@
+def _normalize_size_for_price_key(raw) -> str | None:
+    """Alinha porte do banco (P/M/G/GG, PT/EN) às chaves de price_by_size (small/medium/large)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    low = s.lower()
+    if low in ("small", "medium", "large"):
+        return low
+    u = s.upper()
+    if u == "P":
+        return "small"
+    if u == "M":
+        return "medium"
+    if u == "G":
+        return "large"
+    if u == "GG":
+        return "large"
+    if low in ("pequeno", "mini"):
+        return "small"
+    if low in ("médio", "medio"):
+        return "medium"
+    if low in ("grande",):
+        return "large"
+    return None
+
+
+def _porte_label_pt(price_key: str | None) -> str | None:
+    if not price_key:
+        return None
+    return {"small": "pequeno", "medium": "médio", "large": "grande"}.get(price_key)
+
+
 def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     assistant_name = context.get("assistant_name", "Nina")
     company_name = context.get("company_name", "Petshop")
@@ -13,17 +47,17 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     if not active_pet and len(pets) == 1:
         active_pet = pets[0]["name"]
 
-    # Determina porte do pet ativo para exibir o preço correto
-    active_pet_size = None
+    # Determina porte do pet ativo para exibir o preço correto (DB usa P/M/G; JSON usa small/medium/large)
+    price_key = None
     active_pet_size_label = None
     pet_missing_size = False
     if active_pet:
         match = next((p for p in pets if p["name"].lower() == active_pet.lower()), None)
         if match:
-            size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
-            active_pet_size = match.get("size", "")
-            active_pet_size_label = size_map.get(active_pet_size)
-            if not active_pet_size:
+            raw_sz = match.get("size", "")
+            price_key = _normalize_size_for_price_key(raw_sz)
+            active_pet_size_label = _porte_label_pt(price_key)
+            if not raw_sz or not price_key:
                 pet_missing_size = True
     elif pets:
         # Múltiplos pets sem active_pet definido
@@ -39,9 +73,12 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     for s in services:
         if s.get("price_by_size"):
             sz = s["price_by_size"]
-            if active_pet_size:
+            if price_key:
+                val = sz.get(price_key)
                 price = (
-                    f"R${sz.get(active_pet_size, '?')} (porte {active_pet_size_label})"
+                    f"R${val} (porte {active_pet_size_label})"
+                    if val is not None
+                    else "consultar (preço por porte)"
                 )
             else:
                 price = "preço conforme porte"
@@ -132,17 +169,17 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
 
     # Auto-resolve: se o cliente tem apenas 1 pet, usa ele para preço por porte
     auto_pet = None
-    auto_pet_size = None
+    price_key = None
     auto_pet_size_label = None
     if len(pets) == 1:
         auto_pet = pets[0]
-        size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
-        auto_pet_size = auto_pet.get("size", "")
-        auto_pet_size_label = size_map.get(auto_pet_size)
+        raw_sz = auto_pet.get("size", "")
+        price_key = _normalize_size_for_price_key(raw_sz) if raw_sz else None
+        auto_pet_size_label = _porte_label_pt(price_key)
 
     # Detecta se algum pet não tem porte (ou se não tem pet nenhum)
     pet_missing_size = False
-    if auto_pet and not auto_pet_size:
+    if auto_pet and not price_key:
         pet_missing_size = True
     elif not auto_pet and pets:
         pet_missing_size = any(not p.get("size") for p in pets)
@@ -164,8 +201,13 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
     for s in services:
         if s.get("price_by_size"):
             sz = s["price_by_size"]
-            if auto_pet_size:
-                price = f"R${sz.get(auto_pet_size, '?')} (porte {auto_pet_size_label})"
+            if price_key:
+                val = sz.get(price_key)
+                price = (
+                    f"R${val} (porte {auto_pet_size_label})"
+                    if val is not None
+                    else "consultar (preço por porte)"
+                )
             else:
                 price = "preço conforme porte"
         elif s.get("price"):
@@ -230,6 +272,14 @@ SERVIÇOS E PREÇOS:
 • Se a mensagem atual pedir atendimento humano, atendente ou falar com pessoa real/alguém da loja:
   não use FAQ para "substituir" o humano — responda uma linha natural que vai verificar e retornar em
   breve. O Roteador deve usar escalation_agent.
+• CATÁLOGO / "O QUE VOCÊS FAZEM" / LISTA DE SERVIÇOS: ao apresentar o que o petshop oferece, inclua
+  **todos** os itens de SERVIÇOS E PREÇOS acima, **inclusive** serviços de saúde/veterinária (consulta,
+  vacina, exames, etc.) quando aparecerem na lista. O cliente precisa ver o cardápio completo.
+• SAÚDE — O QUE É PROIBIDO AQUI: **não** agende consultas/serviços de saúde por este fluxo (não use
+  create_appointment nem simule agendamento de especialidade saúde). Só está proibido o **agendamento**;
+  citar preço, duração e descrição desses serviços na vitrine está **permitido e obrigatório** quando
+  fizer sentido na pergunta. Se o cliente quiser **marcar** consulta/saúde, diga que pode ajudar a seguir
+  com o agendamento pelo canal de saúde (o sistema encaminha ao agente correto) — sem omitir o serviço.
 • Tom WhatsApp: informal, empático — máximo 2 linhas
 • Prefira responder sem emoji
 • Se usar emoji, use no máximo 1 e só em confirmação especial ou despedida calorosa
@@ -253,25 +303,27 @@ def build_escalation_prompt(context: dict, router_ctx: dict) -> str:
     return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}
 
-SUA ÚNICA TAREFA OBRIGATÓRIA: na PRIMEIRA resposta, chamar a tool escalate_to_human (sem pular, sem só
-prometer que "vai verificar" sem chamar a tool). Só depois que a tool retornar sucesso você complementa
-com a mensagem curta ao cliente conforme abaixo.
+━━━ DECISÃO ANTES DA TOOL (OBRIGATÓRIO) ━━━
+Chame **escalate_to_human** SOMENTE se a última mensagem do cliente for um pedido **claro e explícito** de:
+falar com humano/atendente/pessoa da loja/dono/gerente, ser transferido, ou assunto B2B/spam/fora do escopo.
+
+**NÃO chame a tool** (responda sem pausar a IA) se a mensagem for só:
+• Saudação: "oi", "olá", "bom dia", "olá pessoal", "e aí" ( "pessoal" aqui é cumprimento, não pedido de equipe)
+• Conversa vaga, emoji, agradecimento, ou dúvida normal sobre petshop
+
+Nesses casos: responda em 1–2 linhas, cumprimente e pergunte em que pode ajudar. **Não** chame escalate_to_human.
+
+━━━ SE E SOMENTE SE O ESCALONAMENTO FOR JUSTIFICADO ━━━
+1) Chame escalate_to_human na primeira resposta (sem só prometer "vou verificar" sem chamar a tool).
+2) Depois que a tool retornar success=true, complemente com mensagem curta ao cliente.
 
 Argumentos da tool:
 
-  summary: resumo em 1-3 frases do motivo, usando o histórico (preço, agendamento, reclamação, B2B, etc.).
-    Exemplos:
-    • "Cliente pediu atendimento humano. Antes discutia preço de banho para o pet Rex."
-    • "Cliente pediu para falar com atendente no meio do fluxo de escolha de horário."
-    • "Cliente insatisfeito; pediu falar com responsável."
-    • "Assunto fora do escopo: proposta comercial de terceiros."
-
+  summary: motivo em 1-3 frases **específicas** (o que o cliente pediu, em linguagem clara).
   last_message: copie exatamente a última mensagem do cliente.
 
-Após chamar a tool:
-• Diga ao cliente de forma natural que vai buscar mais informações e retorna em breve
-• NUNCA mencione "atendente", "humano", "equipe", "sistema", "bot" ou "IA"
-• NUNCA prometa tempo específico (ex: "em 5 minutos") — diga apenas "em breve"
-• Prefira responder sem emoji
-• Exemplos de resposta: "Deixa eu verificar isso melhor e te retorno em breve" / "Vou buscar mais detalhes pra te ajudar, já volto"
-• Se o cliente agradecer ou encerrar, despeça-se calorosamente"""
+Após a tool com sucesso:
+• Diga de forma natural que vai alinhar com a equipe e retorna em breve
+• NUNCA mencione "bot" ou "IA"
+• NUNCA prometa horário exato — só "em breve"
+• Prefira sem emoji"""

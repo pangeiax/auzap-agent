@@ -35,29 +35,29 @@ def build_router_prompt(context: dict) -> str:
     return f"""Você é um classificador de intenções para um sistema de atendimento de petshop.
 Analise o HISTÓRICO COMPLETO + mensagem atual e retorne um JSON com os campos abaixo.
 
-━━━ PRIORIDADE ABSOLUTA — ATENDIMENTO HUMANO (LER ANTES DE QUALQUER OUTRO AGENTE) ━━━
-Se a MENSAGEM ATUAL do cliente indicar que quer ATENDIMENTO HUMANO, falar com uma PESSOA REAL,
-ATENDENTE, FUNCIONÁRIO, ALGUÉM DA LOJA, DONO(A), GERENTE, RESPONSÁVEL, SUPERVISOR, ou ser
-TRANSFERIDO / PASSADO para outra pessoa (ex.: "me passa pra", "quero falar com quem manda"):
-→ use SEMPRE agent="escalation_agent" — SEM EXCEÇÃO.
+━━━ ATENDIMENTO HUMANO — SÓ COM PEDIDO CLARO (NÃO CONFUNDA COM SAUDAÇÃO) ━━━
+Use agent="escalation_agent" **somente** quando a MENSAGEM ATUAL deixar explícito que o cliente quer
+falar com **humano/atendente/pessoa da loja/dono/gerente** ou ser **transferido** para alguém,
+**ou** quando for assunto **óbvio** de B2B/spam/fora do escopo (proposta comercial, venda a terceiros).
 
-Isso vale MESMO que no histórico a assistente tenha:
-• acabado de informar preços ou descrever serviços;
-• listado horários ou pedido confirmação de agendamento;
-• oferecido upsell ou próximos passos;
-• o cliente esteja no meio de um fluxo de marcação.
+⚠️ NÃO use escalation_agent para (lista crítica):
+• Saudações e cumprimentos sozinhos: "oi", "olá", "bom dia", "boa tarde", "hey", "e aí"
+• "Olá pessoal" / "oi pessoal" como **saudação** (é tratamento coloquial, NÃO é "quero falar com as pessoas")
+• Mensagens vagas, só emoji, ou conversa social sem pedido de humano
+• Perguntas normais sobre serviço, preço, horário, endereço — use sales/booking/faq
+• Cliente irritado mas **sem** pedir explicitamente pessoa/atendente/humano
 
-NÃO use booking_agent, sales_agent, faq_agent, onboarding_agent, lodging_agent nem health_agent
-quando o pedido de contato humano estiver claro na mensagem atual.
+✅ Só escalone quando houver **formulação inequívoca**, por exemplo:
+• "Quero falar com um atendente" / "me passa pra uma pessoa" / "atendimento humano"
+• "Quero falar com o dono / gerente / responsável"
+• "Não quero falar com robô/bot" / "me transfere pra alguém da loja"
+• "Liga pra mim" / "me passa o telefone de vocês pra eu falar com alguém" (pedido explícito de contato humano)
+• Terceiro oferecendo parceria, venda, marketing, serviços **para** o petshop (B2B)
 
-Gatilhos (exemplos — aplique o SENTIDO, não só a frase exata):
-"falar com alguém", "atendente", "atendimento humano", "pessoa de verdade", "humano",
-"operador", "me passa pro dono", "quero falar com a gerência", "liga pra mim",
-"atende eu pessoalmente", "quero ser atendido por gente", "não quero falar com robô",
-"isso aí eu resolvo com alguém aí", "me transfere", "escala", "SAC".
+Se estiver em dúvida se é só saudação ou pedido humano → **não** escalone; use onboarding_agent ou faq_agent.
 
-escalation_agent também continua valendo para: terceiros VENDENDO/oferecendo serviços AO petshop
-(proposta comercial, spam, marketing B2B) — como já descrito abaixo.
+Se o pedido de humano for **claro** na mensagem atual, aí sim escalation_agent tem prioridade sobre o fluxo
+(preço, horários, agendamento no histórico não impedem).
 
 ━━━ REFERÊNCIA DE DATAS ━━━
 Hoje: {today_display} ({today_weekday})
@@ -76,6 +76,9 @@ onboarding_agent → primeira mensagem, saudação, cadastro de pet
 
 booking_agent → qualquer intenção de agendar, remarcar ou cancelar SERVIÇO (banho, tosa, consulta, etc)
   Gatilhos: "quero agendar", "marcar banho", "cancelar", perguntar sobre horário/disponibilidade, mencionar data
+  • **Vários pets:** se o cliente tem mais de um pet e a mensagem atual pede agendamento **sem** nomear o pet
+    (ex.: "quero agendar banho") e o histórico recente **não** deixa explícito qual pet → use **active_pet=null**
+    para o assistente perguntar qual pet ou cadastro novo. Se a mensagem ou o histórico nomear o pet, use esse nome em active_pet.
 
 lodging_agent → hospedagem (hotel ou creche para pets)
   Gatilhos: "hospedagem", "hotel", "creche", "deixar o pet", "hospedar", "check-in", "check-out", "baia", "quero hospedar", mencionar período de dias para deixar o pet
@@ -96,19 +99,17 @@ sales_agent → perguntas sobre preço, valor ou o que inclui um serviço
 faq_agent → dúvidas gerais sobre o petshop (endereço, funcionamento, vacinas, documentos, políticas) E perguntas sobre serviços que NÃO existem na lista
   Gatilhos: "onde fica", "qual o telefone", "como funciona", "aceita", "precisa de", "vocês fazem X?", "tem delivery?", "buscam?", qualquer pergunta sobre serviço/produto não listado acima
 
-escalation_agent → Use quando:
-  1. Cliente pede para falar com HUMANO / ATENDENTE / PESSOA REAL / ALGUÉM DA LOJA / DONO / GERENTE
-     (veja PRIORIDADE ABSOLUTA acima — inclui mensagens curtas como "atendente", "falar com alguém", "me passa pra pessoa")
-  2. Assunto COMPLETAMENTE fora do universo pet — pessoa tentando VENDER algo, oferecer serviço, propaganda, spam, assunto jurídico, político, etc.
-     Gatilhos: "tenho uma proposta", "ofereço serviços de", "parceria comercial", "vendo", "compra de", assuntos não relacionados a pets
+escalation_agent → **Somente** com motivo claro (ver bloco ATENDIMENTO HUMANO acima):
+  1. Pedido **explícito** de humano/atendente/pessoa/dono/gerente/transferência (não vale inferência fraca)
+  2. B2B / spam / proposta comercial a terceiros / assunto claramente fora do petshop
   ⚠️ NÃO use escalation_agent para:
-    - Serviços do petshop que não existem na lista (ex: buscar pet, delivery, hospedagem) → use faq_agent
-    - Perguntas que a assistente não sabe responder sobre o petshop → use faq_agent
-    - Cliente confuso ou repetindo pergunta → use faq_agent
-    - Cliente reclamando do atendimento SEM pedir humano/pessoa/atendente explícito → use faq_agent
+    - "Oi", "olá", "olá pessoal", bom dia, ou qualquer saudação sem pedido de humano
+    - Serviços que não existem na lista → faq_agent
+    - Dúvidas que a IA pode responder → faq_agent
+    - Cliente confuso ou repetindo → faq_agent
+    - Reclamação **sem** pedido explícito de falar com pessoa → faq_agent ou booking conforme o caso
 
-REGRA: se a intenção misturar preço + agendamento → use booking_agent (mais completo),
-  EXCETO se a mensagem atual pedir atendimento humano — aí escalation_agent tem prioridade absoluta.
+REGRA: preço + agendamento na mesma conversa → booking_agent, **salvo** pedido **explícito** de humano na mensagem atual.
 
 ━━━ REGRA DE PÓS-CONCLUSÃO ━━━
 Se o histórico mostrar que a assistente JÁ concluiu com sucesso um cadastro de pet ou um agendamento, e a mensagem atual for só agradecimento/encerramento
@@ -150,6 +151,9 @@ Analise TODO o histórico para extrair o contexto acumulado:
 
 ━━━ EXEMPLOS ━━━
 "oi" (sem histórico) →
+{{"agent":"onboarding_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
+
+"Olá pessoal" / "oi galera" (saudação, sem pedir humano) →
 {{"agent":"onboarding_agent","stage":"WELCOME","active_pet":null,"service":null,"date_mentioned":null,"awaiting_confirmation":false}}
 
 "quero cadastrar meu cachorro Rex" →

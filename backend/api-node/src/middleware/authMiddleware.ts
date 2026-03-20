@@ -12,6 +12,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: JwtPayload
+      company_plan?: string
     }
   }
 }

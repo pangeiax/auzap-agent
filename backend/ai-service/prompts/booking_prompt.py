@@ -1,3 +1,48 @@
+def _normalize_size_for_price(raw) -> str | None:
+    """Alinha porte do banco (P/M/G/GG ou inglês) às chaves price_by_size (small/medium/large)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    low = s.lower()
+    if low in ("small", "medium", "large"):
+        return low
+    u = s.upper()
+    if u == "P":
+        return "small"
+    if u == "M":
+        return "medium"
+    if u == "G":
+        return "large"
+    if u == "GG":
+        return "large"
+    if low in ("pequeno", "mini"):
+        return "small"
+    if low in ("médio", "medio"):
+        return "medium"
+    if low in ("grande",):
+        return "large"
+    return None
+
+
+def _format_porte_label(raw) -> str:
+    """Rótulo em PT para exibir no prompt (evita modelo achar que porte não existe)."""
+    if raw is None:
+        return "?"
+    s = str(raw).strip()
+    if not s:
+        return "?"
+    key = _normalize_size_for_price(raw)
+    labels = {"small": "pequeno", "medium": "médio", "large": "grande"}
+    if key:
+        return labels.get(key, s)
+    u = s.upper()
+    if u == "GG":
+        return "extra grande"
+    return s
+
+
 def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     assistant_name = context.get("assistant_name", "Nina")
     company_name = context.get("company_name", "Petshop")
@@ -21,10 +66,10 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     if not active_pet and len(pets) == 1:
         active_pet = pets[0]["name"]
 
-    # Pets com detalhes
+    # Pets com detalhes (porte sempre legível: P/M/G ou pequeno/médio/grande)
     if pets:
         pets_lines = " | ".join(
-            f"{p['name']} (id={p['id']}, {p.get('species','?')}, porte {p.get('size','?')})"
+            f"{p['name']} (id={p['id']}, {p.get('species','?')}, porte {_format_porte_label(p.get('size'))})"
             for p in pets
         )
         pet_count = len(pets)
@@ -32,12 +77,16 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
         pets_lines = "nenhum"
         pet_count = 0
 
-    # Serviços com preço correto por porte — encontra o porte do pet ativo
+    # Serviços com preço correto por porte — encontra o porte do pet ativo (normaliza P/M/G → small/medium/large)
     active_pet_size = None
+    match = None
     if active_pet:
         match = next((p for p in pets if p["name"].lower() == active_pet.lower()), None)
         if match:
-            active_pet_size = match.get("size")  # 'small','medium','large'
+            raw_sz = match.get("size")
+            active_pet_size = _normalize_size_for_price(raw_sz) or (
+                str(raw_sz).strip() if raw_sz else None
+            )
 
     svc_lines = []
     for s in services:
@@ -64,21 +113,26 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     if pet_count == 0:
         pet_rule = "⚠️ Cliente sem pets cadastrados. Oriente-o a cadastrar um pet antes de prosseguir com o agendamento."
     elif pet_count == 1:
-        pet_rule = f"Cliente tem apenas {pets[0]['name']} (id={pets[0]['id']}). Assuma que o serviço é para ele sem perguntar. Se o cliente mencionar OUTRO nome de pet que NÃO seja {pets[0]['name']}, esse pet NÃO existe — inicie o cadastro."
+        pet_rule = f"Cliente tem apenas {pets[0]['name']} (id={pets[0]['id']}). Assuma que o serviço é para ele sem perguntar qual pet. Se o cliente mencionar OUTRO nome de pet que NÃO seja {pets[0]['name']}, esse pet NÃO existe — inicie o cadastro."
     else:
         nomes = ", ".join(p["name"] for p in pets)
-        pet_rule = f"Cliente tem {pet_count} pets cadastrados: {nomes}. Se o cliente mencionar um nome que NÃO está nesta lista, esse pet NÃO existe — inicie o cadastro."
+        pet_rule = (
+            f"Cliente tem {pet_count} pets cadastrados: {nomes}. "
+            f"Se a mensagem atual NÃO disser claramente PARA QUAL PET é o serviço (nome do pet), "
+            f"pergunte primeiro: «É para qual deles?» (cite os nomes) ou se quer cadastrar um pet novo. "
+            f"NÃO pergunte porte neste passo — primeiro defina qual pet. "
+            f"Se o cliente já nomeou o pet na mensagem ou no histórico recente, use esse pet. "
+            f"Se mencionar um nome que NÃO está na lista → cadastro de novo pet."
+        )
 
     # Estado atual
-    size_map = {"small": "pequeno", "medium": "médio", "large": "grande"}
     estado = []
     if active_pet:
-        if active_pet_size:
-            estado.append(
-                f"Pet em foco: {active_pet} (porte {size_map.get(active_pet_size, active_pet_size)})"
-            )
+        if match and match.get("size"):
+            plab = _format_porte_label(match.get("size"))
+            estado.append(f"Pet em foco: {active_pet} (porte já cadastrado: {plab})")
         else:
-            estado.append(f"Pet em foco: {active_pet} (porte NÃO definido)")
+            estado.append(f"Pet em foco: {active_pet} (porte NÃO definido no cadastro — aí sim pergunte porte)")
     if service:
         estado.append(f"Serviço em discussão: {service}")
     if date_hint:
@@ -118,6 +172,7 @@ se você recebeu a mensagem mesmo assim, siga só esta instrução.
 • NUNCA anuncie que vai buscar dados — execute a tool e responda direto
 • ⚠️ UMA ÚNICA FALA AO CLIENTE: NUNCA escreva texto de “processamento” ou raciocínio na mesma mensagem (ex.: "Estou verificando", "Só um instante", "Vou confirmar", "Deixa eu ver"). Execute as tools em silêncio e envie **somente** a resposta final (resultado ou pergunta), em **um** bloco curto — como se fosse WhatsApp real, sem narração do que você está fazendo.
 • NUNCA diga que o dia está "cheio", "sem vaga" ou "indisponível" para um horário **sem** ter acabado de executar get_available_times para aquela data com **service_id** (número do serviço na lista acima) e **pet_id** corretos. Se a tool falhar ou vier vazia, aí sim informe conforme a mensagem da tool — nunca invente "agenda cheia".
+• Se aparecer o bloco **DADOS DE DISPONIBILIDADE** com JSON (injetado pelo sistema), é a mesma fonte de get_available_times — use `available_times` e `availability_policy` dali para responder ao cliente; não contradiga esse JSON sem chamar a tool de novo.
 
 ━━━ FLUXO DE AGENDAMENTO ━━━
 
@@ -128,6 +183,9 @@ PASSO 1 — SERVIÇO
 
 PASSO 2 — PET
 • Siga a regra do pet acima
+• ⚠️ PORTE JÁ CADASTRADO: em PETS DO CLIENTE, se aparecer porte diferente de «?» (P, M, G, GG ou pequeno/médio/grande etc.), esse pet **já tem porte no sistema** — **NUNCA** pergunte o porte de novo para esse pet. Use o preço conforme esse porte e siga para data/horário.
+• ⚠️ VÁRIOS PETS: se houver mais de um pet e a mensagem não deixar óbvio para qual é o serviço, pergunte **qual pet** (cite os nomes) ou se quer **cadastrar um novo** — **não** pergunte porte antes de saber qual pet está em foco.
+• ⚠️ NUNCA invente ou troque o nome do pet (use só nomes da lista PETS DO CLIENTE ou o que o cliente acabou de dizer).
 • ⚠️ REGRA CRÍTICA: Compare o nome do pet mencionado pelo cliente com a lista de PETS DO CLIENTE acima.
   Se o nome NÃO está na lista → o pet NÃO existe no sistema. Informe ao cliente que esse pet ainda não está cadastrado e inicie o cadastro:
   1. Pergunte o porte (pequeno, médio ou grande) PRIMEIRO
@@ -137,8 +195,8 @@ PASSO 2 — PET
   3. Chame create_pet com os 4 campos (nome, espécie, raça, porte)
   4. Só após o cadastro, retome o agendamento
   NUNCA prossiga com agendamento para um pet que não está na lista de pets cadastrados.
-• Se o pet JÁ tem porte definido no contexto (ex: "porte small", "porte medium", "porte large") → use direto. NÃO chame set_pet_size — o porte já é conhecido.
-• Se o pet estiver SEM PORTE (size vazio ou null): PARE o fluxo. Pergunte o porte (pequeno, médio ou grande), chame set_pet_size para confirmar, e SÓ continue após confirmação.
+• Se o pet em foco JÁ tem porte na linha PETS DO CLIENTE (não é «?») → use direto. NÃO chame set_pet_size. NÃO pergunte porte.
+• Se o pet estiver SEM PORTE no cadastro (size vazio ou «?»): aí sim pergunte o porte (pequeno, médio ou grande), chame set_pet_size para confirmar, e SÓ continue após confirmação.
 • Se o pet estiver sem espécie: informe o cliente que precisa completar o cadastro
 • NÃO prossiga para data/horário com pet sem porte definido
 • Com pet completo e porte conhecido, mostre o preço correto para aquele porte

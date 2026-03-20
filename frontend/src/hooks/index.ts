@@ -23,4 +23,5 @@ export * from './useBusinessHours'
 export * from './useAvailableScheduleSlots'
 export * from './useToast'
 export * from './useSettings'
+export * from './usePlan'
 

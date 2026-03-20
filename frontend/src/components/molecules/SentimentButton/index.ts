@@ -1,0 +1,1 @@
+export { SentimentButton } from './SentimentButton'

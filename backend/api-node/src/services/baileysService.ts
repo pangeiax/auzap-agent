@@ -161,19 +161,28 @@ export async function sendTyping(companyIdStr: string, jid: string): Promise<voi
   if (!socket) return
 
   const typingKey = getTypingKey(companyIdStr, jid)
-  if (typingIntervals.has(typingKey)) return
+  // Se já há intervalo ativo, ainda assim envia um composing agora (renova antes do próximo tick)
+  if (typingIntervals.has(typingKey)) {
+    try {
+      await socket.sendPresenceUpdate('composing', jid)
+    } catch {
+      /* ignore */
+    }
+    return
+  }
 
   try {
     await socket.presenceSubscribe(jid)
     await socket.sendPresenceUpdate('composing', jid)
 
+    // WhatsApp expira o estado "composing" em poucos segundos; renovar com frequência
     const interval = setInterval(() => {
       const activeSocket = activeSockets.get(companyIdStr)
       if (!activeSocket) return
       activeSocket.sendPresenceUpdate('composing', jid).catch(() => {
         // Não crítico
       })
-    }, 4000)
+    }, 2000)
 
     typingIntervals.set(typingKey, interval)
   } catch {

@@ -1,4 +1,65 @@
 import { api } from '@/lib/api'
+
+// ─── Tipos para os novos endpoints de métricas (views Supabase) ──────────────
+
+export interface SentimentKpi {
+  total_analyzed: number
+  positive: number
+  neutral: number
+  negative: number
+  high_churn_risk: number
+  medium_churn_risk: number
+  positive_pct: number
+}
+
+export interface DashboardKpis {
+  aiTime: { hours: number; total_conversations: number }
+  afterHours: { pct_after_hours: number; pct_weekend: number; total: number }
+  today: { total: number; confirmed: number; pending: number }
+  conversion: { total_conversations: number; total_appointments: number; conversion_rate: number; revenue_generated: number }
+  topService: { service_name: string; growth_pct: number } | null
+  sentiment?: SentimentKpi
+}
+
+export interface RevenueByMonth {
+  month: string
+  total_revenue: number
+  avg_ticket: number
+}
+
+export interface AppointmentByWeekday {
+  day_of_week: number
+  day_name: string
+  service_name: string
+  total: number
+}
+
+export interface TopService {
+  service_name: string
+  total_appointments: number
+  total_revenue: number
+  avg_ticket: number
+  revenue_pct: number
+}
+
+export interface ClientRecurrence {
+  active: number
+  at_risk: number
+  lost: number
+  never: number
+  avg_return_days: number
+}
+
+export interface LostClient {
+  client_id: string
+  client_name: string
+  pet_name: string
+  pet_species: string
+  last_visit: string | null
+  days_absent: number
+  phone: string
+}
+
 import type {
   DashboardStats,
   RevenueMetrics,
@@ -100,6 +161,42 @@ export const dashboardService = {
   > {
     // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
     const response = await api.get('/dashboard/sales-chart', { params })
+    return response.data
+  },
+
+  // ─── Novos endpoints baseados nas views do Supabase ────────────────────────
+
+  async getKpis(): Promise<DashboardKpis> {
+    const response = await api.get<DashboardKpis>('/dashboard/kpis')
+    return response.data
+  },
+
+  async getRevenueByMonth(): Promise<RevenueByMonth[]> {
+    const response = await api.get<RevenueByMonth[]>('/dashboard/revenue')
+    return response.data
+  },
+
+  async getAppointmentsByWeekday(serviceId?: number): Promise<AppointmentByWeekday[]> {
+    const response = await api.get<AppointmentByWeekday[]>('/dashboard/appointments-by-weekday', {
+      params: serviceId ? { service_id: serviceId } : undefined,
+    })
+    return response.data
+  },
+
+  async getTopServices(): Promise<TopService[]> {
+    const response = await api.get<TopService[]>('/dashboard/top-services')
+    return response.data
+  },
+
+  async getClientRecurrence(): Promise<ClientRecurrence> {
+    const response = await api.get<ClientRecurrence>('/dashboard/recurrence')
+    return response.data
+  },
+
+  async getLostClients(minDays?: number): Promise<LostClient[]> {
+    const response = await api.get<LostClient[]>('/dashboard/lost-clients', {
+      params: minDays ? { min_days: minDays } : undefined,
+    })
     return response.data
   },
 }
