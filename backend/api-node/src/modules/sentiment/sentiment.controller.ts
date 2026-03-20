@@ -7,6 +7,10 @@ const service = new SentimentService()
 export async function getClientStatus(req: Request, res: Response) {
   try {
     const { clientId } = req.params
+    if (!clientId) {
+      res.status(400).json({ error: 'clientId é obrigatório' })
+      return
+    }
     const data = await service.getClientSentimentStatus(req.user!.companyId, clientId)
     res.json(data)
   } catch (err) {
@@ -18,6 +22,10 @@ export async function getClientStatus(req: Request, res: Response) {
 export async function analyzeClient(req: Request, res: Response) {
   try {
     const { clientId } = req.params
+    if (!clientId) {
+      res.status(400).json({ error: 'clientId é obrigatório' })
+      return
+    }
     const { conversation_id } = req.body ?? {}
     const data = await service.analyzeClient(req.user!.companyId, clientId, conversation_id)
     res.json(data)
