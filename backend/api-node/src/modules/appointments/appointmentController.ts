@@ -571,6 +571,7 @@ export async function scheduleAppointment(req: Request, res: Response) {
           status,
           notes: notes ?? null,
           priceCharged,
+          source: 'manual',
         },
         include: appointmentInclude,
       })
@@ -592,6 +593,7 @@ export async function scheduleAppointment(req: Request, res: Response) {
             status,
             notes: notes ?? null,
             priceCharged,
+            source: 'manual',
           },
           select: { id: true },
         })
@@ -607,6 +609,7 @@ export async function scheduleAppointment(req: Request, res: Response) {
             status,
             notes: mergeNotesWithDoublePair(notes, primary.id),
             priceCharged,
+            source: 'manual',
           },
           select: { id: true },
         })
