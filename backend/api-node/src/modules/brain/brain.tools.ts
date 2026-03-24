@@ -292,7 +292,7 @@ export async function executeTool(name: string, args: any, companyId: number): P
         LIMIT 3
       `
 
-      const petsStr = pets?.map(p => `${p.name} (${p.species}, ${p.breed ?? 'SRD'}, porte ${p.size ?? '?'})`).join(', ') ?? 'nenhum pet cadastrado'
+      const petsStr = pets?.map(p => `${p.name} (${p.species}, ${p.breed ?? 'Sem raça definida'}, porte ${p.size ?? '?'})`).join(', ') ?? 'nenhum pet cadastrado'
       const histStr = lastAppt?.map(a => `${new Date(String(a.scheduled_date) + 'T12:00:00').toLocaleDateString('pt-BR')} — ${a.service_name}`).join('\n  ') ?? 'sem histórico'
       return `👤 ${client.name}\n📱 ${client.phone}\n🐾 Pets: ${petsStr}\n📋 Últimas visitas:\n  ${histStr}`
     }

@@ -100,7 +100,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         ATENÇÃO — RAÇA NÃO É NOME:
         Raças são palavras como: "Bull Terrier", "Golden Retriever", "Labrador", "Poodle",
         "Shih Tzu", "Yorkshire", "Bulldog", "Beagle", "Dachshund", "Husky", "Pastor Alemão",
-        "Lhasa Apso", "Maltês", "Rottweiler", "Chihuahua", "Pug", "Dobermann", "SRD" etc.
+        "Lhasa Apso", "Maltês", "Rottweiler", "Chihuahua", "Pug", "Dobermann", "Sem raça definida" etc.
         Se o cliente mencionar apenas uma raça, NÃO use a raça como nome — pergunte qual é
         o nome/apelido do pet antes de prosseguir. O nome é o apelido dado pelo dono
         (ex: "Rex", "Bolinha", "Max", "Luna", "Mel", "Toby").
@@ -108,7 +108,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         Args:
             name: Nome/apelido do pet dado pelo dono (NÃO pode ser uma raça)
             species: Espécie — 'cachorro' ou 'gato'
-            breed: Raça (ou 'SRD' apenas se o cliente disse que não sabe)
+            breed: Raça (ou 'Sem raça definida' se o cliente disser que não sabe)
             size: Porte — 'P', 'M', 'G' ou 'GG' (DEVE ter sido PERGUNTADO ao cliente)
         """
         # Lista de raças comuns para detectar confusão nome vs raça
@@ -118,7 +118,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             "beagle", "dachshund", "husky", "pastor alemão", "german shepherd",
             "lhasa apso", "maltês", "maltese", "rottweiler", "chihuahua", "pug",
             "dobermann", "doberman", "border collie", "cocker spaniel", "boxer",
-            "srd", "vira-lata", "vira lata", "pitbull", "pit bull",
+            "srd", "sem raça definida", "sem raca definida", "vira-lata", "vira lata", "pitbull", "pit bull",
             "american bully", "french bulldog", "bulldog francês",
             "shiba inu", "akita", "chow chow", "dálmata", "dalmatian",
             "schnauzer", "bichon frise", "cavalier king charles", "basset hound",
@@ -131,7 +131,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not species or not species.strip():
             missing.append("espécie (cachorro ou gato)")
         if not breed or not breed.strip():
-            missing.append("raça (ou SRD se não souber)")
+            missing.append("raça (ou Sem raça definida se não souber)")
         if not size or not size.strip():
             missing.append("porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))")
 
@@ -141,6 +141,13 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                 "missing_fields": missing,
                 "message": f"Faltam dados obrigatórios: {', '.join(missing)}. Pergunte ao cliente antes de cadastrar.",
             }
+
+        breed_raw = breed.strip()
+        breed_l = breed_raw.lower()
+        if breed_l in ("srd", "sem raça definida", "sem raca definida"):
+            breed_for_db = "Sem raça definida"
+        else:
+            breed_for_db = breed_raw
 
         # Detecta se o nome passado é uma raça conhecida
         if name.strip().lower() in _KNOWN_BREEDS:
@@ -207,7 +214,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                 VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING id
             """,
-                (company_id, client_id, name, species_norm, breed, size_db),
+                (company_id, client_id, name, species_norm, breed_for_db, size_db),
             )
             pet_id = cur.fetchone()["id"]
 

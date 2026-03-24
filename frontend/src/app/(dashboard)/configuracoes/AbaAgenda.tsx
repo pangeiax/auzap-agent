@@ -33,6 +33,19 @@ function computeSlotCount(open: string, close: string): number {
   return Math.floor((closeMin - openMin) / 60);
 }
 
+/** Texto ao lado de Abre/Fecha e nas linhas de especialidade (evita "slot" em inglês). */
+function horariosDisponiveisLabel(count: number): string {
+  if (count <= 0) return "Nenhum horário disponível";
+  if (count === 1) return "1 Horário disponível";
+  return `${count} Horários disponíveis`;
+}
+
+function vagasPorHorarioLabel(maxCap: number): string {
+  if (maxCap <= 0) return "Nenhuma vaga por horário";
+  if (maxCap === 1) return "1 vaga disponível por horário";
+  return `${maxCap} vagas disponíveis por horário`;
+}
+
 function initLocalDays(days: AgendaDay[]): LocalDayState[] {
   return days.map((d) => ({
     day_of_week: d.day_of_week,
@@ -238,7 +251,7 @@ function DayRow({
                 />
               </div>
               <span className="mt-5 text-xs text-[#727B8E]">
-                {slotCount} slot{slotCount !== 1 ? "s" : ""}
+                {horariosDisponiveisLabel(slotCount)}
               </span>
             </div>
           </div>
@@ -255,7 +268,6 @@ function DayRow({
                     (c) => c.specialty_id === sp.id,
                   );
                   const maxCap = cap?.max_capacity ?? 0;
-                  const totalVagas = slotCount * maxCap;
                   const spColor = sp.color || "#1E62EC";
 
                   return (
@@ -271,8 +283,7 @@ function DayRow({
                         {sp.name}
                       </span>
                       <span className="shrink-0 text-xs text-[#727B8E]">
-                        {slotCount} slot{slotCount !== 1 ? "s" : ""} ·{" "}
-                        {totalVagas} vaga{totalVagas !== 1 ? "s" : ""}
+                        {horariosDisponiveisLabel(slotCount)} · {vagasPorHorarioLabel(maxCap)}
                       </span>
                       <div className="flex shrink-0 items-center gap-1">
                         <button
