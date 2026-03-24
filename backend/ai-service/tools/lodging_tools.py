@@ -16,6 +16,21 @@ def _is_uuid(val) -> bool:
 logger = logging.getLogger("ai-service.tools.lodging")
 
 
+def _time_to_hhmm(val) -> str | None:
+    """Normaliza TIME do Postgres para HH:MM."""
+    if val is None:
+        return None
+    if hasattr(val, "strftime"):
+        return val.strftime("%H:%M")
+    s = str(val).strip()
+    return s[:5] if len(s) >= 5 else s
+
+
+def _last_use_day(checkin: date, checkout: date) -> date:
+    """Último dia civil de uso (checkout no banco é fim exclusivo). Nunca persistir isto em checkout_date."""
+    return checkout - timedelta(days=1)
+
+
 def build_lodging_tools(company_id: int, client_id, lodging_type: str = "hotel") -> list:
     """Tools do agente de hospedagem."""
 
@@ -47,19 +62,24 @@ def build_lodging_tools(company_id: int, client_id, lodging_type: str = "hotel")
 
         with get_connection() as conn:
             cur = conn.cursor()
-            enabled_field = "hotel_enabled" if lodging_type == "hotel" else "daycare_enabled"
-            rate_field = "hotel_daily_rate" if lodging_type == "hotel" else "daycare_daily_rate"
-            cur.execute(f"""
-                SELECT {enabled_field}, {rate_field}
+            cur.execute(
+                """
+                SELECT hotel_enabled, daycare_enabled, hotel_daily_rate, daycare_daily_rate,
+                       daycare_checkin_time, daycare_checkout_time
                 FROM petshop_lodging_config
                 WHERE company_id = %s
-            """, (company_id,))
-            config = cur.fetchone()
-            if not config or not config[enabled_field]:
+                """,
+                (company_id,),
+            )
+            cfg = cur.fetchone()
+            enabled = (cfg["hotel_enabled"] if lodging_type == "hotel" else cfg["daycare_enabled"]) if cfg else None
+            rate_key = "hotel_daily_rate" if lodging_type == "hotel" else "daycare_daily_rate"
+            if not cfg or not enabled:
                 service_name = "Hotel" if lodging_type == "hotel" else "Creche"
                 return {"success": False, "message": f"{service_name} não está disponível no momento."}
 
-            daily_rate_val = float(config[rate_field]) if config[rate_field] else None
+            daily_rate_val = float(cfg[rate_key]) if cfg[rate_key] else None
+            daycare_pickup = _time_to_hhmm(cfg.get("daycare_checkout_time"))
 
             # Disponibilidade do período solicitado
             cur.execute("""
@@ -125,6 +145,38 @@ def build_lodging_tools(company_id: int, client_id, lodging_type: str = "hotel")
         rate_info = f"R${daily_rate_val:.2f}/dia" if daily_rate_val else "valor a combinar"
         total_info = f"Total: R${total:.2f} ({days} dia{'s' if days > 1 else ''})" if total else ""
 
+        last_day = _last_use_day(checkin, checkout)
+        pickup_phrase = daycare_pickup or "horário da loja"
+
+        if lodging_type == "daycare":
+            if last_day == checkin:
+                msg = (
+                    f"Há vaga(s) na creche para o dia {checkin.strftime('%d/%m/%Y')} (1 diária). "
+                    f"{rate_info}. {total_info}. "
+                    f"Retirada no mesmo dia até {pickup_phrase}."
+                ).strip()
+            else:
+                msg = (
+                    f"Há vaga(s) na creche de {checkin.strftime('%d/%m/%Y')} a {last_day.strftime('%d/%m/%Y')} "
+                    f"({days} diárias). {rate_info}. {total_info}. "
+                    f"Retirada no último dia ({last_day.strftime('%d/%m/%Y')}) até {pickup_phrase}."
+                ).strip()
+            out = {
+                "success": True,
+                "available": True,
+                "available_capacity": int(min_vagas),
+                "days": days,
+                "daily_rate": daily_rate_val,
+                "total_amount": total,
+                "checkin_date": checkin_date,
+                "checkout_date": checkout_date,
+                "message": msg,
+                "last_day_client": str(last_day),
+                "pickup_time_hint": daycare_pickup,
+            }
+            return out
+
+        msg = f"Há vaga(s) disponíveis. {rate_info}. {total_info}".strip()
         return {
             "success": True,
             "available": True,
@@ -134,7 +186,7 @@ def build_lodging_tools(company_id: int, client_id, lodging_type: str = "hotel")
             "total_amount": total,
             "checkin_date": checkin_date,
             "checkout_date": checkout_date,
-            "message": f"Há vaga(s) disponíveis. {rate_info}. {total_info}".strip(),
+            "message": msg,
         }
 
     def create_lodging(
@@ -180,24 +232,34 @@ def build_lodging_tools(company_id: int, client_id, lodging_type: str = "hotel")
         if checkout <= checkin:
             return {"success": False, "message": "Data de saída deve ser posterior à data de entrada."}
 
-        # Verifica se o tipo está habilitado e busca taxa diária configurada
+        # Verifica se o tipo está habilitado e busca taxa diária e horários (creche)
         with get_connection() as conn:
             cur = conn.cursor()
-            enabled_field = "hotel_enabled" if lodging_type == "hotel" else "daycare_enabled"
-            rate_field = "hotel_daily_rate" if lodging_type == "hotel" else "daycare_daily_rate"
-            cur.execute(f"""
-                SELECT {enabled_field}, {rate_field}
+            cur.execute(
+                """
+                SELECT hotel_enabled, daycare_enabled, hotel_daily_rate, daycare_daily_rate,
+                       daycare_checkout_time
                 FROM petshop_lodging_config
                 WHERE company_id = %s
-            """, (company_id,))
+                """,
+                (company_id,),
+            )
             config = cur.fetchone()
-            if not config or not config[enabled_field]:
+            enabled = (
+                (config["hotel_enabled"] if lodging_type == "hotel" else config["daycare_enabled"])
+                if config
+                else None
+            )
+            rate_key = "hotel_daily_rate" if lodging_type == "hotel" else "daycare_daily_rate"
+            if not config or not enabled:
                 service_name = "Hotel" if lodging_type == "hotel" else "Creche"
                 return {"success": False, "message": f"{service_name} não está disponível no momento."}
 
+            daycare_pickup = _time_to_hhmm(config.get("daycare_checkout_time"))
+
             # Usa a taxa configurada se o agente não passou explicitamente
-            if daily_rate is None and config[rate_field]:
-                daily_rate = float(config[rate_field])
+            if daily_rate is None and config[rate_key]:
+                daily_rate = float(config[rate_key])
 
         days = (checkout - checkin).days
         total_amount = round(float(daily_rate) * days, 2) if daily_rate else None
@@ -229,12 +291,41 @@ def build_lodging_tools(company_id: int, client_id, lodging_type: str = "hotel")
                 (client_id, company_id)
             )
 
+        pickup_phrase = daycare_pickup or "horário da loja"
+        last_day = _last_use_day(checkin, checkout)
+
+        if lodging_type == "daycare":
+            if last_day == checkin:
+                confirm_msg = (
+                    f"Creche confirmada para o dia {checkin.strftime('%d/%m/%Y')} (1 diária). "
+                    f"Retirada no mesmo dia até {pickup_phrase}."
+                )
+            else:
+                confirm_msg = (
+                    f"Creche confirmada de {checkin.strftime('%d/%m/%Y')} a {last_day.strftime('%d/%m/%Y')} "
+                    f"({days} diárias). Retirada no último dia ({last_day.strftime('%d/%m/%Y')}) até {pickup_phrase}."
+                )
+            return {
+                "success": True,
+                "lodging_id": str(lodging_id),
+                "days": days,
+                "total_amount": total_amount,
+                "message": confirm_msg,
+                "checkin_date": checkin_date,
+                "checkout_date": checkout_date,
+                "last_day_client": str(last_day),
+                "pickup_time_hint": daycare_pickup,
+            }
+
+        confirm_msg = (
+            f"Hospedagem confirmada! Check-in {checkin_date}, check-out {checkout_date} ({days} dias)."
+        )
         return {
             "success": True,
             "lodging_id": str(lodging_id),
             "days": days,
             "total_amount": total_amount,
-            "message": f"Hospedagem confirmada! Check-in {checkin_date}, check-out {checkout_date} ({days} dias)."
+            "message": confirm_msg,
         }
 
     def cancel_lodging(lodging_id: str, reason: str = None) -> dict:

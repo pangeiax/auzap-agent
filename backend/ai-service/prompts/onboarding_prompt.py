@@ -91,7 +91,7 @@ ORDEM DE COLETA (priorize o porte):
      • Raças de gato (Persa, Siamês, Angorá, etc.) → espécie=gato
      • "é um gatinho/cachorrinho" → espécie já informada
      • Só pergunte espécie se NÃO for possível identificar pela raça nem pelo contexto
-  4. RAÇA — raça do animal. Se o cliente disser que não sabe → use "SRD". Mas NUNCA assuma SRD sem perguntar.
+  4. RAÇA — raça do animal. Se o cliente disser que não sabe → use "Sem raça definida". Mas NUNCA assuma isso sem perguntar.
 
 FLUXO:
 • Ao receber informações parciais do pet, identifique o que já tem e pergunte o que falta

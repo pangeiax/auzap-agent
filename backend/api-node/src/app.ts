@@ -18,6 +18,7 @@ import { lodgingReservationRouter } from './modules/lodgings/lodgingReservationR
 import { lodgingConfigRouter } from './modules/lodgings/lodgingConfigRoutes'
 import settingsRoutes from './modules/settings/settingsRoutes'
 import sentimentRoutes from './modules/sentiment/sentiment.routes'
+import brainRoutes from './modules/brain/brain.routes'
 
 dotenv.config()
 
@@ -54,5 +55,6 @@ app.use('/lodging-reservations', lodgingReservationRouter)
 app.use('/lodging-config', lodgingConfigRouter)
 app.use('/settings', settingsRoutes)
 app.use('/sentiment', sentimentRoutes)
+app.use('/brain', brainRoutes)
 
 export default app

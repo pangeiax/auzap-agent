@@ -6,19 +6,25 @@ import { QUICK_ACTIONS_PAIRS, QUICK_ACTIONS_ROTATION_INTERVAL, REFRESH_ANIMATION
 export interface QuickActionsCarouselProps {
   onQuickAction: (action: string) => void
   disabled?: boolean
+  extraPairs?: [string, string][]
 }
 
 export const QuickActionsCarousel = memo(function QuickActionsCarousel({
   onQuickAction,
   disabled,
+  extraPairs,
 }: QuickActionsCarouselProps) {
+  const pairs = extraPairs && extraPairs.length > 0
+    ? [...extraPairs, ...QUICK_ACTIONS_PAIRS]
+    : QUICK_ACTIONS_PAIRS
+
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isRotating, setIsRotating] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const goToNext = useCallback(() => {
-    setCurrentIndex((prev) => (prev + 1) % QUICK_ACTIONS_PAIRS.length)
-  }, [])
+    setCurrentIndex((prev) => (prev + 1) % pairs.length)
+  }, [pairs.length])
 
   useEffect(() => {
     intervalRef.current = setInterval(goToNext, QUICK_ACTIONS_ROTATION_INTERVAL)
@@ -35,7 +41,7 @@ export const QuickActionsCarousel = memo(function QuickActionsCarousel({
     intervalRef.current = setInterval(goToNext, QUICK_ACTIONS_ROTATION_INTERVAL)
   }
 
-  const [longQuestion, shortQuestion] = QUICK_ACTIONS_PAIRS[currentIndex]
+  const [longQuestion, shortQuestion] = pairs[currentIndex] ?? pairs[0]!
 
   return (
     <div className="flex w-full items-center justify-center gap-2">

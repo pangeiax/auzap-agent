@@ -18,6 +18,7 @@ export interface DashboardChatInputProps {
   onQuickAction?: (action: string) => void
   showQuickActions?: boolean
   disabled?: boolean
+  quickActionsPairs?: [string, string][]
 }
 
 export function DashboardChatInput({
@@ -25,6 +26,7 @@ export function DashboardChatInput({
   onQuickAction,
   showQuickActions = true,
   disabled = false,
+  quickActionsPairs,
 }: DashboardChatInputProps) {
   const [message, setMessage] = useState('')
   const [showSearch, setShowSearch] = useState(false)
@@ -312,7 +314,7 @@ export function DashboardChatInput({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          <QuickActionsCarousel onQuickAction={handleQuickAction} disabled={disabled} />
+          <QuickActionsCarousel onQuickAction={handleQuickAction} disabled={disabled} extraPairs={quickActionsPairs} />
         </motion.div>
       )}
     </div>

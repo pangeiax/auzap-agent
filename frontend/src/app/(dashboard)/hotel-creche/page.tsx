@@ -69,8 +69,8 @@ function shiftYmd(ymd: string, deltaDays: number): string {
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
 }
 
-// checkout_date é interpretado como data de saída (modelo fim exclusivo) pelo backend.
-// Nesta UI, exibimos exatamente o valor recebido do backend.
+// checkout_date no backend é fim exclusivo do período (estilo hotel): o pet ocupa os dias
+// [checkin, checkout). Para creche, o “último dia na creche” = dia anterior a checkout_date no calendário.
 
 function getTodayYmd(): string {
   const d = new Date()
@@ -82,6 +82,22 @@ function formatYmdToBR(ymd: string): string {
   const [y, m, d] = ymd.split('-')
   if (!y || !m || !d) return '—'
   return `${d}/${m}/${y}`
+}
+
+function isoYmd(iso: string | Date | null | undefined): string {
+  if (!iso) return ''
+  const s = typeof iso === 'string' ? iso : iso.toISOString()
+  return s.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? ''
+}
+
+/** Último dia civil em que o pet usa a creche (checkout no API é exclusivo). */
+function lastCrecheDayYmd(checkoutYmd: string): string {
+  return shiftYmd(checkoutYmd, -1)
+}
+
+function isDaycareSingleDiaria(res: LodgingReservation): boolean {
+  if (res.type !== 'daycare') return false
+  return isoYmd(res.checkin_date) === lastCrecheDayYmd(isoYmd(res.checkout_date))
 }
 
 function MiniDatePicker({
@@ -325,11 +341,21 @@ function PetCombobox({
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-function ReservadoCard({ res, onCheckin }: { res: LodgingReservation; onCheckin: (r: LodgingReservation) => void }) {
+function ReservadoCard({
+  res,
+  onCheckin,
+  config,
+}: {
+  res: LodgingReservation
+  onCheckin: (r: LodgingReservation) => void
+  config: LodgingConfig | null
+}) {
   const petName = res.pet_name ?? 'Pet'
   const daysToCheckin = daysFromNow(res.checkin_date)
   const urgent = daysToCheckin <= 0
   const soon = daysToCheckin === 1 || daysToCheckin === 0
+  const cin = config?.daycare_checkin_time
+  const cout = config?.daycare_checkout_time
   return (
     <div className={cn(
       'group flex items-start gap-3 rounded-xl border p-3 transition-colors',
@@ -360,17 +386,37 @@ function ReservadoCard({ res, onCheckin }: { res: LodgingReservation; onCheckin:
           <p className="text-xs text-[#727B8E]">{[res.pet_breed, res.pet_size].filter(Boolean).join(' · ')}</p>
         )}
         <p className="mt-0.5 text-xs text-[#727B8E]">{res.client_name ?? '—'}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[#727B8E]">
+        <div className="mt-1 flex flex-col gap-0.5 text-xs text-[#727B8E]">
           <span>
-            Check-in: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkin_date)}</span>
+            {res.type === 'daycare' ? 'Entrada' : 'Check-in'}:{' '}
+            <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkin_date)}</span>
             {daysToCheckin === 0 ? <span className="ml-1 font-semibold text-green-600">(hoje)</span>
              : daysToCheckin === 1 ? <span className="ml-1 font-semibold text-blue-600">(amanhã)</span>
              : daysToCheckin > 0 ? <span className="ml-1">({daysToCheckin}d)</span>
              : <span className="ml-1 font-semibold text-red-500">({Math.abs(daysToCheckin)}d atraso)</span>}
           </span>
-          <span>
-            Saída: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span>
-          </span>
+          {res.type === 'daycare' ? (
+            isDaycareSingleDiaria(res) ? (
+              <span>
+                Dia na creche:{' '}
+                <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatYmdToBR(isoYmd(res.checkin_date))}</span>
+                {cin && cout ? (
+                  <span className="ml-1 text-[#727B8E]">· {cin} — {cout}</span>
+                ) : null}
+              </span>
+            ) : (
+              <span>
+                Período:{' '}
+                <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                  {formatYmdToBR(isoYmd(res.checkin_date))} a {formatYmdToBR(lastCrecheDayYmd(isoYmd(res.checkout_date)))}
+                </span>
+              </span>
+            )
+          ) : (
+            <span>
+              Saída: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span>
+            </span>
+          )}
         </div>
       </div>
       <button
@@ -390,10 +436,23 @@ function ReservadoCard({ res, onCheckin }: { res: LodgingReservation; onCheckin:
   )
 }
 
-function HospedadoCard({ res, onCheckout, loadingId }: { res: LodgingReservation; onCheckout: (r: LodgingReservation) => void; loadingId: string | null }) {
+function HospedadoCard({
+  res,
+  onCheckout,
+  loadingId,
+  config,
+}: {
+  res: LodgingReservation
+  onCheckout: (r: LodgingReservation) => void
+  loadingId: string | null
+  config: LodgingConfig | null
+}) {
   const petName = res.pet_name ?? 'Pet'
-  const remaining = daysFromNow(res.checkout_date)
+  const lastDayYmd =
+    res.type === 'daycare' ? lastCrecheDayYmd(isoYmd(res.checkout_date)) : isoYmd(res.checkout_date)
+  const remaining = daysFromNow(lastDayYmd)
   const checkoutUrgent = remaining <= 0
+  const cout = config?.daycare_checkout_time
   return (
     <div className={cn(
       'group flex items-start gap-3 rounded-xl border p-3 transition-colors',
@@ -417,13 +476,33 @@ function HospedadoCard({ res, onCheckout, loadingId }: { res: LodgingReservation
           <p className="text-xs text-[#727B8E]">{[res.pet_breed, res.pet_size].filter(Boolean).join(' · ')}</p>
         )}
         <p className="mt-0.5 text-xs text-[#727B8E]">{res.client_name ?? '—'}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[#727B8E]">
-          <span>
-            Check-out: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span>
-            {remaining <= 0 ? <span className="ml-1 font-semibold text-amber-500">(vence hoje)</span>
-             : remaining === 1 ? <span className="ml-1 font-semibold text-amber-500">(1 dia)</span>
-             : <span className="ml-1">({remaining}d restantes)</span>}
-          </span>
+        <div className="mt-1 flex flex-col gap-0.5 text-xs text-[#727B8E]">
+          {res.type === 'daycare' ? (
+            isDaycareSingleDiaria(res) ? (
+              <span>
+                Dia na creche:{' '}
+                <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatYmdToBR(isoYmd(res.checkin_date))}</span>
+                {cout ? <span className="ml-1">· retirada até {cout}</span> : null}
+                {remaining <= 0 ? <span className="ml-1 font-semibold text-amber-500">(hoje)</span>
+                 : remaining === 1 ? <span className="ml-1 font-semibold text-amber-500">(amanhã)</span>
+                 : <span className="ml-1">({remaining}d)</span>}
+              </span>
+            ) : (
+              <span>
+                Até{' '}
+                <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatYmdToBR(lastCrecheDayYmd(isoYmd(res.checkout_date)))}</span>
+                {remaining <= 0 ? <span className="ml-1 font-semibold text-amber-500">(último dia hoje)</span>
+                 : <span className="ml-1">({remaining}d no período)</span>}
+              </span>
+            )
+          ) : (
+            <span>
+              Check-out: <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">{formatDateBR(res.checkout_date)}</span>
+              {remaining <= 0 ? <span className="ml-1 font-semibold text-amber-500">(vence hoje)</span>
+               : remaining === 1 ? <span className="ml-1 font-semibold text-amber-500">(1 dia)</span>
+               : <span className="ml-1">({remaining}d restantes)</span>}
+            </span>
+          )}
         </div>
       </div>
       <button
@@ -546,19 +625,8 @@ export default function HotelCrechePage() {
       if (conflict) { setCheckinError('Esta vaga já está ocupada neste período.'); return }
     }
 
-    // Garante respeito à capacidade máxima (max_capacity) antes de marcar como hospedado.
-    try {
-      const availability = await lodgingReservationService.checkAvailability(
-        checkinTarget.type,
-        checkinTarget.checkin_date,
-        checkinTarget.checkout_date,
-      )
-      if (!availability.available || availability.min_available_capacity <= 0) {
-        setCheckinError('Sem vagas disponíveis para este período.'); return
-      }
-    } catch {
-      setCheckinError('Erro ao verificar disponibilidade.'); return
-    }
+    // Não chamar checkAvailability aqui: essa métrica é para *novas* reservas. Com hotel no limite,
+    // min_available_capacity fica 0 mesmo com vaga já reservada para este pet (confirmed conta na ocupação).
 
     setCheckinLoading(true)
     try {
@@ -626,7 +694,8 @@ export default function HotelCrechePage() {
     const today = getTodayYmd()
     const tomorrow = shiftYmd(today, 1)
     setNewCheckinDate(today)
-    setNewCheckoutDate(tomorrow)
+    // Creche: segundo campo = último dia na creche (inclusivo); hotel: check-out exclusivo (dia após última noite).
+    setNewCheckoutDate(activeTab === 'daycare' ? today : tomorrow)
 
     const rate = activeTab === 'hotel' ? config?.hotel_daily_rate : config?.daycare_daily_rate
     setNewDailyRate(rate ? String(Number(rate).toFixed(2)) : '')
@@ -641,16 +710,32 @@ export default function HotelCrechePage() {
     if (!selectedClientId) { setNewResError('Selecione um cliente.'); return }
     if (!selectedPetId) { setNewResError('Selecione um pet.'); return }
     if (!newCheckinDate) { setNewResError('Informe a data de check-in.'); return }
-    if (!newCheckoutDate) { setNewResError('Informe a data de check-out.'); return }
+    if (!newCheckoutDate) {
+      setNewResError(activeTab === 'daycare' ? 'Informe o último dia na creche.' : 'Informe a data de check-out.')
+      return
+    }
 
     const today = getTodayYmd()
     if (newCheckinDate < today) { setNewResError('Data de check-in não pode ser no passado.'); return }
-    if (newCheckoutDate < today) { setNewResError('Data de check-out não pode ser no passado.'); return }
 
-    // O backend exige checkout > checkin.
-    if (newCheckoutDate <= newCheckinDate) {
-      setNewResError('A data de check-out deve ser após o check-in.');
-      return
+    const checkoutForApi =
+      activeTab === 'daycare' ? shiftYmd(newCheckoutDate, 1) : newCheckoutDate
+
+    if (activeTab === 'daycare') {
+      if (newCheckoutDate < newCheckinDate) {
+        setNewResError('O último dia na creche não pode ser antes do primeiro dia.')
+        return
+      }
+      if (newCheckoutDate < today) {
+        setNewResError('O último dia na creche não pode ser no passado.')
+        return
+      }
+    } else {
+      if (newCheckoutDate < today) { setNewResError('Data de check-out não pode ser no passado.'); return }
+      if (newCheckoutDate <= newCheckinDate) {
+        setNewResError('A data de check-out deve ser após o check-in.')
+        return
+      }
     }
 
     setNewResLoading(true)
@@ -659,7 +744,7 @@ export default function HotelCrechePage() {
       const availability = await lodgingReservationService.checkAvailability(
         activeTab,
         newCheckinDate,
-        newCheckoutDate,
+        checkoutForApi,
       )
 
       if (!availability.available || availability.min_available_capacity <= 0) {
@@ -672,7 +757,7 @@ export default function HotelCrechePage() {
         pet_id: selectedPetId,
         type: activeTab,
         checkin_date: newCheckinDate,
-        checkout_date: newCheckoutDate,
+        checkout_date: checkoutForApi,
         ...(newDailyRate ? { daily_rate: Number(newDailyRate.replace(',', '.')) } : {}),
         ...(newEmergencyContact.trim() ? { emergency_contact: newEmergencyContact.trim() } : {}),
       })
@@ -819,7 +904,7 @@ export default function HotelCrechePage() {
                         <p className="text-sm text-[#727B8E]">Nenhuma reserva pendente</p>
                       </div>
                     ) : (
-                      reservados.map((r) => <ReservadoCard key={r.id} res={r} onCheckin={handleOpenCheckin} />)
+                      reservados.map((r) => <ReservadoCard key={r.id} res={r} onCheckin={handleOpenCheckin} config={config} />)
                     )}
                   </div>
                 </motion.div>
@@ -846,7 +931,7 @@ export default function HotelCrechePage() {
                         <p className="text-sm text-[#727B8E]">Nenhum pet hospedado</p>
                       </div>
                     ) : (
-                      hospedados.map((r) => <HospedadoCard key={r.id} res={r} onCheckout={(r) => setCheckoutTarget(r)} loadingId={checkoutLoadingId} />)
+                      hospedados.map((r) => <HospedadoCard key={r.id} res={r} onCheckout={(r) => setCheckoutTarget(r)} loadingId={checkoutLoadingId} config={config} />)
                     )}
                   </div>
                 </motion.div>
@@ -863,7 +948,25 @@ export default function HotelCrechePage() {
             <div className="rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-3 text-sm">
               <p className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">{checkinTarget.pet_name}</p>
               <p className="text-[#727B8E]">{checkinTarget.client_name}</p>
-              <p className="text-[#727B8E]">{formatDateBR(checkinTarget.checkin_date)} → {formatDateBR(checkinTarget.checkout_date)}</p>
+              {checkinTarget.type === 'daycare' ? (
+                isDaycareSingleDiaria(checkinTarget) ? (
+                  <p className="text-[#727B8E]">
+                    <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">Dia na creche:</span>{' '}
+                    {formatYmdToBR(isoYmd(checkinTarget.checkin_date))}
+                    {config?.daycare_checkin_time && config?.daycare_checkout_time
+                      ? ` · ${config.daycare_checkin_time} — ${config.daycare_checkout_time}`
+                      : null}
+                  </p>
+                ) : (
+                  <p className="text-[#727B8E]">
+                    <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">Período:</span>{' '}
+                    {formatYmdToBR(isoYmd(checkinTarget.checkin_date))} a{' '}
+                    {formatYmdToBR(lastCrecheDayYmd(isoYmd(checkinTarget.checkout_date)))}
+                  </p>
+                )
+              ) : (
+                <p className="text-[#727B8E]">{formatDateBR(checkinTarget.checkin_date)} → {formatDateBR(checkinTarget.checkout_date)}</p>
+              )}
             </div>
 
             <div>
@@ -946,28 +1049,37 @@ export default function HotelCrechePage() {
           {/* Datas */}
           <div className="grid grid-cols-2 gap-3">
             <MiniDatePicker
-              label="Check-in"
+              label={activeTab === 'daycare' ? 'Primeiro dia na creche' : 'Check-in'}
               value={newCheckinDate}
               minYmd={todayYmd}
               disabled={newResLoading}
               onChange={(ymd) => {
                 setNewCheckinDate(ymd)
-                // Garante checkout > checkin
                 setNewCheckoutDate((prev) => {
                   if (!prev) return prev
+                  if (activeTab === 'daycare') {
+                    return prev < ymd ? ymd : prev
+                  }
                   const minCheckout = shiftYmd(ymd, 1)
                   return prev <= ymd ? minCheckout : prev
                 })
               }}
             />
             <MiniDatePicker
-              label="Check-out"
+              label={activeTab === 'daycare' ? 'Último dia na creche' : 'Check-out'}
               value={newCheckoutDate}
-              minYmd={shiftYmd(newCheckinDate || todayYmd, 1)}
+              minYmd={activeTab === 'daycare' ? (newCheckinDate || todayYmd) : shiftYmd(newCheckinDate || todayYmd, 1)}
               disabled={newResLoading}
               onChange={setNewCheckoutDate}
             />
           </div>
+          {activeTab === 'daycare' && (
+            <p className="text-xs leading-relaxed text-[#727B8E]">
+              Selecione o período em dias corridos (pode ser o mesmo dia para uma diária). O cadastro envia automaticamente
+              o dia seguinte ao último dia como fim do período no sistema. Horários: {config?.daycare_checkin_time ?? '—'} —{' '}
+              {config?.daycare_checkout_time ?? '—'}.
+            </p>
+          )}
 
           {/* Diária */}
           <div>
@@ -1015,6 +1127,12 @@ export default function HotelCrechePage() {
               Confirmar check-out de <span className="font-semibold text-[#434A57] dark:text-[#f5f9fc]">{checkoutTarget.pet_name}</span>?
               A estadia será encerrada e o pet liberado.
             </p>
+            {checkoutTarget.type === 'daycare' && isDaycareSingleDiaria(checkoutTarget) && (
+              <p className="text-xs text-[#727B8E]">
+                Creche no dia {formatYmdToBR(isoYmd(checkoutTarget.checkin_date))}
+                {config?.daycare_checkout_time ? ` · retirada até ${config.daycare_checkout_time}` : null}.
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCheckoutTarget(null)} disabled={!!checkoutLoadingId}>Cancelar</Button>
               <Button onClick={() => handleCheckout(checkoutTarget)} disabled={!!checkoutLoadingId}

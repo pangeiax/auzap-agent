@@ -42,6 +42,20 @@ const reservationInclude = {
   pet: { select: { name: true, breed: true, size: true } },
 }
 
+/** Calendar day in UTC (YYYY-MM-DD), matches PostgreSQL @db.Date semantics with toISOString. */
+function utcDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Pet occupies calendar day D iff checkin_date <= D AND checkout_date > D (checkout exclusive).
+ * Capacity counts only rows with status confirmed | checked_in (same as vw_lodging_availability).
+ */
+function lodgingOccupiesUtcCalendarDay(checkin: Date, checkout: Date, dayStart: Date): boolean {
+  const d = utcDateKey(dayStart)
+  return utcDateKey(checkin) <= d && utcDateKey(checkout) > d
+}
+
 // GET /lodging-reservations
 export async function listLodgingReservations(req: Request, res: Response) {
   try {
@@ -151,14 +165,14 @@ export async function createLodgingReservation(req: Request, res: Response) {
       })
       const capByDay = new Map(caps.map((c) => [c.dayOfWeek, c]))
 
-      // Load all non-cancelled reservations that overlap with the requested period
+      // Só confirmed e checked_in ocupam vaga fisicamente (alinhado à view e à query de capacidade)
       const overlapping = await tx.petshopLodgingReservation.findMany({
         where: {
           companyId,
           type,
-          status: { not: 'cancelled' },
-          checkinDate: { lt: checkout },   // starts before our checkout
-          checkoutDate: { gt: checkin },   // ends after our checkin
+          status: { in: ['confirmed', 'checked_in'] },
+          checkinDate: { lt: checkout }, // sobrepõe o período solicitado [checkin, checkout)
+          checkoutDate: { gt: checkin },
         },
         select: { checkinDate: true, checkoutDate: true },
       })
@@ -184,14 +198,9 @@ export async function createLodgingReservation(req: Request, res: Response) {
           throw Object.assign(new Error(`Dia ${dayStr} está fechado ou sem vagas configuradas para ${type === 'hotel' ? 'Hotel' : 'Creche'}.`), { statusCode: 409 })
         }
 
-        // Count existing reservations covering this exact day
-        const dayMs = cursor.getTime()
-        const nextDayMs = dayMs + 86400000
-        const count = overlapping.filter((r) => {
-          const rStart = new Date(r.checkinDate).getTime()
-          const rEnd = new Date(r.checkoutDate).getTime()
-          return rStart < nextDayMs && rEnd > dayMs
-        }).length
+        const count = overlapping.filter((r) =>
+          lodgingOccupiesUtcCalendarDay(new Date(r.checkinDate), new Date(r.checkoutDate), cursor),
+        ).length
 
         if (count >= cap.maxCapacity) {
           const dayStr = cursor.toISOString().slice(0, 10)

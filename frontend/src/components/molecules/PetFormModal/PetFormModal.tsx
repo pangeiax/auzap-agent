@@ -178,7 +178,7 @@ export function PetFormModal({
           <FormField
             id="breed"
             label="Raça"
-            placeholder="Ex: Labrador, SRD..."
+            placeholder="Ex: Labrador, Sem raça definida..."
             {...register('breed')}
           />
         </div>

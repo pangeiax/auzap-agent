@@ -15,6 +15,9 @@ import {
   Trash2,
   Clock,
   CalendarClock,
+  Mail,
+  User,
+  Sparkles,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import {
@@ -25,7 +28,6 @@ import { Input } from "@/components/atoms/Input";
 import { TextArea } from "@/components/atoms/TextArea";
 import { Button } from "@/components/atoms/Button";
 import { Modal } from "@/components/molecules/Modal";
-import { getImage } from "@/assets/images";
 import {
   maskPhone,
   maskCardNumber,
@@ -51,6 +53,7 @@ import type { AgendaDay } from "@/services/settingsService";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { AbaAgenda } from "./AbaAgenda";
 import type { Petshop } from "@/types";
+import type { User as AuthUser } from "@/types/auth";
 import type { Specialty } from "@/types/petshop";
 import type { Service } from "@/types";
 import type { CapacityRule } from "@/types/petshop";
@@ -346,9 +349,16 @@ function HourlyCapacityEditor({
   );
 }
 
+function settingsEntityInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "•";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 function SettingsProfileSidebar({
   petshop,
+  user,
   loading,
   error,
   onNovoServico,
@@ -356,6 +366,7 @@ function SettingsProfileSidebar({
   onLogout,
 }: {
   petshop: Petshop | null;
+  user: AuthUser | null;
   loading?: boolean;
   error?: string | null;
   onNovoServico?: () => void;
@@ -366,33 +377,89 @@ function SettingsProfileSidebar({
   generateDays?: number;
   onGenerateDaysChange?: (days: number) => void;
 }) {
+  const establishmentName =
+    petshop?.company?.name ?? petshop?.assistantName ?? "Estabelecimento";
+  const displayPhone = petshop?.phone || petshop?.ownerPhone;
+
   return (
     <div className="flex h-full flex-col gap-4">
-      {/* User / Petshop info */}
-      <div className="flex flex-col items-center gap-4 rounded-xl sm:flex-row sm:items-start">
-        <img
-          width={200}
-          height={200}
-          alt="Estabelecimento avatar"
-          className="size-20 shrink-0 object-cover rounded-full ring-2 ring-[#727B8E]/10"
-          src={getImage("cleber_santos").src}
-        />
-        <div className="min-w-0 text-center sm:text-left">
-          {loading ? (
-            <div className="mt-2 h-4 w-28 animate-pulse rounded bg-[#727B8E]/20" />
-          ) : error ? (
-            <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">{error}</p>
-          ) : (
-            <>
-              <p className="mt-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc] truncate">
-                {petshop?.company?.name ?? petshop?.assistantName ?? "Estabelecimento"}
-              </p>
-              <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
-                {petshop?.phone || petshop?.ownerPhone || "—"}
-              </p>
-            </>
-          )}
-        </div>
+      {/* Conta + estabelecimento (sem foto mockada) */}
+      <div className="rounded-2xl border border-[#727B8E]/12 bg-gradient-to-b from-[#F4F6F9]/90 to-white p-4 shadow-sm dark:border-[#40485A] dark:from-[#25262a]/90 dark:to-[#1A1B1D]">
+        {loading ? (
+          <div className="flex gap-3">
+            <div className="h-14 w-14 shrink-0 animate-pulse rounded-2xl bg-[#727B8E]/20" />
+            <div className="flex-1 space-y-2 pt-0.5">
+              <div className="h-4 w-40 animate-pulse rounded bg-[#727B8E]/20" />
+              <div className="h-3 w-32 animate-pulse rounded bg-[#727B8E]/15" />
+              <div className="h-3 w-48 animate-pulse rounded bg-[#727B8E]/15" />
+            </div>
+          </div>
+        ) : error ? (
+          <p className="text-sm text-amber-600 dark:text-amber-400">{error}</p>
+        ) : (
+          <div className="flex gap-3">
+            <div
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#1E62EC] to-[#1557c7] text-sm font-bold uppercase tracking-wide text-white shadow-inner shadow-black/10"
+              aria-hidden
+            >
+              {settingsEntityInitials(establishmentName)}
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#727B8E] dark:text-[#8a94a6]">
+                  Estabelecimento
+                </p>
+                <p className="truncate text-sm font-semibold leading-snug text-[#434A57] dark:text-[#f5f9fc]">
+                  {establishmentName}
+                </p>
+              </div>
+
+              {displayPhone && (
+                <div className="flex items-start gap-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                  <Smartphone className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1E62EC]/80" />
+                  <span className="min-w-0 break-all">{maskPhone(displayPhone)}</span>
+                </div>
+              )}
+
+              {user && (
+                <>
+                  <div className="flex items-start gap-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                    <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1E62EC]/80" />
+                    <span className="min-w-0">
+                      <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                        {user.name}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                    <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1E62EC]/80" />
+                    <span className="min-w-0 truncate" title={user.email}>
+                      {user.email}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {petshop?.assistantName && (
+                <div className="flex items-start gap-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500/90" />
+                  <span>
+                    Assistente:{" "}
+                    <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                      {petshop.assistantName}
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              {petshop?.company?.plan && (
+                <span className="inline-flex rounded-full border border-[#727B8E]/15 bg-[#F4F6F9] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#727B8E] dark:border-[#40485A] dark:bg-[#212225] dark:text-[#8a94a6]">
+                  Plano {petshop.company.plan}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {showNovoServico && onNovoServico && (
@@ -2102,7 +2169,9 @@ function HospedagemContent() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+        <div className="flex flex-col gap-6 pb-2">
       {/* ─── Hotel ─── */}
       <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
@@ -2285,7 +2354,7 @@ function HospedagemContent() {
             )}
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pb-1">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#727B8E]/10">
@@ -2382,25 +2451,31 @@ function HospedagemContent() {
               </tbody>
             </table>
           </div>
-          <div className="flex justify-end">
-            <Button
-              onClick={handleSaveLodging}
-              disabled={saving}
-              size="sm"
-              className="flex items-center gap-2"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                "Salvar hospedagem"
-              )}
-            </Button>
-          </div>
         </div>
       )}
+        </div>
+      </div>
+
+      {/* Rodapé fixo no painel da aba: área de cima rola; o botão permanece visível */}
+      <div className="sticky bottom-0 z-10 shrink-0 border-t border-[#727B8E]/10 bg-white/95 px-1 py-3 backdrop-blur-sm dark:border-[#40485A] dark:bg-[#1A1B1D]/95 sm:px-0">
+        <div className="flex justify-end">
+          <Button
+            onClick={handleSaveLodging}
+            disabled={saving}
+            size="sm"
+            className="flex items-center gap-2 shadow-sm"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              "Salvar hospedagem"
+            )}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2940,9 +3015,10 @@ export default function ConfiguracoesPage() {
             ref={contentScrollRef}
             className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-4 pt-14 pb-8 sm:gap-11 sm:px-6 sm:pt-12 sm:pb-12 lg:flex-row lg:px-10 lg:py-16"
           >
-            <div className="shrink-0">
+            <div className="w-full shrink-0 lg:max-w-[320px]">
               <SettingsProfileSidebar
                 petshop={petshop}
+                user={user}
                 loading={loadingPetshop}
                 error={petshopError}
                 showNovoServico={false}

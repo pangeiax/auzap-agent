@@ -106,7 +106,10 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
         cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
         cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
         hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
-        svc_lines.append(f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno enquanto você trabalha")
+        svc_lines.append(
+            f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno enquanto você trabalha. "
+            f"No cadastro, a data de fim do período é o dia seguinte ao último dia na creche (fim exclusivo)."
+        )
 
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
     pet_context = (
@@ -233,7 +236,10 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
         cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
         cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
         hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
-        svc_lines.append(f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno")
+        svc_lines.append(
+            f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno. "
+            f"No cadastro, a data de fim do período é o dia seguinte ao último dia na creche (fim exclusivo)."
+        )
 
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
 
