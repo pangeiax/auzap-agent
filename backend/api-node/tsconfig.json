@@ -10,9 +10,9 @@
     "declaration": true,
     "declarationMap": true,
 
-    // Stricter Typechecking Options
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    // strict continua true; estes dois geram muito atrito com Prisma e libs sem tipos perfeitos.
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
     "strict": true,
     "jsx": "react-jsx",
     "verbatimModuleSyntax": false,

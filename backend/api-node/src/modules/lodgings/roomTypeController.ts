@@ -148,8 +148,11 @@ export async function deleteRoomType(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const { id } = req.params
+    if (!id) {
+      return res.status(400).json({ error: 'Missing room type id' })
+    }
 
-    const existing = await prisma.petshopRoomType.findUnique({ where: { id: id! } })
+    const existing = await prisma.petshopRoomType.findUnique({ where: { id } })
     if (!existing || existing.companyId !== companyId) {
       return res.status(404).json({ error: 'Room type not found' })
     }
@@ -168,7 +171,7 @@ export async function deleteRoomType(req: Request, res: Response) {
       })
     }
 
-    await prisma.petshopRoomType.delete({ where: { id: id! } })
+    await prisma.petshopRoomType.delete({ where: { id } })
 
     res.json({ success: true })
   } catch (error) {
