@@ -1,3 +1,9 @@
+from prompts.service_cadastro import (
+    build_lodging_room_types_cadastro_block,
+    build_petshop_services_cadastro_block,
+)
+
+
 def _normalize_size_for_price_key(raw) -> str | None:
     """Alinha porte do banco (P/M/G/GG, PT/EN) às chaves de price_by_size (small/medium/large)."""
     if raw is None:
@@ -42,10 +48,7 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
 
     client_name = client["name"] if client and client.get("name") else None
     active_pet = router_ctx.get("active_pet")
-
-    # Auto-resolve: se o cliente tem apenas 1 pet, usa ele automaticamente
-    if not active_pet and len(pets) == 1:
-        active_pet = pets[0]["name"]
+    # Não preenche active_pet só porque há 1 pet — alinhado ao booking (evita presumir pet após ciclo encerrado).
 
     # Determina porte do pet ativo para exibir o preço correto (DB usa P/M/G; JSON usa small/medium/large)
     price_key = None
@@ -86,30 +89,36 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
             price = f"R${s['price']}"
         else:
             price = "consultar"
-        desc = f" — {s['description']}" if s.get("description") else ""
-        svc_lines.append(
-            f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
-        )
+        svc_lines.append(f"  • {s['name']}: {price} ({s.get('duration_min','?')} min)")
 
-    # Adiciona serviços de hospedagem se habilitados
+    # Adiciona serviços de hospedagem usando preços dos room_types
+    lodging_room_types = context.get("lodging_room_types", [])
+    hotel_rts = [r for r in lodging_room_types if r.get("lodging_type") == "hotel"]
+    daycare_rts = [r for r in lodging_room_types if r.get("lodging_type") == "daycare"]
+
     if lodging_config.get("hotel_enabled"):
-        rate = lodging_config.get("hotel_daily_rate")
-        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
         cin = (lodging_config.get("hotel_checkin_time") or "")[:5]
         cout = (lodging_config.get("hotel_checkout_time") or "")[:5]
         hours_str = f" (check-in {cin}, check-out {cout})" if cin and cout else ""
-        svc_lines.append(f"  • Hotel para pets: {rate_str}{hours_str} — hospedagem noturna com acompanhamento")
+        if hotel_rts:
+            for rt in hotel_rts:
+                dr = rt.get("daily_rate")
+                dr_str = f"R${float(dr):.2f}/dia" if dr is not None else "consultar"
+                svc_lines.append(f"  • Hotel — {rt['name']}: {dr_str}{hours_str}")
+        else:
+            svc_lines.append(f"  • Hotel para pets: consultar{hours_str} — hospedagem noturna com acompanhamento")
 
     if lodging_config.get("daycare_enabled"):
-        rate = lodging_config.get("daycare_daily_rate")
-        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
         cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
         cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
         hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
-        svc_lines.append(
-            f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno enquanto você trabalha. "
-            f"No cadastro, a data de fim do período é o dia seguinte ao último dia na creche (fim exclusivo)."
-        )
+        if daycare_rts:
+            for rt in daycare_rts:
+                dr = rt.get("daily_rate")
+                dr_str = f"R${float(dr):.2f}/dia" if dr is not None else "consultar"
+                svc_lines.append(f"  • Creche — {rt['name']}: {dr_str}{hours_str}")
+        else:
+            svc_lines.append(f"  • Creche diurna: consultar{hours_str} — cuidado diurno enquanto você trabalha.")
 
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
     pet_context = (
@@ -117,6 +126,8 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
         if active_pet and active_pet_size_label
         else ""
     )
+    cadastro_servicos = build_petshop_services_cadastro_block(services)
+    cadastro_lodging = build_lodging_room_types_cadastro_block(context.get("lodging_room_types"))
 
     # Regra de porte obrigatório
     size_rule = ""
@@ -136,10 +147,16 @@ O porte confirmado via set_pet_size define o preço. Use o campo size_label da r
     return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 {f"Cliente: {client_name}" if client_name else ""}{pet_context}
 
-SERVIÇOS DISPONÍVEIS:
+{cadastro_servicos}
+{cadastro_lodging}
+SERVIÇOS DISPONÍVEIS (preços/duração — detalhes e políticas no cadastro acima, quando houver):
 {services_text}{size_rule}
 
 ━━━ REGRAS ━━━
+• Ao explicar o que o serviço inclui, restrições ou canal: use os blocos **CADASTRO DO PETSHOP** acima;
+  não invente política além do cadastro.
+• "Consigo fechar/contratar o plano aqui?" / aderir a plano: responda **só** com o que o cadastro diz;
+  **não** trate isso como pedido de humano nem prometa "vou alinhar com a equipe" sem o cliente pedir atendente explicitamente.
 • Se a mensagem atual pedir atendimento humano, falar com atendente/pessoa real/alguém da loja: NÃO
   discuta preço nem serviço — responda uma linha natural que vai verificar e retornar em breve. O
   Roteador deve usar escalation_agent; se você ainda recebeu a mensagem, não insista em venda.
@@ -147,11 +164,13 @@ SERVIÇOS DISPONÍVEIS:
 • Prefira responder sem emoji
 • Se usar emoji, use no máximo 1 e só em confirmação especial ou despedida calorosa
 • NUNCA use emoji ao informar preço, porte, serviço, regras ou próximos passos
-• Se o pet JÁ tem porte definido no contexto acima → use direto, mostre APENAS o preço daquele porte. NÃO chame set_pet_size — o porte já é conhecido.
+• Se aparece «Pet em foco» acima com porte definido → use direto, mostre APENAS o preço daquele porte. NÃO chame set_pet_size — o porte já é conhecido.
+• Se **não** há pet em foco e o cliente tem **um** pet só: pergunte numa frase se o orçamento é para ele antes de travar preço por porte (o Roteador pode ter zerado o pet após um fluxo encerrado).
 • Se o porte NÃO é conhecido → liste os serviços SEM preços, PERGUNTE o porte, chame set_pet_size para confirmar, e só então mostre o preço filtrado
 • NUNCA liste preços de múltiplos portes (P/M/G) — sempre filtre pelo porte do pet
 • Destaque o que o serviço inclui quando isso agregar valor à resposta
 • Se o cliente demonstrar interesse em agendar, sugira de forma natural: "Quer que eu já separe um horário?"
+• Agendamento pelo WhatsApp: para o **mesmo** pet, combinamos **um serviço por vez**; para **vários** pets no mesmo serviço, marca-se **um pet por vez** conforme a agenda (capacidade do horário).
 • NUNCA invente preços — use APENAS os dados acima
 • Se o cliente perguntar sobre serviço que não está na lista, informe que não está disponível e ofereça as alternativas"""
 
@@ -170,11 +189,21 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
 
     client_name = client["name"] if client and client.get("name") else None
 
-    # Auto-resolve: se o cliente tem apenas 1 pet, usa ele para preço por porte
+    # Pet para exibir preço por porte: prioriza active_pet do Roteador; 1 pet só se estágio ≠ COMPLETED
+    pin = (router_ctx.get("active_pet") or "").strip()
+    stage_upper = (router_ctx.get("stage") or "").strip().upper()
     auto_pet = None
     price_key = None
     auto_pet_size_label = None
-    if len(pets) == 1:
+    if pin:
+        auto_pet = next(
+            (p for p in pets if (p.get("name") or "").strip().lower() == pin.lower()), None
+        )
+        if auto_pet:
+            raw_sz = auto_pet.get("size", "")
+            price_key = _normalize_size_for_price_key(raw_sz) if raw_sz else None
+            auto_pet_size_label = _porte_label_pt(price_key)
+    elif len(pets) == 1 and stage_upper != "COMPLETED":
         auto_pet = pets[0]
         raw_sz = auto_pet.get("size", "")
         price_key = _normalize_size_for_price_key(raw_sz) if raw_sz else None
@@ -217,31 +246,39 @@ def build_faq_prompt(context: dict, router_ctx: dict) -> str:
             price = f"R${s['price']}"
         else:
             price = "consultar"
-        desc = f" — {s['description']}" if s.get("description") else ""
-        svc_lines.append(
-            f"  • {s['name']}: {price} ({s.get('duration_min','?')} min){desc}"
-        )
-    # Adiciona hospedagem na listagem de serviços/preços do FAQ
+        svc_lines.append(f"  • {s['name']}: {price} ({s.get('duration_min','?')} min)")
+    # Adiciona hospedagem na listagem usando preços dos room_types
+    lodging_room_types = context.get("lodging_room_types", [])
+    hotel_rts_faq = [r for r in lodging_room_types if r.get("lodging_type") == "hotel"]
+    daycare_rts_faq = [r for r in lodging_room_types if r.get("lodging_type") == "daycare"]
+
     if lodging_config.get("hotel_enabled"):
-        rate = lodging_config.get("hotel_daily_rate")
-        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
         cin = (lodging_config.get("hotel_checkin_time") or "")[:5]
         cout = (lodging_config.get("hotel_checkout_time") or "")[:5]
         hours_str = f" (check-in {cin}, check-out {cout})" if cin and cout else ""
-        svc_lines.append(f"  • Hotel para pets: {rate_str}{hours_str} — hospedagem noturna")
+        if hotel_rts_faq:
+            for rt in hotel_rts_faq:
+                dr = rt.get("daily_rate")
+                dr_str = f"R${float(dr):.2f}/dia" if dr is not None else "consultar"
+                svc_lines.append(f"  • Hotel — {rt['name']}: {dr_str}{hours_str}")
+        else:
+            svc_lines.append(f"  • Hotel para pets: consultar{hours_str} — hospedagem noturna")
 
     if lodging_config.get("daycare_enabled"):
-        rate = lodging_config.get("daycare_daily_rate")
-        rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
         cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
         cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
         hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
-        svc_lines.append(
-            f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno. "
-            f"No cadastro, a data de fim do período é o dia seguinte ao último dia na creche (fim exclusivo)."
-        )
+        if daycare_rts_faq:
+            for rt in daycare_rts_faq:
+                dr = rt.get("daily_rate")
+                dr_str = f"R${float(dr):.2f}/dia" if dr is not None else "consultar"
+                svc_lines.append(f"  • Creche — {rt['name']}: {dr_str}{hours_str}")
+        else:
+            svc_lines.append(f"  • Creche diurna: consultar{hours_str} — cuidado diurno.")
 
     services_text = "\n".join(svc_lines) or "  nenhum cadastrado"
+    cadastro_servicos = build_petshop_services_cadastro_block(services)
+    cadastro_lodging = build_lodging_room_types_cadastro_block(context.get("lodging_room_types"))
 
     contact_parts = []
     if petshop_phone:
@@ -271,10 +308,15 @@ INFORMAÇÕES DO PETSHOP:
 Horários: {hours_lines}{features_text}
 {contact_text}
 
-SERVIÇOS E PREÇOS:
+{cadastro_servicos}
+{cadastro_lodging}
+SERVIÇOS E PREÇOS (valores/duração — detalhes e políticas no cadastro acima, quando houver):
 {services_text}{size_rule}
 
 ━━━ REGRAS ━━━
+• Ao explicar o que cada serviço inclui ou políticas de canal: use os blocos **CADASTRO DO PETSHOP** acima; não invente além do cadastro.
+• Perguntas sobre planos e se dá para fechar/contratar pelo WhatsApp: use o cadastro; **não** use frase genérica
+  de handoff ("alinhar com a equipe") a menos que o cliente peça **explicitamente** falar com pessoa/atendente.
 • Se a mensagem atual pedir atendimento humano, atendente ou falar com pessoa real/alguém da loja:
   não use FAQ para "substituir" o humano — responda uma linha natural que vai verificar e retornar em
   breve. O Roteador deve usar escalation_agent.
@@ -297,6 +339,7 @@ SERVIÇOS E PREÇOS:
 • Se o cliente perguntar sobre serviço ou produto que NÃO está na lista → informe que no momento não oferece esse serviço e apresente as alternativas disponíveis
 • Se não encontrar a resposta em nenhuma fonte → diga que não tem essa informação no momento e ofereça ajudar com outra coisa — NUNCA invente
 • Se a dúvida puder ser resolvida agendando algo → sugira naturalmente ao final
+• Política de marcação (para alinhar expectativa): **um serviço por vez** para o mesmo pet; **vários pets** no mesmo serviço — um de cada vez na conversa de agendamento. Não agende você mesmo (use o fluxo do assistente de agendamento/saúde).
 • Quando o cliente perguntar endereço ou telefone → responda diretamente com os dados acima"""
 
 

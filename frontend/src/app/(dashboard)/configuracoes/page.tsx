@@ -48,7 +48,10 @@ import {
 } from "@/services";
 import {
   lodgingConfigService,
+  roomTypeService,
   type LodgingConfig,
+  type RoomType,
+  type CreateRoomTypeData,
 } from "@/services/lodgingService";
 import type { AgendaDay } from "@/services/settingsService";
 import { useAuthContext } from "@/contexts/AuthContext";
@@ -709,7 +712,7 @@ function ServicosContent({
   return (
     <>
       {/* ─── Master-Detail layout ─── */}
-      <div className="lg:flex flex-col min-h-0 gap-5">
+      <div className="lg:flex lg:flex-row min-h-0 gap-5">
 
         {/* ─── Left: Specialty sidebar ─── */}
         <div className="flex w-full lg:max-w-52 shrink-0 flex-col gap-1">
@@ -2007,47 +2010,252 @@ function isLodgingDayClosedFromAgenda(
   return row.is_closed;
 }
 
+const EMPTY_ROOM_TYPE_FORM: CreateRoomTypeData & { description: string } = {
+  lodging_type: "hotel",
+  name: "",
+  description: "",
+  capacity: 1,
+  daily_rate: 0,
+};
+
+// ─── Subcomponente: lista de tipos de quarto por lodging_type ────────────────
+function RoomTypeSection({
+  lodgingType,
+  roomTypes,
+  onAdd,
+  onEdit,
+  onToggle,
+  onDelete,
+  deletingId,
+}: {
+  lodgingType: "hotel" | "daycare";
+  roomTypes: RoomType[];
+  onAdd: () => void;
+  onEdit: (rt: RoomType) => void;
+  onToggle: (rt: RoomType) => void;
+  onDelete: (rt: RoomType) => void;
+  deletingId: string | null;
+}) {
+  const label = lodgingType === "hotel" ? "Hotel" : "Creche";
+  const totalCapacity = roomTypes.filter((r) => r.is_active).reduce((s, r) => s + r.capacity, 0);
+
+  return (
+    <div className="rounded-lg border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+            Tipos de Quarto — {label}
+          </p>
+          {roomTypes.length > 0 && (
+            <p className="text-[10px] text-[#727B8E] mt-0.5">
+              Capacidade total ativa: <strong>{totalCapacity}</strong> vaga{totalCapacity !== 1 ? "s" : ""}
+              {" "}· substitui o campo "Vagas por dia" para {label}.
+            </p>
+          )}
+          {roomTypes.length === 0 && (
+            <p className="text-[10px] text-[#727B8E] mt-0.5">
+              Sem tipos configurados — usa a capacidade da tabela "Vagas por dia".
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded-lg border border-[#1E62EC]/25 bg-[#1E62EC]/10 px-3 py-1.5 text-xs font-medium text-[#1E62EC] hover:bg-[#1E62EC]/20 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          Adicionar
+        </button>
+      </div>
+
+      {roomTypes.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {roomTypes.map((rt) => (
+            <div
+              key={rt.id}
+              className={cn(
+                "flex items-center justify-between rounded-lg border bg-white dark:bg-[#1A1B1D] px-3 py-2.5",
+                rt.is_active
+                  ? "border-[#727B8E]/10 dark:border-[#40485A]"
+                  : "border-[#727B8E]/10 dark:border-[#40485A] opacity-50",
+              )}
+            >
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc] truncate">
+                    {rt.name}
+                  </span>
+                  {!rt.is_active && (
+                    <span className="rounded-full bg-[#727B8E]/10 px-1.5 py-0.5 text-[10px] text-[#727B8E]">
+                      Inativo
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5">
+                  <span className="text-xs text-[#727B8E]">
+                    {rt.capacity} vaga{rt.capacity !== 1 ? "s" : ""}
+                  </span>
+                  <span className="text-xs font-semibold text-[#1E62EC]">
+                    R$ {rt.daily_rate.toFixed(2)}/dia
+                  </span>
+                  {rt.description && (
+                    <span className="text-xs text-[#727B8E] truncate max-w-[160px]" title={rt.description}>
+                      {rt.description}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0 ml-2">
+                <button
+                  type="button"
+                  onClick={() => onToggle(rt)}
+                  title={rt.is_active ? "Desativar" : "Ativar"}
+                  className="rounded-lg p-1.5 text-[#727B8E] hover:bg-[#727B8E]/10 transition-colors"
+                >
+                  {rt.is_active ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onEdit(rt)}
+                  title="Editar"
+                  className="rounded-lg p-1.5 text-[#727B8E] hover:bg-[#727B8E]/10 transition-colors"
+                >
+                  <Edit2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(rt)}
+                  disabled={deletingId === rt.id}
+                  title="Excluir"
+                  className="rounded-lg p-1.5 text-[#727B8E] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors disabled:opacity-40"
+                >
+                  {deletingId === rt.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HospedagemContent() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [hotelEnabled, setHotelEnabled] = useState(false);
-  const [hotelDailyRate, setHotelDailyRate] = useState("");
   const [hotelCheckinTime, setHotelCheckinTime] = useState("08:00");
   const [hotelCheckoutTime, setHotelCheckoutTime] = useState("18:00");
-  const [hotelCapacities, setHotelCapacities] = useState<
-    Record<number, number>
-  >({});
-  const [hotelActiveByDay, setHotelActiveByDay] = useState<Record<number, boolean>>(
-    {},
-  );
-
   const [daycareEnabled, setDaycareEnabled] = useState(false);
-  const [daycareDailyRate, setDaycareDailyRate] = useState("");
   const [daycareCheckinTime, setDaycareCheckinTime] = useState("07:00");
   const [daycareCheckoutTime, setDaycareCheckoutTime] = useState("19:00");
-  const [daycareCapacities, setDaycareCapacities] = useState<
-    Record<number, number>
-  >({});
-  const [daycareActiveByDay, setDaycareActiveByDay] = useState<
-    Record<number, boolean>
-  >({});
-  const [defaultHotelCap, setDefaultHotelCap] = useState(5);
-  const [defaultDaycareCap, setDefaultDaycareCap] = useState(5);
   const [agendaDays, setAgendaDays] = useState<AgendaDay[] | null>(null);
 
-  const coerceIsActive = (raw: unknown): boolean => {
-    // API deveria vir como boolean, mas pode chegar como string dependendo de como foi serializado.
-    // Se vier indefinido, preserva comportamento anterior: assume ativo (true).
-    if (raw === undefined) return true
-    return (
-      raw === true ||
-      raw === 1 ||
-      raw === '1' ||
-      raw === 'true'
-    )
-  }
+  // ─── Room Types ────────────────────────────────────────────────────────────
+  const [hotelRoomTypes, setHotelRoomTypes] = useState<RoomType[]>([]);
+  const [daycareRoomTypes, setDaycareRoomTypes] = useState<RoomType[]>([]);
+  const [roomTypeModalOpen, setRoomTypeModalOpen] = useState(false);
+  const [roomTypeEditing, setRoomTypeEditing] = useState<RoomType | null>(null);
+  const [roomTypeForm, setRoomTypeForm] = useState<CreateRoomTypeData & { description: string }>(EMPTY_ROOM_TYPE_FORM);
+  const [savingRoomType, setSavingRoomType] = useState(false);
+  const [deletingRoomTypeId, setDeletingRoomTypeId] = useState<string | null>(null);
+
+  const fetchRoomTypes = useCallback(async () => {
+    const all = await roomTypeService.list();
+    setHotelRoomTypes(all.filter((r) => r.lodging_type === "hotel"));
+    setDaycareRoomTypes(all.filter((r) => r.lodging_type === "daycare"));
+  }, []);
+
+  const openNewRoomType = (lodgingType: "hotel" | "daycare") => {
+    setRoomTypeEditing(null);
+    setRoomTypeForm({ ...EMPTY_ROOM_TYPE_FORM, lodging_type: lodgingType });
+    setRoomTypeModalOpen(true);
+  };
+
+  const openEditRoomType = (rt: RoomType) => {
+    setRoomTypeEditing(rt);
+    setRoomTypeForm({
+      lodging_type: rt.lodging_type,
+      name: rt.name,
+      description: rt.description ?? "",
+      capacity: rt.capacity,
+      daily_rate: rt.daily_rate,
+    });
+    setRoomTypeModalOpen(true);
+  };
+
+  const handleSaveRoomType = async () => {
+    if (!roomTypeForm.name.trim()) {
+      toast.error("Validação", "O nome do tipo de quarto é obrigatório.");
+      return;
+    }
+    if (roomTypeForm.capacity < 0) {
+      toast.error("Validação", "A capacidade deve ser 0 ou mais.");
+      return;
+    }
+    if (roomTypeForm.daily_rate < 0) {
+      toast.error("Validação", "A diária deve ser 0 ou mais.");
+      return;
+    }
+    setSavingRoomType(true);
+    try {
+      if (roomTypeEditing) {
+        await roomTypeService.update(roomTypeEditing.id, {
+          name: roomTypeForm.name.trim(),
+          description: roomTypeForm.description.trim() || null,
+          capacity: roomTypeForm.capacity,
+          daily_rate: roomTypeForm.daily_rate,
+        });
+        toast.success("Salvo!", "Tipo de quarto atualizado com sucesso.");
+      } else {
+        await roomTypeService.create({
+          ...roomTypeForm,
+          name: roomTypeForm.name.trim(),
+          description: roomTypeForm.description.trim() || undefined,
+        });
+        toast.success("Criado!", "Tipo de quarto adicionado com sucesso.");
+      }
+      setRoomTypeModalOpen(false);
+      await fetchRoomTypes();
+    } catch {
+      toast.error("Erro", "Não foi possível salvar o tipo de quarto.");
+    } finally {
+      setSavingRoomType(false);
+    }
+  };
+
+  const handleToggleRoomType = async (rt: RoomType) => {
+    try {
+      await roomTypeService.update(rt.id, { is_active: !rt.is_active });
+      await fetchRoomTypes();
+    } catch {
+      toast.error("Erro", "Não foi possível alterar o status.");
+    }
+  };
+
+  const handleDeleteRoomType = async (rt: RoomType) => {
+    setDeletingRoomTypeId(rt.id);
+    try {
+      await roomTypeService.delete(rt.id);
+      toast.success("Removido!", `"${rt.name}" foi excluído.`);
+      await fetchRoomTypes();
+    } catch (err: any) {
+      const msg = err?.response?.data?.error ?? "Não foi possível excluir o tipo de quarto.";
+      toast.error("Erro", msg);
+    } finally {
+      setDeletingRoomTypeId(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -2055,39 +2263,19 @@ function HospedagemContent() {
     Promise.all([
       lodgingConfigService.get(),
       settingsService.getAgenda().catch(() => null),
+      roomTypeService.list().catch(() => []),
     ])
-      .then(([cfg, agenda]) => {
+      .then(([cfg, agenda, allRoomTypes]) => {
         if (cancelled) return;
         setHotelEnabled(cfg.hotel_enabled);
-        setHotelDailyRate(
-          cfg.hotel_daily_rate != null ? String(cfg.hotel_daily_rate) : "",
-        );
         setHotelCheckinTime(cfg.hotel_checkin_time);
         setHotelCheckoutTime(cfg.hotel_checkout_time);
         setDaycareEnabled(cfg.daycare_enabled);
-        setDaycareDailyRate(
-          cfg.daycare_daily_rate != null ? String(cfg.daycare_daily_rate) : "",
-        );
         setDaycareCheckinTime(cfg.daycare_checkin_time);
         setDaycareCheckoutTime(cfg.daycare_checkout_time);
-        const hCap: Record<number, number> = {};
-        const dCap: Record<number, number> = {};
-        const hActive: Record<number, boolean> = {};
-        const dActive: Record<number, boolean> = {};
-        cfg.capacities.forEach((c) => {
-          if (c.type === "hotel") {
-            hCap[c.day_of_week] = c.max_capacity;
-            hActive[c.day_of_week] = coerceIsActive(c.is_active);
-          } else {
-            dCap[c.day_of_week] = c.max_capacity;
-            dActive[c.day_of_week] = coerceIsActive(c.is_active);
-          }
-        });
-        setHotelCapacities(hCap);
-        setDaycareCapacities(dCap);
-        setHotelActiveByDay(hActive);
-        setDaycareActiveByDay(dActive);
         setAgendaDays(agenda?.days ?? null);
+        setHotelRoomTypes((allRoomTypes as RoomType[]).filter((r) => r.lodging_type === "hotel"));
+        setDaycareRoomTypes((allRoomTypes as RoomType[]).filter((r) => r.lodging_type === "daycare"));
       })
       .catch(() =>
         toast.error(
@@ -2107,95 +2295,19 @@ function HospedagemContent() {
   const handleSaveLodging = async () => {
     setSaving(true);
     try {
-      let daysForSave = agendaDays;
-      if (!daysForSave) {
-        try {
-          const agenda = await settingsService.getAgenda();
-          daysForSave = agenda.days;
-        } catch {
-          daysForSave = null;
-        }
-      }
-
-      // Salva config (enabled/rates/horários)
       await lodgingConfigService.update({
         hotel_enabled: hotelEnabled,
-        hotel_daily_rate: hotelDailyRate
-          ? Number(hotelDailyRate)
-          : undefined,
         hotel_checkin_time: hotelCheckinTime,
         hotel_checkout_time: hotelCheckoutTime,
         daycare_enabled: daycareEnabled,
-        daycare_daily_rate: daycareDailyRate
-          ? Number(daycareDailyRate)
-          : undefined,
         daycare_checkin_time: daycareCheckinTime,
         daycare_checkout_time: daycareCheckoutTime,
       });
-
-      // Salva capacidades (hotel/daycare) consolidando agenda (petshop_business_hours) + is_active
-      const capacities = LODGING_DAY_NAMES.flatMap(({ dayOfWeek }) => {
-        const closed = isLodgingDayClosedFromAgenda(daysForSave, dayOfWeek);
-        const hotelActive = !closed && (hotelActiveByDay[dayOfWeek] ?? true);
-        const daycareActive =
-          !closed && (daycareActiveByDay[dayOfWeek] ?? true);
-
-        return [
-          {
-            type: "hotel" as const,
-            day_of_week: dayOfWeek,
-            max_capacity: hotelActive
-              ? hotelCapacities[dayOfWeek] ?? 0
-              : 0,
-            is_active: hotelActive,
-          },
-          {
-            type: "daycare" as const,
-            day_of_week: dayOfWeek,
-            max_capacity: daycareActive
-              ? daycareCapacities[dayOfWeek] ?? 0
-              : 0,
-            is_active: daycareActive,
-          },
-        ];
-      });
-
-      await lodgingConfigService.upsertCapacities(capacities);
-
-      toast.success(
-        "Hospedagem salva!",
-        "Configurações e vagas atualizadas com sucesso.",
-      );
+      toast.success("Hospedagem salva!", "Configurações atualizadas com sucesso.");
     } catch {
       toast.error("Erro", "Não foi possível salvar a hospedagem.");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const applyDefaultCapacities = (type: "hotel" | "daycare") => {
-    if (type === "hotel") {
-      const next: Record<number, number> = { ...hotelCapacities };
-      LODGING_DAY_NAMES.forEach(({ dayOfWeek }) => {
-        if (
-          !isLodgingDayClosedFromAgenda(agendaDays, dayOfWeek) &&
-          (hotelActiveByDay[dayOfWeek] ?? true)
-        ) {
-          next[dayOfWeek] = defaultHotelCap;
-        }
-      });
-      setHotelCapacities(next);
-    } else {
-      const next: Record<number, number> = { ...daycareCapacities };
-      LODGING_DAY_NAMES.forEach(({ dayOfWeek }) => {
-        if (
-          !isLodgingDayClosedFromAgenda(agendaDays, dayOfWeek) &&
-          (daycareActiveByDay[dayOfWeek] ?? true)
-        ) {
-          next[dayOfWeek] = defaultDaycareCap;
-        }
-      });
-      setDaycareCapacities(next);
     }
   };
 
@@ -2234,20 +2346,7 @@ function HospedagemContent() {
           </label>
         </div>
         {hotelEnabled && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Diária (R$)
-              </label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={hotelDailyRate}
-                onChange={(e) => setHotelDailyRate(e.target.value)}
-                placeholder="0,00"
-              />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
                 Horário de check-in
@@ -2269,6 +2368,19 @@ function HospedagemContent() {
               />
             </div>
           </div>
+        )}
+
+        {/* ─── Tipos de quarto — Hotel ─── */}
+        {hotelEnabled && (
+          <RoomTypeSection
+            lodgingType="hotel"
+            roomTypes={hotelRoomTypes}
+            onAdd={() => openNewRoomType("hotel")}
+            onEdit={openEditRoomType}
+            onToggle={handleToggleRoomType}
+            onDelete={handleDeleteRoomType}
+            deletingId={deletingRoomTypeId}
+          />
         )}
       </div>
 
@@ -2294,20 +2406,7 @@ function HospedagemContent() {
           </label>
         </div>
         {daycareEnabled && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Diária (R$)
-              </label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={daycareDailyRate}
-                onChange={(e) => setDaycareDailyRate(e.target.value)}
-                placeholder="0,00"
-              />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
                 Horário de entrada
@@ -2330,69 +2429,135 @@ function HospedagemContent() {
             </div>
           </div>
         )}
+
+        {/* ─── Tipos de quarto — Creche ─── */}
+        {daycareEnabled && (
+          <RoomTypeSection
+            lodgingType="daycare"
+            roomTypes={daycareRoomTypes}
+            onAdd={() => openNewRoomType("daycare")}
+            onEdit={openEditRoomType}
+            onToggle={handleToggleRoomType}
+            onDelete={handleDeleteRoomType}
+            deletingId={deletingRoomTypeId}
+          />
+        )}
       </div>
 
-      {/* ─── Vagas por dia ─── */}
-      {(hotelEnabled || daycareEnabled) && (
-        <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-4">
+      {/* ─── Modal tipos de quarto ─── */}
+      <Modal
+        isOpen={roomTypeModalOpen}
+        onClose={() => setRoomTypeModalOpen(false)}
+        title={roomTypeEditing ? "Editar tipo de quarto" : "Novo tipo de quarto"}
+      >
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+              Nome <span className="text-red-500">*</span>
+            </label>
+            <Input
+              value={roomTypeForm.name}
+              onChange={(e) => setRoomTypeForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="ex: Standard, Premium, Suíte VIP"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+              Descrição
+            </label>
+            <TextArea
+              value={roomTypeForm.description}
+              onChange={(e) => setRoomTypeForm((p) => ({ ...p, description: e.target.value }))}
+              placeholder="Descreva o que inclui este tipo de quarto..."
+              rows={2}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-                Vagas por dia
-              </p>
-              <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
-                Dias fechados seguem a aba Agenda (horário na base). Se a agenda não
-                carregar, usa-se o horário salvo no cadastro do petshop.
-              </p>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Capacidade (vagas) <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="number"
+                min="0"
+                value={roomTypeForm.capacity}
+                onChange={(e) =>
+                  setRoomTypeForm((p) => ({ ...p, capacity: Number(e.target.value) }))
+                }
+                placeholder="ex: 5"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                Diária (R$) <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={roomTypeForm.daily_rate}
+                onChange={(e) =>
+                  setRoomTypeForm((p) => ({ ...p, daily_rate: Number(e.target.value) }))
+                }
+                placeholder="ex: 150,00"
+              />
             </div>
           </div>
-
-          {/* Quick-fill defaults */}
-          <div className="flex flex-wrap gap-4 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] px-4 py-3">
-            <p className="w-full text-[11px] font-semibold uppercase tracking-wide text-[#727B8E]">Preenchimento rápido</p>
-            {hotelEnabled && (
-              <div className="flex items-end gap-2">
-                <div>
-                  <p className="mb-1 text-xs text-[#727B8E]">Padrão Hotel</p>
-                  <input
-                    type="number"
-                    min="0"
-                    value={defaultHotelCap}
-                    onChange={(e) => setDefaultHotelCap(Number(e.target.value))}
-                    className="w-20 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-2 py-1.5 text-sm text-center text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => applyDefaultCapacities("hotel")}
-                  className="rounded-lg border border-[#1E62EC]/25 bg-[#1E62EC]/10 px-3 py-1.5 text-xs font-medium text-[#1E62EC] hover:bg-[#1E62EC]/20 transition-colors"
-                >
-                  Aplicar nos abertos
-                </button>
-              </div>
-            )}
-            {daycareEnabled && (
-              <div className="flex items-end gap-2">
-                <div>
-                  <p className="mb-1 text-xs text-[#727B8E]">Padrão Creche</p>
-                  <input
-                    type="number"
-                    min="0"
-                    value={defaultDaycareCap}
-                    onChange={(e) => setDefaultDaycareCap(Number(e.target.value))}
-                    className="w-20 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-2 py-1.5 text-sm text-center text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => applyDefaultCapacities("daycare")}
-                  className="rounded-lg border border-[#8B5CF6]/25 bg-[#8B5CF6]/10 px-3 py-1.5 text-xs font-medium text-[#8B5CF6] hover:bg-[#8B5CF6]/20 transition-colors"
-                >
-                  Aplicar nos abertos
-                </button>
-              </div>
-            )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRoomTypeModalOpen(false)}
+              disabled={savingRoomType}
+            >
+              Cancelar
+            </Button>
+            <Button size="sm" onClick={handleSaveRoomType} disabled={savingRoomType}>
+              {savingRoomType ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  Salvando...
+                </>
+              ) : roomTypeEditing ? (
+                "Salvar alterações"
+              ) : (
+                "Criar tipo"
+              )}
+            </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* ─── Visão geral de capacidade (read-only) ─── */}
+      {(hotelEnabled || daycareEnabled) && (
+        <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+          <div>
+            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+              Visão geral de capacidade
+            </p>
+            <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+              Calculada automaticamente: soma dos tipos de quarto ativos × agenda de funcionamento.
+              Dias fechados (aba Agenda) sempre terão capacidade zero.
+            </p>
+          </div>
+
+          {/* Alertas quando não há tipos de quarto */}
+          {(hotelEnabled && hotelRoomTypes.filter((r) => r.is_active).length === 0) && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
+              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                <strong>Hotel</strong> habilitado mas sem tipos de quarto ativos. Adicione pelo menos um tipo de quarto para que reservas sejam aceitas.
+              </p>
+            </div>
+          )}
+          {(daycareEnabled && daycareRoomTypes.filter((r) => r.is_active).length === 0) && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
+              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                <strong>Creche</strong> habilitada mas sem tipos de quarto ativos. Adicione pelo menos um tipo de quarto para que reservas sejam aceitas.
+              </p>
+            </div>
+          )}
 
           <div className="overflow-x-auto pb-1">
             <table className="w-full text-sm">
@@ -2402,12 +2567,12 @@ function HospedagemContent() {
                     Dia
                   </th>
                   {hotelEnabled && (
-                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-2">
+                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-4">
                       Hotel
                     </th>
                   )}
                   {daycareEnabled && (
-                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-2">
+                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-4">
                       Creche
                     </th>
                   )}
@@ -2416,33 +2581,22 @@ function HospedagemContent() {
               <tbody>
                 {LODGING_DAY_NAMES.map(({ dayOfWeek, label }) => {
                   const closed = isLodgingDayClosedFromAgenda(agendaDays, dayOfWeek);
-                  const hotelInactive = !(hotelActiveByDay[dayOfWeek] ?? true);
-                  const daycareInactive = !(daycareActiveByDay[dayOfWeek] ?? true);
-                  const blockedByCapacity =
-                    (hotelEnabled && hotelInactive) ||
-                    (daycareEnabled && daycareInactive);
-                  const rowBlocked = closed || blockedByCapacity;
+                  const hotelCap = closed ? 0 : hotelRoomTypes.filter((r) => r.is_active).reduce((s, r) => s + r.capacity, 0);
+                  const daycareCap = closed ? 0 : daycareRoomTypes.filter((r) => r.is_active).reduce((s, r) => s + r.capacity, 0);
                   return (
                     <tr
                       key={dayOfWeek}
                       className={cn(
                         "border-b border-[#727B8E]/5 last:border-0",
-                        rowBlocked && "opacity-40",
+                        closed && "opacity-40",
                       )}
                     >
                       <td className="py-2.5 pr-4">
                         <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "text-sm font-medium",
-                              rowBlocked
-                                ? "text-[#727B8E]"
-                                : "text-[#434A57] dark:text-[#f5f9fc]",
-                            )}
-                          >
+                          <span className={cn("text-sm font-medium", closed ? "text-[#727B8E]" : "text-[#434A57] dark:text-[#f5f9fc]")}>
                             {label}
                           </span>
-                          {rowBlocked && (
+                          {closed && (
                             <span className="rounded-full bg-[#727B8E]/10 px-1.5 py-0.5 text-[10px] text-[#727B8E]">
                               Fechado
                             </span>
@@ -2450,39 +2604,29 @@ function HospedagemContent() {
                         </div>
                       </td>
                       {hotelEnabled && (
-                        <td className="py-2.5 px-2 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            disabled={closed || hotelInactive}
-                            value={closed || hotelInactive ? 0 : (hotelCapacities[dayOfWeek] ?? 0)}
-                            onChange={(e) => {
-                              if (closed || hotelInactive) return;
-                              setHotelCapacities((p) => ({
-                                ...p,
-                                [dayOfWeek]: Number(e.target.value),
-                              }));
-                            }}
-                            className="w-20 mx-auto text-center rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-2 py-1.5 text-sm text-[#434A57] dark:text-[#f5f9fc] disabled:opacity-40 focus:border-[#1E62EC] focus:outline-none"
-                          />
+                        <td className="py-2.5 px-4 text-center">
+                          {closed ? (
+                            <span className="text-xs text-[#727B8E]">—</span>
+                          ) : hotelRoomTypes.filter((r) => r.is_active).length === 0 ? (
+                            <span className="text-xs text-amber-500">Sem tipos</span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center w-10 h-8 rounded-lg bg-[#1E62EC]/8 dark:bg-[#1E62EC]/15 text-sm font-semibold text-[#1E62EC]">
+                              {hotelCap}
+                            </span>
+                          )}
                         </td>
                       )}
                       {daycareEnabled && (
-                        <td className="py-2.5 px-2 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            disabled={closed || daycareInactive}
-                            value={closed || daycareInactive ? 0 : (daycareCapacities[dayOfWeek] ?? 0)}
-                            onChange={(e) => {
-                              if (closed || daycareInactive) return;
-                              setDaycareCapacities((p) => ({
-                                ...p,
-                                [dayOfWeek]: Number(e.target.value),
-                              }));
-                            }}
-                            className="w-20 mx-auto text-center rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-2 py-1.5 text-sm text-[#434A57] dark:text-[#f5f9fc] disabled:opacity-40 focus:border-[#1E62EC] focus:outline-none"
-                          />
+                        <td className="py-2.5 px-4 text-center">
+                          {closed ? (
+                            <span className="text-xs text-[#727B8E]">—</span>
+                          ) : daycareRoomTypes.filter((r) => r.is_active).length === 0 ? (
+                            <span className="text-xs text-amber-500">Sem tipos</span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center w-10 h-8 rounded-lg bg-[#8B5CF6]/8 dark:bg-[#8B5CF6]/15 text-sm font-semibold text-[#8B5CF6]">
+                              {daycareCap}
+                            </span>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -2577,6 +2721,8 @@ export default function ConfiguracoesPage() {
     price_medium: "",
     price_large: "",
     duration_multiplier_large: false,
+    block_ai_schedule: false,
+    dependent_service_id: "" as string | number,
   });
 
   const [newServiceModalOpen, setNewServiceModalOpen] = useState(false);
@@ -2592,6 +2738,8 @@ export default function ConfiguracoesPage() {
     price_medium: 0,
     price_large: 0,
     duration_multiplier_large: false,
+    block_ai_schedule: false,
+    dependent_service_id: "" as string | number,
   });
   const [priceDisplay, setPriceDisplay] = useState({
     price: "",
@@ -2600,6 +2748,7 @@ export default function ConfiguracoesPage() {
     price_large: "",
   });
   const [creatingService, setCreatingService] = useState(false);
+  const [updatingService, setUpdatingService] = useState(false);
 
   const fetchPetshop = useCallback(async () => {
     if (!petshopId) {
@@ -2772,6 +2921,8 @@ export default function ConfiguracoesPage() {
       price_medium: "",
       price_large: "",
       duration_multiplier_large: false,
+      block_ai_schedule: false,
+      dependent_service_id: "",
     });
   };
 
@@ -2795,6 +2946,8 @@ export default function ConfiguracoesPage() {
         price_large: selectedService.priceBySize?.large?.toString() || "",
         duration_multiplier_large:
           selectedService.durationMultiplierLarge === 2,
+        block_ai_schedule: selectedService.blockAiSchedule ?? false,
+        dependent_service_id: selectedService.dependentServiceId ?? "",
       });
     }
   }, [selectedService]);
@@ -2807,11 +2960,13 @@ export default function ConfiguracoesPage() {
   };
 
   const handleUpdateService = async () => {
+    if (updatingService) return;
     if (!selectedService || !editingData.name.trim()) {
       toast.warning("Erro", "Nome do serviço é obrigatório.");
       return;
     }
 
+    setUpdatingService(true);
     try {
       await serviceService.updateService(selectedService.id, {
         name: editingData.name,
@@ -2839,6 +2994,10 @@ export default function ConfiguracoesPage() {
         duration_multiplier_large: editingData.duration_multiplier_large
           ? 2
           : 1,
+        block_ai_schedule: editingData.block_ai_schedule,
+        dependent_service_id: editingData.block_ai_schedule && editingData.dependent_service_id
+          ? Number(editingData.dependent_service_id)
+          : null,
       });
       toast.success("Sucesso!", "Serviço atualizado com sucesso.");
       handleCloseEditModal();
@@ -2846,6 +3005,8 @@ export default function ConfiguracoesPage() {
     } catch (error) {
       console.error("Erro ao atualizar:", error);
       toast.error("Erro", "Não foi possível atualizar o serviço.");
+    } finally {
+      setUpdatingService(false);
     }
   };
 
@@ -2892,6 +3053,8 @@ export default function ConfiguracoesPage() {
       price_medium: 0,
       price_large: 0,
       duration_multiplier_large: false,
+      block_ai_schedule: false,
+      dependent_service_id: "",
     });
     setPriceDisplay({
       price: "",
@@ -2942,6 +3105,7 @@ export default function ConfiguracoesPage() {
   }, [activeTab]);
 
   const handleCreateService = async () => {
+    if (creatingService) return;
     if (!newServiceData.name.trim()) {
       toast.warning(
         "Preencha os campos obrigatórios",
@@ -2977,6 +3141,10 @@ export default function ConfiguracoesPage() {
         duration_multiplier_large: newServiceData.duration_multiplier_large
           ? 2
           : 1,
+        block_ai_schedule: newServiceData.block_ai_schedule,
+        dependent_service_id: newServiceData.block_ai_schedule && newServiceData.dependent_service_id
+          ? Number(newServiceData.dependent_service_id)
+          : null,
       });
       handleCloseNewServiceModal();
       await fetchServices();
@@ -3093,8 +3261,9 @@ export default function ConfiguracoesPage() {
         onClose={handleCloseEditModal}
         title="Editar serviço"
         onSubmit={handleUpdateService}
-        submitText="Salvar"
+        submitText={updatingService ? "Salvando..." : "Salvar"}
         cancelText="Cancelar"
+        isLoading={updatingService}
         className="max-w-[480px]"
       >
         <div className="flex flex-col gap-4">
@@ -3218,7 +3387,7 @@ export default function ConfiguracoesPage() {
           )}
 
           {editingData.price_varies_by_size && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Input
                 label="Pequeno (P)"
                 type="number"
@@ -3255,6 +3424,67 @@ export default function ConfiguracoesPage() {
             </div>
           )}
 
+          <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 px-4 py-3">
+            <div className="flex-1">
+              <label
+                htmlFor="edit_block_ai_schedule"
+                className="cursor-pointer text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                Bloquear agendamento pelo bot
+              </label>
+              <p className="text-xs font-normal text-[#727B8E]">
+                O bot não agendará este serviço diretamente
+              </p>
+            </div>
+            <label
+              htmlFor="edit_block_ai_schedule"
+              className="relative inline-flex cursor-pointer items-center"
+            >
+              <input
+                type="checkbox"
+                id="edit_block_ai_schedule"
+                checked={editingData.block_ai_schedule}
+                onChange={(e) =>
+                  handleEditingDataChange("block_ai_schedule", e.target.checked)
+                }
+                className="peer sr-only"
+              />
+              <div className="peer h-6 w-11 rounded-full bg-[#727B8E]/30 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-amber-500 peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-amber-400/30"></div>
+            </label>
+          </div>
+
+          {editingData.block_ai_schedule && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                Serviço dependente (pré-requisito)
+              </label>
+              <select
+                value={String(editingData.dependent_service_id)}
+                onChange={(e) =>
+                  handleEditingDataChange("dependent_service_id", e.target.value)
+                }
+                className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                <option value="">— Selecione o serviço pré-requisito —</option>
+                {services
+                  .filter(
+                    (s) =>
+                      s.specialtyId === editingData.specialty_id &&
+                      s.id !== selectedService?.id &&
+                      !s.blockAiSchedule
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                O bot recomendará este serviço antes de aceitar o agendamento do serviço bloqueado.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="mb-2 block text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
               Descrição
@@ -3279,6 +3509,7 @@ export default function ConfiguracoesPage() {
         onSubmit={handleCreateService}
         submitText={creatingService ? "Criando..." : "Criar serviço"}
         cancelText="Cancelar"
+        isLoading={creatingService}
         className="max-w-[480px]"
       >
         <div className="flex flex-col gap-4">
@@ -3417,7 +3648,7 @@ export default function ConfiguracoesPage() {
           )}
 
           {newServiceData.price_varies_by_size && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Input
                 label="Pequeno (P)"
                 placeholder="0,00"
@@ -3442,6 +3673,66 @@ export default function ConfiguracoesPage() {
                   handlePriceChange("price_large", e.target.value)
                 }
               />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 px-4 py-3">
+            <div className="flex-1">
+              <label
+                htmlFor="new_block_ai_schedule"
+                className="cursor-pointer text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                Bloquear agendamento pelo bot
+              </label>
+              <p className="text-xs font-normal text-[#727B8E]">
+                O bot não agendará este serviço diretamente
+              </p>
+            </div>
+            <label
+              htmlFor="new_block_ai_schedule"
+              className="relative inline-flex cursor-pointer items-center"
+            >
+              <input
+                type="checkbox"
+                id="new_block_ai_schedule"
+                checked={newServiceData.block_ai_schedule}
+                onChange={(e) =>
+                  handleNewServiceChange("block_ai_schedule", e.target.checked)
+                }
+                className="peer sr-only"
+              />
+              <div className="peer h-6 w-11 rounded-full bg-[#727B8E]/30 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-amber-500 peer-checked:after:translate-x-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-amber-400/30"></div>
+            </label>
+          </div>
+
+          {newServiceData.block_ai_schedule && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                Serviço dependente (pré-requisito)
+              </label>
+              <select
+                value={String(newServiceData.dependent_service_id)}
+                onChange={(e) =>
+                  handleNewServiceChange("dependent_service_id", e.target.value)
+                }
+                className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
+              >
+                <option value="">— Selecione o serviço pré-requisito —</option>
+                {services
+                  .filter(
+                    (s) =>
+                      s.specialtyId === newServiceData.specialty_id &&
+                      !s.blockAiSchedule
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                O bot recomendará este serviço antes de aceitar o agendamento do serviço bloqueado.
+              </p>
             </div>
           )}
         </div>

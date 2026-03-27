@@ -11,7 +11,8 @@ def build_faq_agent(context: dict, router_ctx: dict) -> Agent:
     company_id = context["company_id"]
     client_id = (context.get("client") or {}).get("id", "")
 
-    get_services = build_booking_tools(company_id, client_id)[0]
+    # build_booking_tools: [0]=get_specialties, [1]=get_services, …
+    get_services = build_booking_tools(company_id, client_id)[1]
     client_tools = build_client_tools(company_id, client_id)
     set_pet_size = client_tools[2]
 

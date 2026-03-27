@@ -305,8 +305,10 @@ export async function executeTool(name: string, args: any, companyId: number): P
       const futureStr = future.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
 
       type LodgingRow = { check_date: string | Date; type: string; max_capacity: number; occupied_capacity: number; available_capacity: number }
-      let data: LodgingRow[]
+      type RoomTypeRow = { lodging_type: string; room_type_name: string; daily_rate: string; total_capacity: number; min_available: number }
 
+      // Fetch global availability (respects fallback: room types > legacy capacity)
+      let data: LodgingRow[]
       if (args.type) {
         data = await prisma.$queryRaw<LodgingRow[]>`
           SELECT check_date, type, max_capacity, occupied_capacity, available_capacity
@@ -330,10 +332,32 @@ export async function executeTool(name: string, args: any, companyId: number): P
 
       if (!data || data.length === 0) return 'Sem dados de disponibilidade para o período.'
 
+      // Fetch room type breakdown (only if room types are configured)
+      const roomTypeData = await prisma.$queryRaw<RoomTypeRow[]>`
+        SELECT
+          lodging_type,
+          room_type_name,
+          daily_rate::text,
+          total_capacity,
+          MIN(available_capacity) AS min_available
+        FROM vw_room_type_availability
+        WHERE company_id = ${companyId}
+          AND check_date >= ${today}::date
+          AND check_date <= ${futureStr}::date
+        GROUP BY lodging_type, room_type_id, room_type_name, daily_rate, total_capacity
+        ORDER BY lodging_type, daily_rate::numeric ASC
+      `
+
       const byType: Record<string, LodgingRow[]> = {}
       for (const row of data) {
         if (!byType[row.type]) byType[row.type] = []
         byType[row.type]!.push(row)
+      }
+
+      const roomTypesByLodging: Record<string, RoomTypeRow[]> = {}
+      for (const row of roomTypeData) {
+        if (!roomTypesByLodging[row.lodging_type]) roomTypesByLodging[row.lodging_type] = []
+        roomTypesByLodging[row.lodging_type]!.push(row)
       }
 
       return Object.entries(byType).map(([type, rows]) => {
@@ -343,7 +367,18 @@ export async function executeTool(name: string, args: any, companyId: number): P
           const status = r.available_capacity === 0 ? '🔴 LOTADO' : r.available_capacity === 1 ? '🟡 quase cheio' : '🟢 disponível'
           return `  ${date}: ${r.occupied_capacity}/${r.max_capacity} ocupados ${status}`
         }).join('\n')
-        return `${label}:\n${lines}`
+
+        // Append room type breakdown if configured
+        const rtRows = roomTypesByLodging[type] ?? []
+        const rtSection = rtRows.length > 0
+          ? '\n  Tipos de quarto:\n' + rtRows.map(rt => {
+              const avail = Number(rt.min_available)
+              const statusIcon = avail === 0 ? '🔴' : avail === 1 ? '🟡' : '🟢'
+              return `    ${statusIcon} ${rt.room_type_name}: ${avail}/${rt.total_capacity} vagas — R$${Number(rt.daily_rate).toFixed(2)}/dia`
+            }).join('\n')
+          : ''
+
+        return `${label}:\n${lines}${rtSection}`
       }).join('\n\n')
     }
 
@@ -374,7 +409,7 @@ export async function executeTool(name: string, args: any, companyId: number): P
       const days = args.days ?? 7
       try {
         const data = await prisma.$queryRaw<Array<{ pet_name: string; client_name: string; birth_date: string; days_until: number }>>`
-          SELECT * FROM get_pet_birthdays_next_days(${companyId}, ${days})
+          SELECT * FROM get_pet_birthdays_next_days(${companyId}::int, ${days}::int)
         `
         if (!data || data.length === 0) return `Nenhum pet faz aniversário nos próximos ${days} dias.`
         return `${data.length} pet(s) fazem aniversário nos próximos ${days} dias:\n` +

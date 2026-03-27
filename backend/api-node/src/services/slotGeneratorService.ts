@@ -7,7 +7,8 @@ import {
   loadBusinessHourRows,
 } from '../lib/businessHoursTable'
 
-const MAX_DAYS_AHEAD = 60
+/** Horizonte máximo de slots / agenda (próximos N dias a partir de hoje). */
+export const MAX_DAYS_AHEAD = 90
 
 export const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 
@@ -62,7 +63,7 @@ const SLOT_INSERT_CHUNK = 8000
  */
 export async function generateSlotsForCompany(
   companyId?: number,
-  requestedDays = 60,
+  requestedDays = MAX_DAYS_AHEAD,
 ): Promise<{ companies: number; slots_processed: number }> {
   const days = Math.min(requestedDays, MAX_DAYS_AHEAD)
 

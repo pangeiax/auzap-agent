@@ -16,6 +16,7 @@ import specialtyRoutes from './modules/specialties/specialtyRoutes'
 import lodgingRoutes from './modules/lodgings/lodgingRoutes'
 import { lodgingReservationRouter } from './modules/lodgings/lodgingReservationRoutes'
 import { lodgingConfigRouter } from './modules/lodgings/lodgingConfigRoutes'
+import { roomTypeRouter } from './modules/lodgings/roomTypeRoutes'
 import settingsRoutes from './modules/settings/settingsRoutes'
 import sentimentRoutes from './modules/sentiment/sentiment.routes'
 import brainRoutes from './modules/brain/brain.routes'
@@ -53,6 +54,7 @@ app.use('/specialties', specialtyRoutes)
 app.use('/lodgings', lodgingRoutes)
 app.use('/lodging-reservations', lodgingReservationRouter)
 app.use('/lodging-config', lodgingConfigRouter)
+app.use('/room-types', roomTypeRouter)
 app.use('/settings', settingsRoutes)
 app.use('/sentiment', sentimentRoutes)
 app.use('/brain', brainRoutes)

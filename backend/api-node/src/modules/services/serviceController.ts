@@ -55,7 +55,7 @@ export async function getService(req: Request, res: Response) {
 export async function createService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const { name, description, duration_min, price, price_by_size, duration_multiplier_large, specialty_id, requires_vet } =
+    const { name, description, duration_min, price, price_by_size, duration_multiplier_large, specialty_id, requires_vet, block_ai_schedule, dependent_service_id } =
       req.body
 
     if (!name) {
@@ -73,6 +73,8 @@ export async function createService(req: Request, res: Response) {
         durationMultiplierLarge: duration_multiplier_large ? parseFloat(duration_multiplier_large) : null,
         specialtyId: specialty_id ?? null,
         requiresVet: requires_vet ?? false,
+        blockAiSchedule: block_ai_schedule ?? false,
+        dependentServiceId: (block_ai_schedule && dependent_service_id) ? parseInt(dependent_service_id) : null,
         isActive: true,
       },
       include: { specialty: { select: { id: true, name: true, color: true } } },
@@ -90,7 +92,7 @@ export async function updateService(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const serviceId = req.params.serviceId!
-    const { name, description, duration_min, price, price_by_size, is_active, specialty_id, duration_multiplier_large } = req.body
+    const { name, description, duration_min, price, price_by_size, is_active, specialty_id, duration_multiplier_large, block_ai_schedule, dependent_service_id } = req.body
 
     const existing = await prisma.petshopService.findUnique({
       where: { id: parseInt(serviceId) },
@@ -99,6 +101,8 @@ export async function updateService(req: Request, res: Response) {
     if (!existing || existing.companyId !== companyId) {
       return res.status(404).json({ error: 'Service not found' })
     }
+
+    const blockAi = block_ai_schedule !== undefined ? block_ai_schedule : existing.blockAiSchedule
 
     const service = await prisma.petshopService.update({
       where: { id: parseInt(serviceId) },
@@ -111,6 +115,8 @@ export async function updateService(req: Request, res: Response) {
         ...(is_active !== undefined ? { isActive: is_active } : {}),
         ...(specialty_id !== undefined ? { specialtyId: specialty_id || null } : {}),
         ...(duration_multiplier_large !== undefined ? { durationMultiplierLarge: duration_multiplier_large !== null ? parseFloat(String(duration_multiplier_large)) : null } : {}),
+        ...(block_ai_schedule !== undefined ? { blockAiSchedule: block_ai_schedule } : {}),
+        dependentServiceId: blockAi && dependent_service_id ? parseInt(String(dependent_service_id)) : null,
       },
       include: { specialty: { select: { id: true, name: true, color: true } } },
     })

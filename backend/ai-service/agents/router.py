@@ -117,7 +117,7 @@ def _resolve_service_and_pet_ids(context: dict, router_ctx: dict) -> tuple:
 
 def _booking_availability_snapshot_block(context: dict, router_ctx: dict) -> str:
     """
-    Pré-executa get_available_times e injeta JSON na entrada do booking_agent.
+    Pré-executa get_available_times e injeta JSON na entrada do especialista (booking_agent e health_agent).
     Evita respostas sem tool e negações inventadas sobre horários.
     """
     stage = router_ctx.get("stage") or ""
@@ -236,7 +236,9 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     logger.info("Invocando especialista → %s", agent_name)
     specialist = _build_specialist(agent_name, context, router_ctx)
     base_input = _build_specialist_input(message, history, router_ctx)
-    if agent_name == "booking_agent":
+    # Mesma pré-carga de get_available_times do booking — health_agent também agenda e
+    # antes só recebia lista “na cabeça” do modelo ou dependia 100% da tool na hora.
+    if agent_name in ("booking_agent", "health_agent"):
         snap = _booking_availability_snapshot_block(context, router_ctx)
         if snap:
             base_input = base_input + snap

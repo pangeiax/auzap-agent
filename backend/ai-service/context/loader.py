@@ -65,11 +65,15 @@ async def load_context(company_id: int, client_phone: str) -> dict:
 
         cur.execute(
             """
-            SELECT id, name, description, duration_min, price, price_by_size, duration_multiplier_large,
-                   specialty_id::text AS specialty_id
-            FROM petshop_services
-            WHERE company_id = %s AND is_active = TRUE
-            ORDER BY name
+            SELECT
+                s.id, s.name, s.description, s.duration_min, s.price, s.price_by_size,
+                s.duration_multiplier_large, s.specialty_id::text AS specialty_id,
+                s.block_ai_schedule, s.dependent_service_id,
+                sd.name AS dependent_service_name
+            FROM petshop_services s
+            LEFT JOIN petshop_services sd ON sd.id = s.dependent_service_id
+            WHERE s.company_id = %s AND s.is_active = TRUE
+            ORDER BY s.name
         """,
             (company_id,),
         )
@@ -139,6 +143,25 @@ async def load_context(company_id: int, client_phone: str) -> dict:
                 "daycare_checkout_time",
             ):
                 lodging_dict[field] = _fmt_time(lodging_dict.get(field))
+            lodging_dict.pop("hotel_daily_rate", None)
+            lodging_dict.pop("daycare_daily_rate", None)
+
+        cur.execute(
+            """
+            SELECT
+                id::text AS id,
+                lodging_type,
+                name,
+                description,
+                daily_rate,
+                features
+            FROM petshop_room_types
+            WHERE company_id = %s AND is_active = TRUE
+            ORDER BY lodging_type, daily_rate ASC NULLS LAST, name
+            """,
+            (company_id,),
+        )
+        lodging_room_types = [dict(r) for r in cur.fetchall()]
 
         return {
             "company_id": company["company_id"],
@@ -153,4 +176,5 @@ async def load_context(company_id: int, client_phone: str) -> dict:
             "pets": [dict(p) for p in pets],
             "specialties": [dict(s) for s in specialties],
             "lodging_config": lodging_dict,
+            "lodging_room_types": lodging_room_types,
         }

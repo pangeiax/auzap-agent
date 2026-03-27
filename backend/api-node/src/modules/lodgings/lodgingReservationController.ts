@@ -21,6 +21,9 @@ function shapeLodgingReservation(r: any) {
     pet_breed: r.pet?.breed ?? null,
     pet_size: r.pet?.size ?? null,
     type: r.type,
+    room_type_id: r.roomTypeId ?? null,
+    room_type_name: r.roomType?.name ?? null,
+    room_type_daily_rate: r.roomType?.dailyRate != null ? Number(r.roomType.dailyRate) : null,
     checkin_date: r.checkinDate,
     checkout_date: r.checkoutDate,
     checkin_time: r.checkinTime ? formatTime(r.checkinTime) : null,
@@ -40,17 +43,14 @@ function shapeLodgingReservation(r: any) {
 const reservationInclude = {
   client: { select: { name: true, phone: true } },
   pet: { select: { name: true, breed: true, size: true } },
+  roomType: { select: { name: true, dailyRate: true } },
 }
 
-/** Calendar day in UTC (YYYY-MM-DD), matches PostgreSQL @db.Date semantics with toISOString. */
+/** Calendar day in UTC (YYYY-MM-DD), matches PostgreSQL @db.Date semantics. */
 function utcDateKey(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
-/**
- * Pet occupies calendar day D iff checkin_date <= D AND checkout_date > D (checkout exclusive).
- * Capacity counts only rows with status confirmed | checked_in (same as vw_lodging_availability).
- */
 function lodgingOccupiesUtcCalendarDay(checkin: Date, checkout: Date, dayStart: Date): boolean {
   const d = utcDateKey(dayStart)
   return utcDateKey(checkin) <= d && utcDateKey(checkout) > d
@@ -63,7 +63,6 @@ export async function listLodgingReservations(req: Request, res: Response) {
     const { status, type, client_id, pet_id, checkin_from, checkin_to } = req.query
 
     const where: any = { companyId }
-
     if (status) {
       const statuses = (status as string).split(',').map((s) => s.trim()).filter(Boolean)
       where.status = statuses.length === 1 ? statuses[0] : { in: statuses }
@@ -120,6 +119,7 @@ export async function createLodgingReservation(req: Request, res: Response) {
       client_id,
       pet_id,
       type,
+      room_type_id,
       checkin_date,
       checkout_date,
       checkin_time,
@@ -142,70 +142,115 @@ export async function createLodgingReservation(req: Request, res: Response) {
       return res.status(400).json({ error: 'checkout_date deve ser posterior a checkin_date' })
     }
 
-    const totalAmount = daily_rate
-      ? Number(daily_rate) * Math.ceil((checkout.getTime() - checkin.getTime()) / 86400000)
-      : null
+    const days = Math.ceil((checkout.getTime() - checkin.getTime()) / 86400000)
 
     let checkinTimeDate: Date | undefined
     let checkoutTimeDate: Date | undefined
     if (checkin_time) {
       const [hh, mm] = String(checkin_time).split(':').map(Number)
-      checkinTimeDate = new Date(Date.UTC(1970, 0, 1, hh, mm, 0))
+      checkinTimeDate = new Date(Date.UTC(1970, 0, 1, hh!, mm!, 0))
     }
     if (checkout_time) {
       const [hh, mm] = String(checkout_time).split(':').map(Number)
-      checkoutTimeDate = new Date(Date.UTC(1970, 0, 1, hh, mm, 0))
+      checkoutTimeDate = new Date(Date.UTC(1970, 0, 1, hh!, mm!, 0))
     }
 
-    // Atomically check capacity and create — prevents double-booking under concurrent requests
     const reservation = await prisma.$transaction(async (tx) => {
-      // Load capacity config for this type (all days of week)
-      const caps = await tx.petshopLodgingCapacity.findMany({
-        where: { companyId, type },
-      })
-      const capByDay = new Map(caps.map((c) => [c.dayOfWeek, c]))
+      const typeLabel = type === 'hotel' ? 'Hotel' : 'Creche'
 
-      // Só confirmed e checked_in ocupam vaga fisicamente (alinhado à view e à query de capacidade)
+      // ── 1. Verifica que existem room types configurados (obrigatório) ────────
+      const roomTypes = await tx.petshopRoomType.findMany({
+        where: { companyId, lodgingType: type, isActive: true },
+      })
+
+      if (roomTypes.length === 0) {
+        throw Object.assign(
+          new Error(
+            `${typeLabel} não possui tipos de quarto configurados. ` +
+            'Configure pelo menos um tipo de quarto em Configurações → Hospedagem antes de criar reservas.',
+          ),
+          { statusCode: 409 },
+        )
+      }
+
+      // ── 2. Carrega horários de funcionamento ─────────────────────────────────
+      const businessHours = await tx.petshopBusinessHours.findMany({ where: { companyId } })
+      const bhByDay = new Map(businessHours.map((bh) => [bh.dayOfWeek, bh]))
+
+      // ── 3. Resolve room type e daily rate ────────────────────────────────────
+      let effectiveDailyRate: number | null = daily_rate != null ? Number(daily_rate) : null
+      let resolvedRoomTypeId: string | null = room_type_id ?? null
+
+      if (resolvedRoomTypeId) {
+        const roomType = roomTypes.find((rt) => rt.id === resolvedRoomTypeId)
+
+        if (!roomType) {
+          throw Object.assign(
+            new Error('Tipo de quarto não encontrado ou não pertence a este petshop.'),
+            { statusCode: 404 },
+          )
+        }
+        if (roomType.lodgingType !== type) {
+          throw Object.assign(
+            new Error(`Tipo de quarto é de "${roomType.lodgingType}", não de "${type}".`),
+            { statusCode: 400 },
+          )
+        }
+        if (effectiveDailyRate === null) {
+          effectiveDailyRate = Number(roomType.dailyRate)
+        }
+      }
+
+      // ── 4. Cursor de dias: valida BH + capacidade ────────────────────────────
+      const startDay = new Date(Date.UTC(checkin.getUTCFullYear(), checkin.getUTCMonth(), checkin.getUTCDate()))
+      const endDay   = new Date(Date.UTC(checkout.getUTCFullYear(), checkout.getUTCMonth(), checkout.getUTCDate()))
+
+      // Busca reservas ativas que se sobrepõem ao período (uma única query)
       const overlapping = await tx.petshopLodgingReservation.findMany({
         where: {
           companyId,
           type,
           status: { in: ['confirmed', 'checked_in'] },
-          checkinDate: { lt: checkout }, // sobrepõe o período solicitado [checkin, checkout)
+          checkinDate: { lt: checkout },
           checkoutDate: { gt: checkin },
+          ...(resolvedRoomTypeId ? { roomTypeId: resolvedRoomTypeId } : {}),
         },
         select: { checkinDate: true, checkoutDate: true },
       })
 
-      // Check each day in the requested period [checkin, checkout)
-      const cursor = new Date(Date.UTC(
-        checkin.getUTCFullYear(),
-        checkin.getUTCMonth(),
-        checkin.getUTCDate(),
-      ))
-      const endDay = new Date(Date.UTC(
-        checkout.getUTCFullYear(),
-        checkout.getUTCMonth(),
-        checkout.getUTCDate(),
-      ))
+      const capacityForCheck = resolvedRoomTypeId
+        ? roomTypes.find((rt) => rt.id === resolvedRoomTypeId)!.capacity
+        : roomTypes.reduce((s, rt) => s + rt.capacity, 0)
 
+      const cursor = new Date(startDay)
       while (cursor < endDay) {
-        const dow = cursor.getUTCDay() // 0=Sun … 6=Sat
-        const cap = capByDay.get(dow)
+        const dow = cursor.getUTCDay()
+        const dayStr = cursor.toISOString().slice(0, 10)
 
-        if (!cap || !cap.isActive || cap.maxCapacity <= 0) {
-          const dayStr = cursor.toISOString().slice(0, 10)
-          throw Object.assign(new Error(`Dia ${dayStr} está fechado ou sem vagas configuradas para ${type === 'hotel' ? 'Hotel' : 'Creche'}.`), { statusCode: 409 })
+        // Verifica se o dia está aberto
+        const bh = bhByDay.get(dow)
+        const isDayClosed = !bh || bh.isClosed || !bh.openTime || !bh.closeTime
+        if (isDayClosed) {
+          throw Object.assign(
+            new Error(`${typeLabel} não funciona no dia ${dayStr} (dia fechado na agenda).`),
+            { statusCode: 409 },
+          )
         }
 
-        const count = overlapping.filter((r) =>
+        // Verifica capacidade disponível no dia
+        const occupied = overlapping.filter((r) =>
           lodgingOccupiesUtcCalendarDay(new Date(r.checkinDate), new Date(r.checkoutDate), cursor),
         ).length
 
-        if (count >= cap.maxCapacity) {
-          const dayStr = cursor.toISOString().slice(0, 10)
+        if (occupied >= capacityForCheck) {
           throw Object.assign(
-            new Error(`Sem vagas disponíveis em ${dayStr}: capacidade máxima de ${cap.maxCapacity} ${cap.maxCapacity === 1 ? 'vaga' : 'vagas'} atingida.`),
+            new Error(
+              `Sem vagas disponíveis em ${dayStr}: ` +
+              `${occupied}/${capacityForCheck} vaga(s) ocupada(s)` +
+              (resolvedRoomTypeId
+                ? ` para o tipo "${roomTypes.find((rt) => rt.id === resolvedRoomTypeId)!.name}".`
+                : '.'),
+            ),
             { statusCode: 409 },
           )
         }
@@ -213,18 +258,21 @@ export async function createLodgingReservation(req: Request, res: Response) {
         cursor.setUTCDate(cursor.getUTCDate() + 1)
       }
 
-      // All days have capacity — create the reservation
+      const totalAmount = effectiveDailyRate != null ? effectiveDailyRate * days : null
+
+      // ── 5. Cria a reserva ────────────────────────────────────────────────────
       return tx.petshopLodgingReservation.create({
         data: {
           companyId,
           clientId: client_id,
           petId: pet_id,
           type,
+          roomTypeId: resolvedRoomTypeId,
           checkinDate: checkin,
           checkoutDate: checkout,
           ...(checkinTimeDate ? { checkinTime: checkinTimeDate } : {}),
           ...(checkoutTimeDate ? { checkoutTime: checkoutTimeDate } : {}),
-          dailyRate: daily_rate ? Number(daily_rate) : null,
+          dailyRate: effectiveDailyRate,
           totalAmount,
           careNotes: care_notes ?? {},
           emergencyContact: emergency_contact ?? null,
@@ -238,9 +286,9 @@ export async function createLodgingReservation(req: Request, res: Response) {
     res.status(201).json(shapeLodgingReservation(reservation))
   } catch (error: any) {
     console.error('Error creating lodging reservation:', error)
-    if (error?.statusCode === 409) {
-      return res.status(409).json({ error: error.message })
-    }
+    if (error?.statusCode === 409) return res.status(409).json({ error: error.message })
+    if (error?.statusCode === 404) return res.status(404).json({ error: error.message })
+    if (error?.statusCode === 400) return res.status(400).json({ error: error.message })
     res.status(500).json({ error: 'Failed to create lodging reservation' })
   }
 }
@@ -250,7 +298,7 @@ export async function updateLodgingReservation(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const { id } = req.params
-    const { status, kennel_id, care_notes, emergency_contact, confirmed } = req.body
+    const { status, kennel_id, room_type_id, care_notes, emergency_contact, confirmed } = req.body
 
     const existing = await prisma.petshopLodgingReservation.findUnique({ where: { id: id! } })
     if (!existing || existing.companyId !== companyId) {
@@ -260,6 +308,7 @@ export async function updateLodgingReservation(req: Request, res: Response) {
     const data: any = { updatedAt: new Date() }
     if (status !== undefined) data.status = status
     if (kennel_id !== undefined) data.kennelId = kennel_id
+    if (room_type_id !== undefined) data.roomTypeId = room_type_id
     if (care_notes !== undefined) data.careNotes = care_notes
     if (emergency_contact !== undefined) data.emergencyContact = emergency_contact
     if (confirmed !== undefined) data.confirmed = confirmed

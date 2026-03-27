@@ -1,6 +1,5 @@
 import logging
 import os
-from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -12,6 +11,7 @@ load_dotenv()
 from context.loader import load_context
 from memory.redis_memory import get_history, save_message, clear_history
 from agents.router import run_router
+from timezone_br import today_sao_paulo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,8 +104,7 @@ async def run_agent(req: AgentRequest):
         # 1. Carrega contexto da company + petshop + cliente
         context = await load_context(req.company_id, req.client_phone)
 
-        # Injeta data atual no fuso de Brasília (UTC-3)
-        _BRASILIA = timezone(timedelta(hours=-3))
+        # Injeta data atual em America/Sao_Paulo
         _PT_WEEKDAYS = [
             "Segunda-feira",
             "Terça-feira",
@@ -115,7 +114,7 @@ async def run_agent(req: AgentRequest):
             "Sábado",
             "Domingo",
         ]
-        _today_brt = datetime.now(_BRASILIA).date()
+        _today_brt = today_sao_paulo()
         context["today"] = _today_brt.strftime("%d/%m/%Y")
         context["today_iso"] = _today_brt.isoformat()
         context["today_weekday"] = _PT_WEEKDAYS[_today_brt.weekday()]

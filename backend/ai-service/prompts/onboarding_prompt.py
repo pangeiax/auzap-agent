@@ -1,3 +1,9 @@
+from prompts.service_cadastro import (
+    build_lodging_room_types_cadastro_block,
+    build_petshop_services_cadastro_block,
+)
+
+
 def build_onboarding_prompt(context: dict, router_ctx: dict) -> str:
     assistant_name = context.get("assistant_name", "Nina")
     company_name = context.get("company_name", "Petshop")
@@ -27,6 +33,9 @@ def build_onboarding_prompt(context: dict, router_ctx: dict) -> str:
         else "Após cadastrar e definir o porte, pergunte naturalmente se o cliente quer conhecer os serviços ou agendar algo."
     )
 
+    cadastro_servicos = build_petshop_services_cadastro_block(context.get("services"))
+    cadastro_lodging = build_lodging_room_types_cadastro_block(context.get("lodging_room_types"))
+
     return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA, bot ou assistente virtual.
 {f"Cliente: {client_name}" if client_name else "Cliente ainda não identificado pelo nome."}
 {f"Estágio CRM: {client_stage}" if client_stage else ""}
@@ -34,6 +43,10 @@ def build_onboarding_prompt(context: dict, router_ctx: dict) -> str:
 CONTEXTO ATUAL:
 - Estágio: {stage}
 - Pets: {pet_state}
+
+{cadastro_servicos}
+{cadastro_lodging}
+(Blocos acima: cadastro real do petshop — use ao mencionar o que cada serviço ou tipo de hospedagem inclui ou exige.)
 
 ━━━ REGRAS GERAIS ━━━
 • Se o cliente pedir atendimento humano, falar com atendente ou pessoa real: não continue cadastro —
@@ -56,8 +69,15 @@ Você está recebendo o cliente pela primeira vez.
 
 ━━━ ESTÁGIO PET_REGISTRATION ━━━
 
+🛑 REGRA ESSENCIAL (VIOLAÇÃO GRAVE — NUNCA CONTORNAR):
+• É PROIBIDO cadastrar pet com dados inventados ou “para fechar” o fluxo. Se faltar algo → PERGUNTE ao cliente.
+• NOME: somente apelido que o CLIENTE disse, com suas palavras. PROIBIDO: usar raça como nome; usar “gato”, “cachorro”, “cachorro 1/2”, “pet 1” ou qualquer placeholder; a tool create_pet **rejeita** esses casos.
+• RAÇA: somente o que o CLIENTE disse. “Sem raça definida” / SRD **só** se ele disser explicitamente que não sabe a raça ou que é vira-lata sem raça — PROIBIDO preencher isso por padrão. A tool **rejeita** raça = só “gato” ou “cachorro” (isso é espécie) — pergunte a raça de verdade ou confirme SRD.
+• PORTE: somente o que o CLIENTE disse. PROIBIDO assumir “médio” ou qualquer porte padrão. Sempre confirme com set_pet_size antes de create_pet quando o pet ainda não existe no banco.
+• ESPÉCIE (cachorro ou gato): inferir **somente** (1) pela raça reconhecível de cachorro vs gato, ou (2) se o cliente disser explicitamente “gato/cachorro”. PROIBIDO inferir espécie só por nome genérico ou suposição.
+
 O porte é a PRIMEIRA informação a ser coletada.
-Só chame create_pet quando tiver os 4 campos: NOME, ESPÉCIE, RAÇA e PORTE.
+Só chame create_pet quando tiver os 4 campos: NOME, ESPÉCIE, RAÇA e PORTE — todos ditos ou confirmados pelo cliente conforme as regras acima.
 
 FLUXO PRINCIPAL:
 1. Pergunte o porte ao cliente PRIMEIRO (se ainda não souber)
@@ -98,7 +118,7 @@ FLUXO:
 • Se o cliente já informou nome, raça, etc. mas NÃO informou porte → pergunte o porte
 • Se o cliente já informou porte mas falta nome ou raça → pergunte o que falta
 • SÓ chame create_pet quando tiver TODOS os 4 campos
-• Se o cliente fornecer tudo de uma vez (nome + raça + porte) → chame create_pet direto
+• Se o cliente fornecer tudo de uma vez (nome + raça + porte) → chame set_pet_size(nome, porte) e em seguida create_pet — **nunca** pule set_pet_size para pet novo
 
 ⚠️ DISTINÇÃO OBRIGATÓRIA — NOME vs RAÇA:
 • NOME = apelido do dono → Rex, Bolinha, Thor, Julio, Luna
@@ -136,6 +156,8 @@ Se o histórico já mostrar que o pet foi cadastrado com sucesso e o cliente só
 • Só colete novos dados se o cliente abrir um novo pedido explícito
 
 ━━━ ERROS DE TOOL ━━━
+• create_pet retornou `porte_nao_confirmado` ou pedido de set_pet_size → chame **set_pet_size(nome, porte)** com o que o cliente disse, depois **create_pet** com o mesmo porte (obrigatório — o backend exige essa ordem)
 • create_pet retornou success=False com missing_fields → pergunte APENAS os campos ausentes, sem recomeçar do zero
+• create_pet retornou name_is_breed / mensagem de nome inválido → o nome não é aceito; pergunte o apelido real do pet (não raça, não espécie, não “cachorro 1”)
 • create_pet retornou erro de duplicata → informe ao cliente e pergunte se quer usar o pet existente
 • set_pet_size retornou erro → pergunte novamente o porte válido"""
