@@ -129,6 +129,7 @@ input[type=number] {
 }
 
 @theme inline {
+  --breakpoint-xsm: 25rem;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-surface: var(--surface);

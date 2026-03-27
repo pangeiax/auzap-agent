@@ -179,6 +179,7 @@ function ClientsSidebar({
   searchQuery,
   onSearchChange,
   onNewCustomer,
+  onSearchClick,
   loading,
   error,
 }: {
@@ -188,6 +189,7 @@ function ClientsSidebar({
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onNewCustomer: () => void;
+  onSearchClick: () => void;
   loading?: boolean;
   error?: string | null;
 }) {
@@ -199,9 +201,100 @@ function ClientsSidebar({
       getClientPhoneDisplay(customer).includes(searchQuery),
   );
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="p-4 border-b border-[#727B8E]/10 dark:border-[#40485A]">
+  const renderMobileView = () => (
+    <div className="lg:hidden h-full w-full relative overflow-hidden">
+      <div className="relative z-10 h-full flex flex-col">
+        <div className="flex-1 flex lg:gap-2.5 overflow-hidden">
+          <div className="w-[88.73px] bg-white border-l border-t border-b border-[#727B8E]/10 rounded-l-2xl flex flex-col justify-between py-[10px] px-2">
+            <div className="pb-1 border-b border-[#727B8E]/10">
+              <div className="flex items-center justify-between text-[10px] font-medium text-[#434A57] leading-7">
+                <h2 className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  Clientes
+                </h2>
+                <button
+                  type="button"
+                  onClick={onSearchClick}
+                  className="flex h-3 w-3 items-center justify-center rounded-full text-[#727B8E] transition-colors hover:bg-[#F4F6F9] dark:text-[#8a94a6] dark:hover:bg-[#212225]"
+                >
+                  <Search className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-0">
+              {filteredCustomers.slice(0, 8).map((customer) => (
+                <button
+                  key={customer.id}
+                  type="button"
+                  onClick={() => onSelect(customer.id)}
+                  className={`w-full p-3 border-b border-[#727B8E]/10 ${selectedId === customer.id ? "bg-[#F4F6F9]" : "bg-white"
+                    }`}
+                >
+                  <div className="relative w-[49px] h-[49px] mx-auto">
+                    <div className="w-full h-full rounded-full bg-[#FAFAFA] border border-[#727B8E]/10 flex items-center justify-center">
+                      <span className="text-base font-medium text-[#434A57]">
+                        {getInitials(customer.name)}
+                      </span>
+                    </div>
+                    {customer.status === "ativo" && (
+                      <div className="absolute bottom-0 right-0 w-2 h-2 bg-[#3DCA21] rounded-full border-2 border-white/10" />
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="pt-2">
+
+              <Button
+                onClick={onNewCustomer}
+                className="h-[37px] px-5 bg-[#1E62EC] text-white text-xs font-medium rounded-lg hover:bg-[#1E62EC]/90"
+              >
+                <Plus className="h-6 w-6 text-white" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="hidden flex-1 bg-[#F4F6F9] border border-[#727B8E]/10 rounded-r-[24px] lg:flex flex-col items-center justify-center p-4">
+            {loading ? (
+              <Loader2 className="h-8 w-8 animate-spin text-[#1E62EC]" />
+            ) : filteredCustomers.length === 0 ? (
+              <div className="text-center pb-[90px]">
+                <div className="w-[155.21px] h-[81.95px] mx-auto mb-[35px]">
+                  <EmptyState
+                    image="not_found_clientes_ativos"
+                    description=""
+                    buttonText=""
+                    onButtonClick={() => { }}
+                  />
+                </div>
+                <p className="text-sm font-medium text-[#727B8E] mb-4">
+                  Você ainda não tem conversas
+                </p>
+                <Button
+                  onClick={onNewCustomer}
+                  className="h-[37px] px-5 bg-[#1E62EC] text-white text-xs font-medium rounded-lg hover:bg-[#1E62EC]/90"
+                >
+                  Cadastrar cliente
+                </Button>
+              </div>
+            ) : (
+              <div className="text-center">
+                <p className="text-sm font-medium text-[#727B8E]">
+                  Selecione um cliente para ver detalhes
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Desktop view (>= lg) - Original design
+  const renderDesktopView = () => (
+    <div className="hidden lg:flex h-full flex-col">
+      <div className="p-2 lg:p-4 border-b border-[#727B8E]/10 dark:border-[#40485A]">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-[#434A57] dark:text-[#f5f9fc]">
             Clientes
@@ -255,11 +348,10 @@ function ClientsSidebar({
               type="button"
               onClick={() => onSelect(customer.id)}
               whileHover={{ backgroundColor: "rgba(244, 246, 249, 0.5)" }}
-              className={`w-full p-4 text-left border-b border-[#727B8E]/5 dark:border-[#40485A]/50 transition-colors ${
-                selectedId === customer.id
-                  ? "bg-[#F4F6F9] dark:bg-[#212225]"
-                  : ""
-              }`}
+              className={`w-full p-4 text-left border-b border-[#727B8E]/5 dark:border-[#40485A]/50 transition-colors ${selectedId === customer.id
+                ? "bg-[#F4F6F9] dark:bg-[#212225]"
+                : ""
+                }`}
             >
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#1E62EC]/20">
@@ -273,11 +365,10 @@ function ClientsSidebar({
                       {customer.name}
                     </span>
                     <span
-                      className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                        customer.status === "ativo"
-                          ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
-                          : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
-                      }`}
+                      className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${customer.status === "ativo"
+                        ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
+                        : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
+                        }`}
                     >
                       {customer.status}
                     </span>
@@ -297,6 +388,13 @@ function ClientsSidebar({
         )}
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {renderMobileView()}
+      {renderDesktopView()}
+    </>
   );
 }
 
@@ -372,7 +470,7 @@ function CustomerDetails({
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="hidden lg:flex flex-1 items-center justify-center"
+        className="flex flex-1 items-center justify-center"
       >
         <div className="text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#1E62EC]/10">
@@ -440,8 +538,8 @@ function CustomerDetails({
       exit={{ opacity: 0 }}
       className="flex flex-1 flex-col min-h-0"
     >
-      <div className="p-4 border-b border-[#727B8E]/10 dark:border-[#40485A]">
-        <div className="flex items-center gap-3">
+      <div className="p-2 lg:p-4 border-b border-[#727B8E]/10 dark:border-[#40485A]">
+        <div className="flex items-center gap-1 lg:gap-3">
           <button
             type="button"
             onClick={onBack}
@@ -460,12 +558,12 @@ function CustomerDetails({
             </h2>
             <div className="flex items-center gap-3 text-sm text-[#727B8E] dark:text-[#8a94a6]">
               <span className="flex items-center gap-1">
-                <Phone className="h-3 w-3" />
+                <Phone className="hidden lg:flex h-3 w-3" />
                 {formatClientPhoneForSidebar(getClientPhoneDisplay(customer))}
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center lg:gap-2">
             <button
               type="button"
               onClick={onEditCustomer}
@@ -518,15 +616,14 @@ function CustomerDetails({
       </div>
 
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex gap-1 mx-4 mt-4 p-1 bg-[#F4F6F9] dark:bg-[#212225] rounded-lg">
+        <div className="flex gap-1 mx-2 lg:mx-4 mt-2 lg:mt-4 p-1 bg-[#F4F6F9] overflow-x-auto w-auto dark:bg-[#212225] rounded-lg ">
           <button
             type="button"
             onClick={() => onTabChange("pets")}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === "pets"
-                ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
-                : "text-[#727B8E] dark:text-[#8a94a6]"
-            }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors min-w-fit ${activeTab === "pets"
+              ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
+              : "text-[#727B8E] dark:text-[#8a94a6]"
+              }`}
           >
             <PawPrint className="h-4 w-4" />
             Pets ({customer.petsCount})
@@ -534,11 +631,10 @@ function CustomerDetails({
           <button
             type="button"
             onClick={() => onTabChange("agendamentos")}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === "agendamentos"
-                ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
-                : "text-[#727B8E] dark:text-[#8a94a6]"
-            }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "agendamentos"
+              ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
+              : "text-[#727B8E] dark:text-[#8a94a6]"
+              }`}
           >
             <Calendar className="h-4 w-4" />
             Agendamentos
@@ -546,11 +642,10 @@ function CustomerDetails({
           <button
             type="button"
             onClick={() => onTabChange("conversas")}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === "conversas"
-                ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
-                : "text-[#727B8E] dark:text-[#8a94a6]"
-            }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "conversas"
+              ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
+              : "text-[#727B8E] dark:text-[#8a94a6]"
+              }`}
           >
             <MessageCircle className="h-4 w-4" />
             Conversas
@@ -810,7 +905,7 @@ function CustomerDetails({
               <p className="mt-1 text-xs text-red-500">{petFormErrors.species}</p>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="Raça"
               placeholder="Raça"
@@ -828,7 +923,7 @@ function CustomerDetails({
               }
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="Peso"
               placeholder="Peso"
@@ -1113,6 +1208,7 @@ export default function ClientesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
   const [customerStep, setCustomerStep] = useState<1 | 2>(1);
@@ -1374,8 +1470,8 @@ export default function ClientesPage() {
       toast.error(
         "Erro ao excluir cliente",
         error.response?.data?.detail ||
-          error.response?.data?.error ||
-          "Não foi possível excluir o cliente.",
+        error.response?.data?.error ||
+        "Não foi possível excluir o cliente.",
       );
     }
   };
@@ -1391,10 +1487,10 @@ export default function ClientesPage() {
         prev.map((c) =>
           c.id === selectedCustomer.id
             ? {
-                ...c,
-                pets: c.pets.filter((p) => p.id !== petId),
-                petsCount: Math.max(c.petsCount - 1, 0),
-              }
+              ...c,
+              pets: c.pets.filter((p) => p.id !== petId),
+              petsCount: Math.max(c.petsCount - 1, 0),
+            }
             : c,
         ),
       );
@@ -1409,8 +1505,8 @@ export default function ClientesPage() {
       toast.error(
         "Erro ao excluir pet",
         error.response?.data?.detail ||
-          error.response?.data?.error ||
-          "Não foi possível excluir o pet.",
+        error.response?.data?.error ||
+        "Não foi possível excluir o pet.",
       );
     }
   };
@@ -1435,15 +1531,15 @@ export default function ClientesPage() {
           prev.map((c) =>
             c.id === selectedCustomer.id
               ? {
-                  ...c,
-                  appointments: c.appointments.filter(
-                    (a) => !removeIds.includes(a.id),
-                  ),
-                  totalAppointments: Math.max(
-                    c.totalAppointments - removeIds.length,
-                    0,
-                  ),
-                }
+                ...c,
+                appointments: c.appointments.filter(
+                  (a) => !removeIds.includes(a.id),
+                ),
+                totalAppointments: Math.max(
+                  c.totalAppointments - removeIds.length,
+                  0,
+                ),
+              }
               : c,
           ),
         );
@@ -1463,15 +1559,15 @@ export default function ClientesPage() {
         prev.map((c) =>
           c.id === selectedCustomer.id
             ? {
-                ...c,
-                appointments: c.appointments.filter(
-                  (a) => !removeIds.includes(a.id),
-                ),
-                totalAppointments: Math.max(
-                  c.totalAppointments - removeIds.length,
-                  0,
-                ),
-              }
+              ...c,
+              appointments: c.appointments.filter(
+                (a) => !removeIds.includes(a.id),
+              ),
+              totalAppointments: Math.max(
+                c.totalAppointments - removeIds.length,
+                0,
+              ),
+            }
             : c,
         ),
       );
@@ -1486,8 +1582,8 @@ export default function ClientesPage() {
       toast.error(
         "Erro ao remover agendamento",
         error.response?.data?.detail ||
-          error.response?.data?.error ||
-          "Não foi possível remover o agendamento.",
+        error.response?.data?.error ||
+        "Não foi possível remover o agendamento.",
       );
     } finally {
       setDeletingAppointmentId(null);
@@ -1565,8 +1661,8 @@ export default function ClientesPage() {
         toast.error(
           "Erro ao salvar pet",
           error.response?.data?.detail ||
-            error.response?.data?.error ||
-            "Não foi possível salvar o pet.",
+          error.response?.data?.error ||
+          "Não foi possível salvar o pet.",
         );
         throw error;
       }
@@ -1674,6 +1770,10 @@ export default function ClientesPage() {
             setEditingCustomer(null);
             setCustomerModalOpen(true);
           }}
+          onSearchClick={() => {
+            console.log('click search');
+            setSearchModalOpen(true)
+          }}
           loading={customersLoading}
           error={customersError}
         />
@@ -1700,6 +1800,91 @@ export default function ClientesPage() {
           loadingConversations={loadingConversations}
         />
       </AnimatePresence>
+
+      <Modal
+        isOpen={searchModalOpen}
+        onClose={() => setSearchModalOpen(false)}
+        title="Buscar clientes"
+        className="max-w-[500px] max-h-[85vh] flex flex-col overflow-hidden"
+      >
+        <div className="flex flex-col gap-4 overflow-y-auto max-h-[520px]">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#727B8E] dark:text-[#8a94a6]" />
+            <input
+              type="text"
+              placeholder="Buscar clientes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg  bg-[#F4F6F9] dark:bg-[#212225] border-none pl-10 pr-4 py-2.5 text-sm text-[#434A57] dark:text-[#f5f9fc] placeholder:text-[#727B8E] dark:placeholder:text-[#8a94a6] outline-none"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {customers
+              .filter(
+                (customer) =>
+                  customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  customer.phone.includes(searchQuery) ||
+                  getClientPhoneDisplay(customer).includes(searchQuery)
+              )
+              .map((customer) => (
+                <button
+                  key={customer.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(customer.id);
+                    setSearchModalOpen(false);
+                  }}
+                  className="w-full p-4 text-left border border-[#727B8E]/10 dark:border-[#40485A] rounded-xl hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#1E62EC]/20">
+                      <span className="text-sm font-medium text-[#1E62EC]">
+                        {getInitials(customer.name)}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                          {customer.name}
+                        </span>
+                        <span
+                          className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                            customer.status === "ativo"
+                              ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
+                              : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
+                          }`}
+                        >
+                          {customer.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
+                        {customer.petsCount} pet{customer.petsCount !== 1 ? "s" : ""} •{" "}
+                        {formatClientPhoneForSidebar(getClientPhoneDisplay(customer))}
+                      </p>
+                      <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+                        {customer.totalAppointments} agendamentos
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            {customers.filter(
+              (customer) =>
+                customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                customer.phone.includes(searchQuery) ||
+                getClientPhoneDisplay(customer).includes(searchQuery)
+            ).length === 0 && (
+              <div className="text-center py-8 text-[#727B8E] dark:text-[#8a94a6]">
+                <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p>Nenhum cliente encontrado</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={customerModalOpen}
@@ -1827,7 +2012,7 @@ export default function ClientesPage() {
                 value={address.rua}
                 onChange={(e) => setField("rua", e.target.value)}
               />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Número"
                   placeholder="Nº"
@@ -1841,7 +2026,7 @@ export default function ClientesPage() {
                   onChange={(e) => setField("complemento", e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
                   label="Bairro"
                   placeholder="Bairro"

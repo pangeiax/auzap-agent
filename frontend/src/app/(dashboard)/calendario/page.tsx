@@ -982,7 +982,6 @@ export default function CalendarioPage() {
         className="max-w-[480px]"
       >
         <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1">
-          {/* Cliente */}
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
@@ -1069,7 +1068,6 @@ export default function CalendarioPage() {
             )}
           </div>
 
-          {/* Pet */}
           {formData.clientId && !showNewClientForm && (
             <div>
               <div className="mb-2 flex items-center justify-between">
@@ -1196,7 +1194,6 @@ export default function CalendarioPage() {
             </div>
           )}
 
-          {/* Data e Serviço */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <MiniDatePicker
@@ -1242,7 +1239,6 @@ export default function CalendarioPage() {
             </div>
           </div>
 
-          {/* Horários — só aparecem quando data E serviço estão preenchidos */}
           {formData.date && formData.serviceId && (
             <div>
               {slotsLoading ? (
@@ -1261,7 +1257,7 @@ export default function CalendarioPage() {
                   <p className="mb-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
                     Horário disponível <span className="text-red-500">*</span>
                   </p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {availableSlots.map((slot) => (
                       <button
                         key={slot.slot_id}
@@ -1274,7 +1270,7 @@ export default function CalendarioPage() {
                             time: slot.time,
                           }));
                         }}
-                        className={`flex flex-col items-center rounded-lg border px-2 py-2 text-sm transition-all ${
+                        className={`flex flex-col items-center rounded-lg border px-2 py-2 text-sm min-h-[60px] transition-all ${
                           formData.slotId === slot.slot_id
                             ? "border-[#1E62EC] bg-[#1E62EC]/10 text-[#1E62EC] dark:border-[#2172e5] dark:bg-[#2172e5]/20 dark:text-[#2172e5]"
                             : "border-[#727B8E]/20 bg-white text-[#434A57] hover:border-[#1E62EC]/40 hover:bg-[#1E62EC]/5 dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc]"
@@ -1300,7 +1296,6 @@ export default function CalendarioPage() {
             </div>
           )}
 
-          {/* Status */}
           <Select
             label="Status"
             placeholder="Status"
@@ -1309,7 +1304,6 @@ export default function CalendarioPage() {
             onChange={(e) => handleFormChange("status", e.target.value)}
           />
 
-          {/* Observações */}
           <div className="flex flex-col gap-3">
             <label className="font-be-vietnam-pro text-base font-semibold leading-[23px] text-[#434A57] dark:text-[#f5f9fc]">
               Observações

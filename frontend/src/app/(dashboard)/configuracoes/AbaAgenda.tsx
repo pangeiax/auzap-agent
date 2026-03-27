@@ -12,7 +12,6 @@ import type {
   SaveAgendaDay,
 } from "@/services/settingsService";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type LocalDayState = {
   day_of_week: number;
@@ -22,7 +21,6 @@ type LocalDayState = {
   capacity_by_specialty: { specialty_id: string; max_capacity: number }[];
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function computeSlotCount(open: string, close: string): number {
   const [oh = 8, om = 0] = open.split(":").map(Number);
@@ -33,7 +31,6 @@ function computeSlotCount(open: string, close: string): number {
   return Math.floor((closeMin - openMin) / 60);
 }
 
-/** Texto ao lado de Abre/Fecha e nas linhas de especialidade (evita "slot" em inglês). */
 function horariosDisponiveisLabel(count: number): string {
   if (count <= 0) return "Nenhum horário disponível";
   if (count === 1) return "1 Horário disponível";
@@ -59,7 +56,6 @@ function initLocalDays(days: AgendaDay[]): LocalDayState[] {
   }));
 }
 
-// ─── Toggle Switch ─────────────────────────────────────────────────────────────
 
 function Toggle({
   checked,
@@ -83,8 +79,6 @@ function Toggle({
     </label>
   );
 }
-
-// ─── Day Accordion Row ────────────────────────────────────────────────────────
 
 function DayRow({
   local,
@@ -112,20 +106,17 @@ function DayRow({
   const isOpen = !local.is_closed;
   const slotCount = isOpen ? computeSlotCount(local.open_time, local.close_time) : 0;
 
-  // Filtered specialties for display
   const visibleSpecialties =
     filterSpecialtyId === null
       ? specialties
       : specialties.filter((s) => s.id === filterSpecialtyId);
 
-  // Header badges
   const headerBadges = visibleSpecialties.map((sp) => {
     const cap = local.capacity_by_specialty.find((c) => c.specialty_id === sp.id);
     const abbrev = sp.name.slice(0, 3);
     return cap ? `${abbrev}.${cap.max_capacity}` : null;
   }).filter(Boolean);
 
-  // Check if this day has pending changes
   const hasChanges =
     local.is_closed !== original.is_closed ||
     local.open_time !== original.open_time ||
@@ -145,7 +136,6 @@ function DayRow({
         !isOpen && "opacity-60",
       )}
     >
-      {/* Header */}
       <div
         className={cn(
           "flex cursor-pointer items-center gap-3 px-4 py-3 select-none",
@@ -155,7 +145,6 @@ function DayRow({
         )}
         onClick={onToggleExpand}
       >
-        {/* Expand arrow */}
         <span className="shrink-0 text-[#727B8E]">
           {isExpanded ? (
             <ChevronDown className="h-4 w-4" />
@@ -164,7 +153,6 @@ function DayRow({
           )}
         </span>
 
-        {/* Toggle */}
         <span onClick={(e) => e.stopPropagation()}>
           <Toggle
             checked={isOpen}
@@ -173,7 +161,6 @@ function DayRow({
           />
         </span>
 
-        {/* Day name */}
         <span
           className={cn(
             "w-20 shrink-0 text-sm font-semibold",
@@ -185,7 +172,6 @@ function DayRow({
           {original.day_name}
         </span>
 
-        {/* Summary */}
         {!isOpen ? (
           <span className="rounded-full bg-[#727B8E]/10 px-2.5 py-0.5 text-[10px] font-medium text-[#727B8E]">
             Fechado
@@ -220,10 +206,8 @@ function DayRow({
         )}
       </div>
 
-      {/* Expanded body */}
       {isExpanded && isOpen && (
         <div className="flex flex-col gap-4 px-4 pb-5 pt-3 bg-white dark:bg-[#1A1B1D] rounded-b-xl">
-          {/* Horário section */}
           <div>
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#727B8E]">
               Horário
@@ -256,7 +240,6 @@ function DayRow({
             </div>
           </div>
 
-          {/* Capacidade por especialidade */}
           {visibleSpecialties.length > 0 && (
             <div>
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#727B8E]">
@@ -316,7 +299,6 @@ function DayRow({
         </div>
       )}
 
-      {/* Expanded body — day closed */}
       {isExpanded && !isOpen && (
         <div className="px-4 pb-4 pt-2 bg-white dark:bg-[#1A1B1D] rounded-b-xl">
           <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
@@ -327,8 +309,6 @@ function DayRow({
     </div>
   );
 }
-
-// ─── Main Component ───────────────────────────────────────────────────────────
 
 export function AbaAgenda() {
   const toast = useToast();
@@ -346,7 +326,6 @@ export function AbaAgenda() {
       const d = await settingsService.getAgenda();
       setData(d);
       setLocalDays(initLocalDays(d.days));
-      // Auto-expand today's day
       const todayDow = new Date().getDay();
       setExpandedDow(todayDow);
     } catch {
@@ -360,7 +339,6 @@ export function AbaAgenda() {
     loadData();
   }, [loadData]);
 
-  // ─── Pending count ──────────────────────────────────────────────────────────
   const pendingCount = useMemo(() => {
     if (!data) return 0;
     let count = 0;
@@ -384,7 +362,6 @@ export function AbaAgenda() {
     return count;
   }, [localDays, data]);
 
-  // ─── Handlers ───────────────────────────────────────────────────────────────
   const toggleDay = (dow: number, isOpen: boolean) => {
     setLocalDays((prev) =>
       prev.map((d) =>
@@ -436,7 +413,6 @@ export function AbaAgenda() {
     }
   };
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-[#727B8E] dark:text-[#8a94a6]">
@@ -448,12 +424,10 @@ export function AbaAgenda() {
 
   if (!data) return null;
 
-  // Hospedagem é gerenciada em outra aba
   const displaySpecialties = data.specialties.filter((s) => s.name !== "Hospedagem");
 
   return (
     <div className="flex flex-col gap-5 pb-8">
-      {/* Specialty filter pills */}
       {displaySpecialties.length > 0 && (
         <div className="flex flex-wrap gap-2">
           <button
@@ -499,7 +473,6 @@ export function AbaAgenda() {
         </div>
       )}
 
-      {/* Day accordions */}
       <div className="space-y-2">
         {localDays.map((local) => {
           const original = data.days.find((d) => d.day_of_week === local.day_of_week);
@@ -527,7 +500,6 @@ export function AbaAgenda() {
         })}
       </div>
 
-      {/* Save bar */}
       <div className="sticky bottom-0 flex items-center gap-3 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3 shadow-sm">
         {pendingCount > 0 && (
           <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
@@ -535,11 +507,11 @@ export function AbaAgenda() {
             {pendingCount} dia{pendingCount !== 1 ? "s" : ""} com alterações não salvas
           </span>
         )}
-        <div className="flex-1" />
+        <div className="hidden lg:flex flex-1" />
         <Button
           onClick={handleSave}
           disabled={saving || pendingCount === 0}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 w-full lg:w-auto"
         >
           {saving ? (
             <>

@@ -59,19 +59,19 @@ export const QuickActionsCarousel = memo(function QuickActionsCarousel({
             onClick={() => onQuickAction(longQuestion)}
             disabled={disabled}
             aria-label={`Ação rápida: ${longQuestion}`}
-            className="flex items-center gap-1.5 rounded-full border border-[#727B8E1A] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-3 py-1.5 text-xs sm:text-sm text-[#727B8E] dark:text-[#8a94a6] backdrop-blur-md transition-colors hover:bg-gray-50 dark:hover:bg-[#212225] hover:text-[#434A57] dark:hover:text-[#f5f9fc] hover:border-[#727B8E]/30 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 rounded-full border border-[#727B8E1A] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-3 py-1.5 text-xs sm:text-sm text-[#727B8E] dark:text-[#8a94a6] backdrop-blur-md transition-colors hover:bg-gray-50 dark:hover:bg-[#212225] hover:text-[#434A57] dark:hover:text-[#f5f9fc] hover:border-[#727B8E]/30 whitespace-normal sm:whitespace-nowrap max-w-full disabled:opacity-50 disabled:cursor-not-allowed"
             whileHover={{ scale: 1.02, y: -1 }}
             whileTap={{ scale: 0.98 }}
           >
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#8A96A8]" />
-            {longQuestion}
+            <span className="break-words">{longQuestion}</span>
           </motion.button>
           <motion.button
             type="button"
             onClick={() => onQuickAction(shortQuestion)}
             disabled={disabled}
             aria-label={`Ação rápida: ${shortQuestion}`}
-            className="flex items-center gap-1.5 rounded-full border border-[#727B8E1A] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-3 py-1.5 text-xs sm:text-sm text-[#727B8E] dark:text-[#8a94a6] backdrop-blur-md transition-colors hover:bg-gray-50 dark:hover:bg-[#212225] hover:text-[#434A57] dark:hover:text-[#f5f9fc] hover:border-[#727B8E]/30 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#727B8E1A] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-3 py-1.5 text-xs sm:text-sm text-[#727B8E] dark:text-[#8a94a6] backdrop-blur-md transition-colors hover:bg-gray-50 dark:hover:bg-[#212225] hover:text-[#434A57] dark:hover:text-[#f5f9fc] hover:border-[#727B8E]/30 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             whileHover={{ scale: 1.02, y: -1 }}
             whileTap={{ scale: 0.98 }}
           >

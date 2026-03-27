@@ -41,6 +41,7 @@ model SaasCompany {
   lodgingConfig       PetshopLodgingConfig?
   lodgingCapacities   PetshopLodgingCapacity[]
   lodgingReservations PetshopLodgingReservation[]
+  roomTypes           PetshopRoomType[]
 
   @@map("saas_companies")
 }
@@ -264,13 +265,17 @@ model PetshopService {
   // Formato: {"P": 50.00, "M": 70.00, "G": 90.00, "GG": 110.00}
   requiresVet Boolean   @default(false) @map("requires_vet")
   durationMultiplierLarge Decimal? @map("duration_multiplier_large") @db.Decimal(3, 1)
+  blockAiSchedule    Boolean  @default(false) @map("block_ai_schedule")
+  dependentServiceId Int?     @map("dependent_service_id")
   isActive    Boolean?  @default(true) @map("is_active")
   createdAt   DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  saasCompany  SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  specialty    PetshopSpecialty?    @relation(fields: [specialtyId], references: [id])
-  appointments PetshopAppointment[]
+  saasCompany      SaasCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  specialty        PetshopSpecialty?    @relation(fields: [specialtyId], references: [id])
+  dependentService PetshopService?      @relation("ServiceDependency", fields: [dependentServiceId], references: [id])
+  dependentServices PetshopService[]    @relation("ServiceDependency")
+  appointments     PetshopAppointment[]
 
   @@index([companyId], map: "idx_services_company")
   @@index([specialtyId], map: "idx_services_specialty")
@@ -458,12 +463,34 @@ model PetshopLodgingCapacity {
   @@map("petshop_lodging_capacity")
 }
 
+model PetshopRoomType {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   Int       @map("company_id")
+  lodgingType String    @map("lodging_type") @db.VarChar(10)   // 'hotel' | 'daycare'
+  name        String    @db.VarChar(100)
+  description String?
+  capacity    Int       @default(1)
+  dailyRate   Decimal   @map("daily_rate") @db.Decimal(10, 2)
+  features    Json?     @default("{}")
+  isActive    Boolean   @default(true)   @map("is_active")
+  createdAt   DateTime? @default(now())  @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime? @default(now())  @map("updated_at") @db.Timestamptz(6)
+
+  saasCompany  SaasCompany                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  reservations PetshopLodgingReservation[]
+
+  @@index([companyId],              map: "idx_room_types_company")
+  @@index([companyId, lodgingType], map: "idx_room_types_company_type")
+  @@map("petshop_room_types")
+}
+
 model PetshopLodgingReservation {
   id               String    @id @default(uuid()) @db.Uuid
   companyId        Int       @map("company_id")
   clientId         String    @map("client_id") @db.Uuid
   petId            String    @map("pet_id") @db.Uuid
   type             String    @db.VarChar(10)   // 'hotel' | 'daycare'
+  roomTypeId       String?   @map("room_type_id") @db.Uuid
   checkinDate      DateTime  @map("checkin_date") @db.Date
   checkoutDate     DateTime  @map("checkout_date") @db.Date
   checkinTime      DateTime? @map("checkin_time") @db.Time
@@ -478,13 +505,15 @@ model PetshopLodgingReservation {
   createdAt        DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  saasCompany SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  pet         PetshopPet  @relation(fields: [petId], references: [id])
+  saasCompany SaasCompany      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pet         PetshopPet       @relation(fields: [petId], references: [id])
+  roomType    PetshopRoomType? @relation(fields: [roomTypeId], references: [id], onDelete: SetNull)
 
-  @@index([companyId], map: "idx_lodging_res_company")
-  @@index([clientId],  map: "idx_lodging_res_client")
-  @@index([petId],     map: "idx_lodging_res_pet")
+  @@index([companyId],                           map: "idx_lodging_res_company")
+  @@index([clientId],                            map: "idx_lodging_res_client")
+  @@index([petId],                               map: "idx_lodging_res_pet")
+  @@index([roomTypeId],                          map: "idx_lodging_res_room_type")
   @@index([companyId, checkinDate, checkoutDate], map: "idx_lodging_res_dates")
   @@index([companyId, type, checkinDate],         map: "idx_lodging_res_type")
   @@map("petshop_lodging_reservations")

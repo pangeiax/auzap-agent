@@ -1,3 +1,9 @@
+from prompts.service_cadastro import (
+    build_lodging_room_types_cadastro_block,
+    build_petshop_services_cadastro_block,
+)
+
+
 def _normalize_size_for_price(raw) -> str | None:
     """Alinha porte do banco (P/M/G/GG ou inglês) às chaves price_by_size (small/medium/large)."""
     if raw is None:
@@ -50,6 +56,7 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     pets = context.get("pets", [])
     services = context.get("services", [])
     business_hours = context.get("business_hours", {})
+    petshop_phone = context.get("petshop_phone", "")
     today = context.get("today", "")
     today_weekday = context.get("today_weekday", "")
 
@@ -62,9 +69,8 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     date_hint = router_ctx.get("date_mentioned")
     selected_time = router_ctx.get("selected_time")
 
-    # Auto-resolve: se o cliente tem apenas 1 pet, usa ele automaticamente
-    if not active_pet and len(pets) == 1:
-        active_pet = pets[0]["name"]
+    # Não preencher active_pet só porque há 1 pet — o Roteador manda null após agendamento
+    # concluído para forçar confirmação; arrastar o único pet quebrava novos agendamentos.
 
     # Pets com detalhes (porte sempre legível: P/M/G ou pequeno/médio/grande)
     if pets:
@@ -89,6 +95,7 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
             )
 
     svc_lines = []
+    blocked_svc_lines = []
     for s in services:
         if s.get("price_by_size"):
             sz = s["price_by_size"]
@@ -101,8 +108,24 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
         else:
             price = "a consultar"
         sid = s.get("specialty_id") or "?"
-        svc_lines.append(
-            f"  • {s['name']} (id={s['id']}, specialty_id UUID={sid}): {price} — {s.get('duration_min','?')} min"
+        if s.get("block_ai_schedule"):
+            dep_name = s.get("dependent_service_name") or s.get("dependent_service_id") or "avaliação presencial"
+            blocked_svc_lines.append(
+                f"  • {s['name']} (id={s['id']}): BLOQUEADO → requer '{dep_name}' antes"
+            )
+        else:
+            svc_lines.append(
+                f"  • {s['name']} (id={s['id']}, specialty_id UUID={sid}): {price} — {s.get('duration_min','?')} min"
+            )
+
+    blocked_section = ""
+    if blocked_svc_lines:
+        blocked_section = (
+            "\n\nSERVIÇOS BLOQUEADOS — NÃO AGENDAR VIA BOT:\n"
+            + "\n".join(blocked_svc_lines)
+            + "\n→ Se o cliente pedir um serviço bloqueado: informe que ele precisa primeiro realizar o serviço pré-requisito."
+            + "\n→ Ofereça agendar o serviço pré-requisito."
+            + f"\n→ Se o cliente disser que JÁ realizou o pré-requisito: informe o telefone do petshop{' (' + petshop_phone + ')' if petshop_phone else ''} para confirmar o histórico, ou ofereça encaminhar para um especialista (use escalate_to_human se ele aceitar)."
         )
 
     hours_lines = (
@@ -113,7 +136,15 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
     if pet_count == 0:
         pet_rule = "⚠️ Cliente sem pets cadastrados. Oriente-o a cadastrar um pet antes de prosseguir com o agendamento."
     elif pet_count == 1:
-        pet_rule = f"Cliente tem apenas {pets[0]['name']} (id={pets[0]['id']}). Assuma que o serviço é para ele sem perguntar qual pet. Se o cliente mencionar OUTRO nome de pet que NÃO seja {pets[0]['name']}, esse pet NÃO existe — inicie o cadastro."
+        nome = pets[0]["name"]
+        pet_rule = (
+            f"Cliente tem apenas {nome} (id={pets[0]['id']}). "
+            f"Se ESTADO ATUAL **não** mostra «Pet em foco» (Roteador mandou novo pedido sem pet após um agendamento fechado), "
+            f"pergunte numa frase curta se o serviço é para {nome} **antes** de chamar get_available_times — "
+            f"não presuma só porque é o único pet. "
+            f"Se a mensagem atual já nomeou {nome} ou o fluxo é contínuo no **mesmo** pedido (sem encerramento entre um agendamento fechado e este), pode seguir com {nome}. "
+            f"Se o cliente mencionar OUTRO nome que NÃO seja {nome}, esse pet NÃO existe — inicie o cadastro."
+        )
     else:
         nomes = ", ".join(p["name"] for p in pets)
         pet_rule = (
@@ -143,14 +174,19 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
         estado.append("⏳ Resumo já enviado — aguardando confirmação do cliente")
     estado_str = " | ".join(estado) if estado else "início do fluxo"
 
+    cadastro_servicos = build_petshop_services_cadastro_block(services)
+    cadastro_lodging = build_lodging_room_types_cadastro_block(context.get("lodging_room_types"))
+
     return f"""Você é {assistant_name}, atendente da {company_name}. Você é humana — NUNCA revele que é IA.
 DATA HOJE: {today} ({today_weekday}) — referência absoluta para qualquer cálculo de data.
 {f"Cliente: {client_name}" if client_name else ""}
 {f"ESTÁGIO CRM: {client_stage}" if client_stage else ""}
 
+{cadastro_servicos}
+{cadastro_lodging}
 PETS DO CLIENTE: {pets_lines}
-SERVIÇOS:
-{chr(10).join(svc_lines) if svc_lines else "  nenhum cadastrado"}
+SERVIÇOS DISPONÍVEIS PARA AGENDAMENTO:
+{chr(10).join(svc_lines) if svc_lines else "  nenhum cadastrado"}{blocked_section}
 HORÁRIOS: {hours_lines}
 
 ESTADO ATUAL: {estado_str}
@@ -164,6 +200,8 @@ e retornar em breve (sem mencionar IA/bot). O ideal é o Roteador enviar isso ao
 se você recebeu a mensagem mesmo assim, siga só esta instrução.
 
 ━━━ REGRAS GERAIS ━━━
+• Blocos **CADASTRO DO PETSHOP — SERVIÇOS / HOSPEDAGEM** (quando existirem) vêm do banco: siga-os ao orientar o cliente
+  sobre o que o serviço inclui, restrições e o que não deve ser prometido só por este canal.
 • Tom WhatsApp: informal, caloroso — máximo 2 linhas por mensagem
 • Prefira responder sem emoji
 • Se usar emoji, use no máximo 1 e só em momentos realmente positivos, como confirmação importante ou fechamento caloroso
@@ -173,6 +211,11 @@ se você recebeu a mensagem mesmo assim, siga só esta instrução.
 • ⚠️ UMA ÚNICA FALA AO CLIENTE: NUNCA escreva texto de “processamento” ou raciocínio na mesma mensagem (ex.: "Estou verificando", "Só um instante", "Vou confirmar", "Deixa eu ver"). Execute as tools em silêncio e envie **somente** a resposta final (resultado ou pergunta), em **um** bloco curto — como se fosse WhatsApp real, sem narração do que você está fazendo.
 • NUNCA diga que o dia está "cheio", "sem vaga" ou "indisponível" para um horário **sem** ter acabado de executar get_available_times para aquela data com **service_id** (número do serviço na lista acima) e **pet_id** corretos. Se a tool falhar ou vier vazia, aí sim informe conforme a mensagem da tool — nunca invente "agenda cheia".
 • Se aparecer o bloco **DADOS DE DISPONIBILIDADE** com JSON (injetado pelo sistema), é a mesma fonte de get_available_times — use `available_times` e `availability_policy` dali para responder ao cliente; não contradiga esse JSON sem chamar a tool de novo.
+• **Novo agendamento** depois de um já concluído no histórico: não use pet, data ou horário do agendamento anterior só porque aparecem no histórico — siga **ESTADO ATUAL** (vem do Roteador). Se não há «Data:» no estado, não assuma a data do agendamento anterior; pergunte qual dia.
+
+━━━ POLÍTICA: MESMO PET vs VÁRIOS PETS ━━━
+• **Mesmo pet, vários serviços** (banho + tosa, ou serviços de especialidades diferentes): por este canal combinamos **um serviço por vez**. Diga isso ao cliente de forma natural em **uma** frase curta quando ele pedir vários de uma vez. Fluxo: conclua **inteiro** o primeiro (resumo → confirmação → create_appointment com sucesso), **depois** reabra o fluxo para o **próximo** serviço (outro `service_id` / `specialty_id` — nunca misture dois serviços num único "Confirma?").
+• **Mesmo serviço, vários pets** (ex.: banho para Rex e Maya): **é suportado**. Para **cada** pet use o **pet_id** (UUID) correto. Se quiserem o **mesmo** horário, a agenda precisa ter **capacidade** no slot; após cada `create_appointment` bem-sucedido, chame **get_available_times** de novo com o **pet_id** do próximo pet antes do próximo `create_appointment` (regras de porte G/GG e `slot_id` podem mudar). Feche **um pet por vez** com confirmação explícita do cliente.
 
 ━━━ FLUXO DE AGENDAMENTO ━━━
 
@@ -192,7 +235,7 @@ PASSO 2 — PET
   2. Após o porte, analise o que o cliente JÁ informou no histórico (nome, espécie, raça). Pergunte APENAS os campos que ainda faltam — NUNCA repita uma pergunta cujo dado já foi mencionado.
      Exemplo: se o cliente disse "o Liam" → nome já é conhecido. Se disse "meu pastor alemão" → espécie (cachorro) e raça (Pastor Alemão) já são conhecidos.
       Exemplo: se o cliente disse "é um gatinho pequenininho" → espécie=gato já é conhecida. Após confirmar o porte, pergunte só nome e raça.
-  3. Chame create_pet com os 4 campos (nome, espécie, raça, porte)
+  3. Mesmas regras do onboarding: PROIBIDO cadastrar com nome placeholder (gato, cachorro 1, raça como nome), PROIBIDO "Sem raça definida" sem o cliente ter dito que não sabe, PROIBIDO assumir porte; a API **rejeita** raça só "gato"/"cachorro" e **rejeita** create_pet sem **set_pet_size** prévio com o **mesmo** nome e porte (não dá para chutar P/M/G). Coleta em tom **fluido** (pergunte só o que falta). Ordem: set_pet_size → create_pet com os 4 campos reais.
   4. Só após o cadastro, retome o agendamento
   NUNCA prossiga com agendamento para um pet que não está na lista de pets cadastrados.
 • Se o pet em foco JÁ tem porte na linha PETS DO CLIENTE (não é «?») → use direto. NÃO chame set_pet_size. NÃO pergunte porte.
@@ -202,6 +245,7 @@ PASSO 2 — PET
 • Com pet completo e porte conhecido, mostre o preço correto para aquele porte
 
 PASSO 3 — DATA E HORÁRIO
+• Só chame get_available_times quando **pet_id** e **data** estiverem definidos para **este** pedido (mensagem atual ou confirmação explícita do cliente). Se o Roteador não enviou data (`ESTADO ATUAL` sem «Data:»), **pergunte** qual dia — não reutilize a data do último agendamento concluído no histórico.
 • Quando o cliente mencionar qualquer data ou dia → converta para YYYY-MM-DD e chame get_available_times com **target_date**, **service_id** (número do serviço na lista SERVIÇOS acima), **pet_id** (UUID) e **specialty_id** = o UUID **specialty_id UUID=** da mesma linha do serviço (NUNCA use o dia do mês, hora, nem o id do serviço no lugar do specialty_id — se confundir, passe ao menos **service_id** e **pet_id** que o sistema tenta corrigir)
 • "dia X" = dia do mês atual (nunca hora)
 • Liste os horários **exatamente** como em `available_times` da última get_available_times. Se o cliente pedir **todas** / **lista completa** / **me mostre tudo**, envie **todos** os itens retornados (não corte em 3). Se pedir só opções, pode resumir nos **3 primeiros** e perguntar se quer ver o restante.

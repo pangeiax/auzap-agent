@@ -6,20 +6,33 @@ import type {
   ServiceFilters,
 } from '@/types'
 
+/** API returns Prisma Decimals as strings; normalize so UI checks like `=== 2` work. */
+function normalizeService(raw: Service): Service {
+  const v = raw.durationMultiplierLarge
+  if (v == null || v === '') {
+    return { ...raw, durationMultiplierLarge: null }
+  }
+  const n = typeof v === 'number' ? v : Number(v)
+  return {
+    ...raw,
+    durationMultiplierLarge: Number.isFinite(n) ? n : null,
+  }
+}
+
 export const serviceService = {
   async listServices(filters?: ServiceFilters): Promise<Service[]> {
     const response = await api.get<Service[]>('/services', {
       params: filters,
     })
-    return response.data
+    return response.data.map(normalizeService)
   },
   async getService(serviceId: number): Promise<Service> {
     const response = await api.get<Service>(`/services/${serviceId}`)
-    return response.data
+    return normalizeService(response.data)
   },
   async createService(serviceData: ServiceCreate): Promise<Service> {
     const response = await api.post<Service>('/services', serviceData)
-    return response.data
+    return normalizeService(response.data)
   },
   async updateService(
     serviceId: number,
@@ -29,7 +42,7 @@ export const serviceService = {
       `/services/${serviceId}`,
       updates
     )
-    return response.data
+    return normalizeService(response.data)
   },
   async deleteService(serviceId: number): Promise<void> {
     await api.delete(`/services/${serviceId}`)

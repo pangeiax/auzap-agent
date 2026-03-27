@@ -79,7 +79,7 @@ export function CalendarWeekView({
 }: CalendarWeekViewProps) {
   return (
     <div className="flex w-max min-w-full flex-col">
-      <div className="sticky top-0 z-20 grid grid-cols-[80px_repeat(7,1fr)] border-b border-[#727B8E]/10 bg-white shadow-[0_1px_0_rgba(114,123,142,0.08)] dark:border-[#40485A] dark:bg-[#1A1B1D]">
+      <div className="sticky top-0 z-20 grid grid-cols-[80px_repeat(7,minmax(100px,1fr))] border-b border-[#727B8E]/10 bg-white shadow-[0_1px_0_rgba(114,123,142,0.08)] dark:border-[#40485A] dark:bg-[#1A1B1D]">
         <div className="border-b border-r border-[rgba(114,123,142,0.1)] bg-[#FAFBFC] dark:border-[#40485A] dark:bg-[#212225]" />
 
         {weekDays.map((day) => {
@@ -145,7 +145,7 @@ export function CalendarWeekView({
           return (
             <div
               key={hour}
-              className="grid min-h-[64px] grid-cols-[80px_repeat(7,1fr)]"
+              className="grid min-h-[64px] grid-cols-[80px_repeat(7,minmax(100px,1fr))]"
             >
               <div className="flex items-start justify-end border-b border-r border-[rgba(114,123,142,0.1)] bg-[#FAFBFC] px-3 pt-2 dark:border-[#40485A] dark:bg-[#212225]">
                 <span className="text-[11px] font-medium text-[#727B8E] dark:text-[#8a94a6]">

@@ -39,11 +39,11 @@ function KpiCard({
         className,
       )}
     >
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-[#727B8E] dark:text-[#8a94a6]">
           {title}
         </p>
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#1E62EC]/10 text-[#1E62EC] dark:bg-[#2172e5]/20 dark:text-[#6ba3f7]">
+        <div className="flex h-7 w-7 px-2 items-center justify-center rounded-md bg-[#1E62EC]/10 text-[#1E62EC] dark:bg-[#2172e5]/20 dark:text-[#6ba3f7]">
           {icon}
         </div>
       </div>
@@ -220,8 +220,8 @@ export function DashboardKpiCards({ data, loading }: Props) {
         {!revenueRealtime ? (
           <EmptyValue label="Sem dados de faturamento" />
         ) : (
-          <div className="flex gap-0">
-            <div className="flex-1 pr-3">
+          <div className="grid grid-cols-1 divide-y xsm:divide-y-0 xsm:grid-cols-2 xsm:divide-x divide-[#727b8e7d]! dark:divide-[#40485A]!">
+            <div className="pr-3 pb-1.5 xsm:pb-0">
               <p className="text-[10px] text-[#9ca3af] mb-1">hoje</p>
               <p className="text-2xl font-bold text-[#434A57] dark:text-[#f5f9fc] leading-none">
                 {formatCurrency(revenueRealtime.today)}
@@ -235,9 +235,7 @@ export function DashboardKpiCards({ data, loading }: Props) {
               )}
             </div>
 
-            <div className="w-px bg-[#727B8E1A] dark:bg-[#40485A] mx-1" />
-
-            <div className="flex-1 pl-3">
+            <div className="xsm:pl-3 pt-1.5 xsm:pt-0">
               <p className="text-[10px] text-[#9ca3af] mb-1">esta semana</p>
               <p className="text-2xl font-bold text-[#434A57] dark:text-[#f5f9fc] leading-none">
                 {formatCurrency(revenueRealtime.this_week)}

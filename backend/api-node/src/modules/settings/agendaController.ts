@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
-import { generateSlotsForCompany } from '../../services/slotGeneratorService'
+import { generateSlotsForCompany, MAX_DAYS_AHEAD } from '../../services/slotGeneratorService'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const
@@ -271,8 +271,8 @@ export async function saveAgenda(req: Request, res: Response) {
       }
     }))
 
-    // 5. Regenerate slots for next 60 days
-    await generateSlotsForCompany(companyId, 60)
+    // 5. Regenerate slots for the configured horizon (MAX_DAYS_AHEAD)
+    await generateSlotsForCompany(companyId, MAX_DAYS_AHEAD)
 
     const agenda = await buildAgendaPayload(companyId)
     res.json({ success: true, specialties: agenda.specialties, days: agenda.days })

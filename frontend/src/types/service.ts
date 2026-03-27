@@ -12,7 +12,10 @@ export interface Service {
     medium?: number
     large?: number
   } | null
-  durationMultiplierLarge?: number | null
+  /** Usually number; API may send Prisma Decimal as string until normalized in serviceService. */
+  durationMultiplierLarge?: number | string | null
+  blockAiSchedule?: boolean
+  dependentServiceId?: number | null
   isActive?: boolean
   createdAt?: string
   updatedAt?: string
@@ -30,6 +33,8 @@ export interface ServiceCreate {
     large?: number
   }
   duration_multiplier_large?: number | string
+  block_ai_schedule?: boolean
+  dependent_service_id?: number | null
 }
 
 export interface ServiceUpdate {
@@ -45,6 +50,8 @@ export interface ServiceUpdate {
   } | null
   is_active?: boolean
   duration_multiplier_large?: number | null
+  block_ai_schedule?: boolean
+  dependent_service_id?: number | null
 }
 
 export interface ServiceFilters {

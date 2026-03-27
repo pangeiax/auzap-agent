@@ -74,7 +74,7 @@ export function LandingHeader() {
           <AuthButtons layout="row" />
         </div>
 
-        <button
+        {/* <button
           type="button"
           className="md:hidden"
           onClick={() => setMobileMenuOpen((open) => !open)}
@@ -87,7 +87,7 @@ export function LandingHeader() {
           ) : (
             <Menu className="h-6 w-6 text-[#434A57]" />
           )}
-        </button>
+        </button> */}
       </div>
 
       {mobileMenuOpen && (

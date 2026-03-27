@@ -1,14 +1,12 @@
 import { Request, Response } from 'express'
-import { generateSlotsForCompany } from '../../services/slotGeneratorService'
-
-const MAX_DAYS = 60
+import { generateSlotsForCompany, MAX_DAYS_AHEAD } from '../../services/slotGeneratorService'
 
 // POST /settings/generate-slots — Authenticated, gera slots da empresa do usuário
 export async function generateSlotsManual(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const daysRequested = Number(req.body.days ?? 30)
-    const daysGenerated = Math.min(daysRequested, MAX_DAYS)
+    const daysGenerated = Math.min(daysRequested, MAX_DAYS_AHEAD)
 
     const result = await generateSlotsForCompany(companyId, daysGenerated)
 
@@ -27,8 +25,8 @@ export async function generateSlotsManual(req: Request, res: Response) {
       },
     }
 
-    if (daysRequested > MAX_DAYS) {
-      response.warning = `O máximo permitido é ${MAX_DAYS} dias. Geração limitada a ${MAX_DAYS} dias.`
+    if (daysRequested > MAX_DAYS_AHEAD) {
+      response.warning = `O máximo permitido é ${MAX_DAYS_AHEAD} dias. Geração limitada a ${MAX_DAYS_AHEAD} dias.`
     }
 
     res.json(response)

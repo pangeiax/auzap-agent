@@ -3,8 +3,9 @@ import os
 import re
 import urllib.request
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from db import get_connection
+from timezone_br import now_sao_paulo_naive, today_sao_paulo
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
 _UUID_RE = re.compile(
@@ -16,11 +17,11 @@ _UUID_RE = re.compile(
 def _is_uuid(val) -> bool:
     return bool(val and _UUID_RE.match(str(val)))
 
-# Fuso horário de Brasília (UTC-3) — usado para filtrar horários do dia
-BRASILIA = timezone(timedelta(hours=-3))
-
 # URL interna do backend Node (Docker network)
 BACKEND_INTERNAL_URL = os.getenv("BACKEND_INTERNAL_URL", "http://backend:3000")
+
+# Deve coincidir com MAX_DAYS_AHEAD no backend Node (geração de slots / agenda).
+MAX_AGENDA_DAYS_AHEAD = 90
 
 logger = logging.getLogger("ai-service.tools.booking")
 
@@ -151,15 +152,28 @@ def build_booking_tools(company_id: int, client_id) -> list:
         """
         Retorna lista de serviços ativos do petshop.
         Chamar em silêncio para validar o serviço antes de pedir dados do pet.
+        Serviços com block_ai_schedule=true NÃO devem ser agendados pelo bot.
         """
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, name, description, duration_min, price, price_by_size, duration_multiplier_large, specialty_id
-                FROM petshop_services
-                WHERE company_id = %s AND is_active = TRUE
-                ORDER BY name
+                SELECT
+                    ps.id,
+                    ps.name,
+                    ps.description,
+                    ps.duration_min,
+                    ps.price,
+                    ps.price_by_size,
+                    ps.duration_multiplier_large,
+                    ps.specialty_id,
+                    ps.block_ai_schedule,
+                    ps.dependent_service_id,
+                    dep.name AS dependent_service_name
+                FROM petshop_services ps
+                LEFT JOIN petshop_services dep ON dep.id = ps.dependent_service_id
+                WHERE ps.company_id = %s AND ps.is_active = TRUE
+                ORDER BY ps.name
             """,
                 (company_id,),
             )
@@ -170,7 +184,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
         """Tenta gerar slots via endpoint interno. Retorna True se bem-sucedido."""
         try:
             url = f"{BACKEND_INTERNAL_URL}/internal/generate-slots"
-            payload = json.dumps({"company_id": company_id, "days": 60}).encode()
+            payload = json.dumps(
+                {"company_id": company_id, "days": MAX_AGENDA_DAYS_AHEAD}
+            ).encode()
             req = urllib.request.Request(
                 url, data=payload, headers={"Content-Type": "application/json"}
             )
@@ -253,21 +269,21 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "message": "Data inválida. Use o formato YYYY-MM-DD.",
             }
 
-        # Data "hoje" em Brasília — evita desvio se o servidor estiver em UTC
-        today = datetime.now(BRASILIA).date()
+        # Data "hoje" em America/Sao_Paulo
+        today = today_sao_paulo()
         if parsed_date < today:
             return {
                 "available": False,
                 "message": "Não é possível agendar em datas passadas.",
             }
-        if parsed_date > today + timedelta(days=60):
+        if parsed_date > today + timedelta(days=MAX_AGENDA_DAYS_AHEAD):
             return {
                 "available": False,
-                "message": "Só é possível agendar com até 60 dias de antecedência.",
+                "message": f"Só é possível agendar com até {MAX_AGENDA_DAYS_AHEAD} dias de antecedência.",
                 "beyond_limit": True,
             }
 
-        now = datetime.now(BRASILIA).replace(tzinfo=None)
+        now = now_sao_paulo_naive()
 
         raw_specialty = (specialty_id or "").strip()
         spec_id = raw_specialty

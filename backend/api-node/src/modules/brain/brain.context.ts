@@ -37,7 +37,7 @@ async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
 
     // 2. Aniversários de pets nos próximos 7 dias
     prisma.$queryRaw<Array<{ pet_name: string; client_name: string }>>`
-      SELECT * FROM get_pet_birthdays_next_days(${companyId}, 7)
+      SELECT * FROM get_pet_birthdays_next_days(${companyId}::int, 7)
     `,
 
     // 3. Clientes com risco alto de churn (mês atual)

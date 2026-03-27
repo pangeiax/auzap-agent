@@ -9,6 +9,7 @@ import {
   Moon,
   Sun,
   Bed,
+  Menu,
 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { cn } from "@/lib/cn";
@@ -95,22 +96,25 @@ const NAV_ICONS = [
 
 interface TopNavProps {
   linked?: boolean;
+  onMenuClick?: () => void;
 }
 
-export function TopNav({ linked = true }: TopNavProps) {
+export function TopNav({ linked = true, onMenuClick }: TopNavProps) {
   const { pathname } = useLocation();
   const { theme, toggleTheme } = useTheme();
 
   return (
     <Tooltip.Provider delayDuration={200}>
       <div className="flex w-full items-center justify-between gap-2 px-1">
+
         <WhatsAppStatusDot />
         <div
           className={cn(
-            "flex shrink-0 items-center justify-center gap-1 rounded-full px-1 sm:gap-2 sm:px-2",
+            "flex shrink-0 items-center justify-center rounded-full",
+            "gap-0.5 px-1 sm:gap-2 sm:px-2",
             "border border-[#727B8E]/10 bg-white backdrop-blur-[6px] dark:border-[#40485A] dark:bg-[#1A1B1D]/90",
           )}
-          style={{ height: "38px" }}
+          style={{ height: "auto", padding: "4px" }}
         >
           {NAV_ICONS.map(({ icon: Icon, label, href }) => {
             if (!linked) {
@@ -119,11 +123,11 @@ export function TopNav({ linked = true }: TopNavProps) {
                   <Tooltip.Trigger asChild>
                     <button
                       type="button"
-                      className="flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-300 ease-in-out hover:bg-gray-100"
+                      className="flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-full transition-colors duration-300 ease-in-out hover:bg-gray-100 dark:hover:bg-[#212225]"
                       aria-label={label}
                     >
                       <Icon
-                        className="h-[17px] w-[17px] stroke-[#8A96A8]"
+                        className="h-5 w-5 sm:h-[17px] sm:w-[17px] stroke-[#8A96A8] dark:stroke-[#8a94a6]"
                         strokeWidth={1.33}
                       />
                     </button>
@@ -155,7 +159,7 @@ export function TopNav({ linked = true }: TopNavProps) {
                   <Link
                     to={href}
                     className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-300 ease-in-out",
+                      "flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-full transition-colors duration-300 ease-in-out",
                       isActive
                         ? "bg-[#1E62EC] dark:bg-[#2172e5]"
                         : "hover:bg-gray-100 dark:hover:bg-[#212225]",
@@ -164,7 +168,7 @@ export function TopNav({ linked = true }: TopNavProps) {
                   >
                     <Icon
                       className={cn(
-                        "h-[17px] w-[17px]",
+                        "h-5 w-5 sm:h-[17px] sm:w-[17px]",
                         isActive
                           ? "stroke-white"
                           : "stroke-[#8A96A8] dark:stroke-[#8a94a6]",

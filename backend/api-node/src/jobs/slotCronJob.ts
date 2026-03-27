@@ -1,4 +1,4 @@
-import { generateSlotsForCompany } from '../services/slotGeneratorService'
+import { generateSlotsForCompany, MAX_DAYS_AHEAD } from '../services/slotGeneratorService'
 
 /**
  * Cron job semanal — gera slots para TODAS as empresas ativas.
@@ -25,7 +25,7 @@ async function tick() {
     lastRun = dayKey
     console.log('[SlotCron] Iniciando geração semanal de slots...')
     try {
-      const result = await generateSlotsForCompany(undefined, 60)
+      const result = await generateSlotsForCompany(undefined, MAX_DAYS_AHEAD)
       console.log(
         `[SlotCron] Concluído: ${result.companies} empresas, ${result.slots_processed} slots processados.`,
       )

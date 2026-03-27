@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cn } from '@/lib/cn'
 import { TopNav } from '@/components/organisms/TopNav'
 import { SupportChatButton } from '@/components/molecules/SupportChatButton'
@@ -15,6 +16,11 @@ export function DashboardLayout({
   topLabel,
   contentClassName,
 }: DashboardLayoutProps) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  const toggleSidebar = () => setSidebarOpen((prev) => !prev)
+  const closeSidebar = () => setSidebarOpen(false)
+
   return (
     <div className="relative flex h-dvh max-h-dvh w-full flex-col overflow-hidden bg-[#1B5FE9] dark:bg-gradient-to-b! dark:from-[#1B5FE9]! dark:to-[#1A1B1D]!">
       <div
@@ -38,7 +44,7 @@ export function DashboardLayout({
           'relative z-10 flex w-full shrink-0 items-center justify-center',
           'px-4 pt-4 sm:px-6 lg:px-10',
         )}>
-          <TopNav />
+          <TopNav onMenuClick={sidebar ? toggleSidebar : undefined} />
         </div>
 
         {sidebar ? (
@@ -46,16 +52,30 @@ export function DashboardLayout({
             'w-auto mx-4 mt-4 sm:mx-6 sm:mt-6 flex min-h-0 flex-1 flex-col gap-0 animate-fade-in',
             contentClassName
           )}>
+            {sidebarOpen && (
+              <div
+                className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+                onClick={closeSidebar}
+              />
+            )}
+
             <div
               className={cn(
                 'relative flex w-full flex-1 min-h-0 overflow-hidden rounded-2xl sm:rounded-3xl border border-[#727B8E]/10 dark:border-[#40485A]',
-                'flex-col lg:flex-row'
+                'flex-row'
               )}
             >
-              <div className="flex h-[min(50vh,400px)] w-full shrink-0 flex-col overflow-hidden rounded-t-2xl bg-white dark:bg-[#1A1B1D] sm:rounded-t-3xl lg:h-full lg:min-h-0 lg:w-[400px] lg:rounded-l-3xl lg:rounded-tr-none">
+              <div
+                className={cn(
+                  'flex shrink-0 flex-col overflow-hidden bg-white dark:bg-[#1A1B1D]',
+                  'w-[88px]',
+                  'lg:w-[400px] lg:rounded-l-3xl'
+                )}
+              >
                 {sidebar}
               </div>
-              <div className="flex flex-1 flex-col min-h-0 overflow-auto rounded-b-2xl bg-[#F4F6F9] dark:bg-[#272A34] sm:rounded-b-3xl lg:rounded-r-3xl lg:rounded-bl-none">
+
+              <div className="flex flex-1 flex-col min-h-0 overflow-auto rounded-none bg-[#F4F6F9] dark:bg-[#272A34] rounded-r-2xl">
                 {children}
               </div>
             </div>

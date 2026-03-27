@@ -1,7 +1,7 @@
 import { Suspense, useState, useRef, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search } from "lucide-react";
+import { Search, ArrowLeftRight, Plus } from "lucide-react";
 
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import { ConversationItem } from "@/components/molecules/ConversationItem";
@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/molecules/EmptyState";
 import { ChatBubble } from "@/components/molecules/ChatBubble";
 import { ChatInput } from "@/components/molecules/ChatInput";
 import { ChatHeader } from "@/components/molecules/ChatHeader";
+import { Button } from "@/components/atoms/Button";
 import { useConversations } from "@/hooks";
 import { conversationService, whatsappService } from "@/services";
 import type { Conversation } from "@/types";
@@ -46,9 +47,9 @@ function mapApiConversation(conv: Conversation): MockConversation {
     lastMessage: `${conv.message_count ?? 0} mensagens`,
     time: conv.last_message_at
       ? new Date(conv.last_message_at).toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+        hour: "2-digit",
+        minute: "2-digit",
+      })
       : "",
     unreadCount: 0,
     isAiPaused: conv.ai_paused ?? conv.is_ai_paused ?? false,
@@ -69,6 +70,15 @@ function mapApiMessage(msg: any): MockMessage {
     }),
     isRead: true,
   };
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 function ConversationsSidebar({
@@ -93,8 +103,98 @@ function ConversationsSidebar({
       conv.lastMessage.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  return (
-    <div className="flex h-full flex-col">
+  const renderMobileView = () => (
+    <div className="lg:hidden h-full w-full relative overflow-hidden">
+      <div className="relative z-10 h-full flex flex-col">
+        <div className="flex-1 flex lg:gap-2.5 overflow-hidden">
+          <div className="w-[88.73px] bg-white border-l border-t border-b border-[#727B8E]/10 rounded-l-2xl flex flex-col justify-between py-[10px] px-2">
+            <div className="pb-1 border-b border-[#727B8E]/10">
+              <div className="flex items-center justify-between text-[10px] font-medium text-[#434A57] leading-7">
+                <span>Conversas</span>
+
+                <Link
+                  to="/pipeline"
+                  className="flex h-10 w-10 items-center justify-center rounded-full"
+
+                >
+                  <ArrowLeftRight className="h-2.5 w-2.5" />
+                </Link>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-0">
+              {filteredConversations.slice(0, 8).map((conversation) => (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  onClick={() => onSelect(conversation.id)}
+                  className={`w-full p-3 border-b border-[#727B8E]/10 ${selectedId === conversation.id ? "bg-[#F4F6F9]" : "bg-white"
+                    }`}
+                >
+                  <div className="relative w-[49px] h-[49px] mx-auto">
+                    <div className="w-full h-full rounded-full bg-[#FAFAFA] border border-[#727B8E]/10 flex items-center justify-center">
+                      <span className="text-base font-medium text-[#434A57]">
+                        {getInitials(conversation.name)}
+                      </span>
+                    </div>
+                    {conversation.isOnline && (
+                      <div className="absolute bottom-0 right-0 w-2 h-2 bg-[#3DCA21] rounded-full border-2 border-white/10" />
+                    )}
+                    {conversation.unreadCount > 0 && (
+                      <div className="absolute -top-1 -right-1 w-4 h-4 bg-black rounded-full flex items-center justify-center">
+                        <span className="text-[8px] font-medium text-white">{conversation.unreadCount}</span>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="pt-2">
+              <button className="w-16 h-[46px] mx-auto bg-[#1E62EC] rounded-lg flex items-center justify-center hover:bg-[#1E62EC]/90 transition-colors">
+                <Plus className="h-6 w-6 text-white" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 bg-[#F4F6F9] border border-[#727B8E]/10 rounded-r-[24px] flex flex-col items-center justify-center p-4">
+            {loading ? (
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1E62EC] border-t-transparent" />
+            ) : filteredConversations.length === 0 ? (
+              <div className="text-center pb-[90px]">
+                <div className="w-[155.21px] h-[112.55px] mx-auto mb-[35px]">
+                  <EmptyState
+                    image="bored"
+                    description=""
+                    buttonText=""
+                    onButtonClick={() => { }}
+                  />
+                </div>
+                <p className="text-sm font-medium text-[#727B8E] mb-4">
+                  Você ainda não tem conversas
+                </p>
+                <Button
+                  onClick={() => { }}
+                  className="h-[37px] px-5 bg-[#1E62EC] text-white text-xs font-medium rounded-lg hover:bg-[#1E62EC]/90"
+                >
+                  Cadastrar cliente
+                </Button>
+              </div>
+            ) : (
+              <div className="text-center">
+                <p className="text-sm font-medium text-[#727B8E]">
+                  Selecione uma conversa para iniciar
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDesktopView = () => (
+    <div className="hidden lg:flex h-full flex-col">
       <ConversationsPipelineHeader title="Conversas" activeTab="chat" />
       <div className="flex flex-col gap-4 p-4">
         <div className="flex items-center gap-2 rounded-full border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#1A1B1D] px-4 py-2">
@@ -126,7 +226,7 @@ function ConversationsSidebar({
                   : "Você ainda não tem conversas"
               }
               buttonText={searchQuery ? undefined : "Cadastrar cliente"}
-              onButtonClick={searchQuery ? undefined : () => {}}
+              onButtonClick={searchQuery ? undefined : () => { }}
             />
           </div>
         ) : (
@@ -141,6 +241,13 @@ function ConversationsSidebar({
         )}
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {renderMobileView()}
+      {renderDesktopView()}
+    </>
   );
 }
 
@@ -176,6 +283,25 @@ function ChatArea({
     }
   }, [messages]);
 
+  useEffect(() => {
+    const handleResize = () => {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop =
+          messagesContainerRef.current.scrollHeight;
+      }
+    };
+
+    window.visualViewport?.addEventListener("resize", handleResize);
+    return () =>
+      window.visualViewport?.removeEventListener("resize", handleResize);
+  }, []);
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
   if (!conversation) {
     return (
       <motion.div
@@ -194,18 +320,12 @@ function ChatArea({
     );
   }
 
-  const formatRecordingTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="flex h-full flex-col"
+      className="flex h-full max-h-[100dvh] flex-col"
     >
       <ChatHeader
         name={conversation.name}
@@ -378,11 +498,11 @@ function ChatPageContent() {
       prev.map((conv) =>
         conv.id === selectedId
           ? {
-              ...conv,
-              lastMessage: message,
-              time: getCurrentTime(),
-              unreadCount: 0,
-            }
+            ...conv,
+            lastMessage: message,
+            time: getCurrentTime(),
+            unreadCount: 0,
+          }
           : conv,
       ),
     );
@@ -418,10 +538,10 @@ function ChatPageContent() {
             prev.map((conv) =>
               conv.id === selectedId
                 ? {
-                    ...conv,
-                    lastMessage: aiResponse.message,
-                    time: getCurrentTime(),
-                  }
+                  ...conv,
+                  lastMessage: aiResponse.message,
+                  time: getCurrentTime(),
+                }
                 : conv,
             ),
           );
@@ -518,11 +638,11 @@ function ChatPageContent() {
         prev.map((conv) =>
           conv.id === selectedId
             ? {
-                ...conv,
-                lastMessage: "🎤 Mensagem de voz",
-                time: getCurrentTime(),
-                unreadCount: 0,
-              }
+              ...conv,
+              lastMessage: "🎤 Mensagem de voz",
+              time: getCurrentTime(),
+              unreadCount: 0,
+            }
             : conv,
         ),
       );
@@ -545,10 +665,10 @@ function ChatPageContent() {
             prev.map((conv) =>
               conv.id === selectedId
                 ? {
-                    ...conv,
-                    lastMessage: aiResponse.message,
-                    time: getCurrentTime(),
-                  }
+                  ...conv,
+                  lastMessage: aiResponse.message,
+                  time: getCurrentTime(),
+                }
                 : conv,
             ),
           );

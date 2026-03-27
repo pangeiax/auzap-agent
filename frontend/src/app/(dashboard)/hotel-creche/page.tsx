@@ -8,8 +8,8 @@ import { Input } from '@/components/atoms/Input'
 import { ClientCombobox } from '@/components/molecules/ClientCombobox'
 import { PawPrint, Clock, LogIn, LogOut, Home, Loader2, AlertTriangle, Plus, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { lodgingConfigService, lodgingReservationService } from '@/services/lodgingService'
-import type { LodgingReservation, LodgingType, LodgingConfig } from '@/services/lodgingService'
+import { lodgingConfigService, lodgingReservationService, roomTypeService } from '@/services/lodgingService'
+import type { LodgingReservation, LodgingType, LodgingConfig, RoomTypeAvailability, RoomType } from '@/services/lodgingService'
 import { clientService } from '@/services'
 import type { Client, Pet } from '@/types'
 
@@ -376,6 +376,11 @@ function ReservadoCard({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="text-sm font-bold text-[#434A57] dark:text-[#f5f9fc]">{petName}</p>
+          {res.room_type_name && (
+            <span className="rounded-full bg-[#8B5CF6]/10 dark:bg-[#8B5CF6]/20 px-2 py-0.5 text-[10px] font-semibold text-[#8B5CF6]">
+              {res.room_type_name}
+            </span>
+          )}
           {res.status === 'needs_reschedule' && (
             <span className="flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">
               <AlertTriangle className="h-2.5 w-2.5" />Reagendar
@@ -466,6 +471,11 @@ function HospedadoCard({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="text-sm font-bold text-[#434A57] dark:text-[#f5f9fc]">{petName}</p>
+          {res.room_type_name && (
+            <span className="rounded-full bg-[#8B5CF6]/10 dark:bg-[#8B5CF6]/20 px-2 py-0.5 text-[10px] font-semibold text-[#8B5CF6]">
+              {res.room_type_name}
+            </span>
+          )}
           {res.kennel_id && (
             <span className="rounded-full bg-[#727B8E]/10 px-2 py-0.5 text-[10px] font-semibold text-[#727B8E]">
               Vaga {res.kennel_id}
@@ -523,6 +533,83 @@ function HospedadoCard({
   )
 }
 
+// ─── Skeleton primitives ─────────────────────────────────────────────────────
+
+function Sk({ className }: { className?: string }) {
+  return (
+    <div className={cn('animate-pulse rounded-lg bg-[#727B8E]/10 dark:bg-[#40485A]/40', className)} />
+  )
+}
+
+function ReservationCardSkeleton() {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] p-3">
+      <Sk className="h-11 w-11 shrink-0 rounded-xl" />
+      <div className="flex-1 min-w-0 space-y-2">
+        <Sk className="h-4 w-32" />
+        <Sk className="h-3 w-20" />
+        <Sk className="h-3 w-40" />
+      </div>
+      <Sk className="h-7 w-20 shrink-0 rounded-lg" />
+    </div>
+  )
+}
+
+function PageSkeleton() {
+  return (
+    <DashboardLayout>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white shadow-sm dark:border-[#40485A] dark:bg-[#1A1B1D] sm:p-6 p-4">
+          <div className="flex flex-col gap-5">
+
+            {/* Header */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Sk className="h-9 w-36 rounded-xl" />
+                <Sk className="hidden sm:block h-7 w-[88px] rounded-lg" />
+                <Sk className="hidden sm:block h-7 w-[88px] rounded-lg" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Sk className="h-[34px] w-36 rounded-lg" />
+                <Sk className="h-9 w-32 rounded-lg" />
+              </div>
+            </div>
+
+            {/* KPIs */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(['border-[#1E62EC]/10', 'border-green-200/60 dark:border-green-800/20', 'border-transparent', 'border-[#727B8E]/10'] as const).map((border, i) => (
+                <div key={i} className={cn('rounded-xl border p-3.5 bg-[#F4F6F9]/60 dark:bg-[#212225]/60', border)}>
+                  <Sk className="h-3 w-28 mb-3" />
+                  <Sk className="h-8 w-16" />
+                </div>
+              ))}
+            </div>
+
+            {/* Lists */}
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {[0, 1].map((col) => (
+                <div key={col} className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
+                  <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3.5">
+                    <Sk className="h-8 w-8 shrink-0 rounded-lg" />
+                    <div className="flex-1 space-y-1.5">
+                      <Sk className="h-4 w-24" />
+                      <Sk className="h-3 w-32" />
+                    </div>
+                    <Sk className="h-7 w-8 rounded-lg" />
+                  </div>
+                  <div className="bg-[#F4F6F9]/40 dark:bg-[#212225]/40 p-3 space-y-2">
+                    {[0, 1, 2].map((j) => <ReservationCardSkeleton key={j} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function HotelCrechePage() {
@@ -559,6 +646,15 @@ export default function HotelCrechePage() {
   const [newEmergencyContact, setNewEmergencyContact] = useState('')
   const [newResLoading, setNewResLoading] = useState(false)
   const [newResError, setNewResError] = useState('')
+  const [roomTypeOptions, setRoomTypeOptions] = useState<RoomTypeAvailability[]>([])
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState('')
+  const [loadingRoomTypes, setLoadingRoomTypes] = useState(false)
+
+  // Filtro de tipo de quarto (painel principal)
+  const [allRoomTypes, setAllRoomTypes] = useState<RoomType[]>([])
+  const [selectedRoomTypeFilter, setSelectedRoomTypeFilter] = useState<string>('all')
+  const [todayRoomAvailability, setTodayRoomAvailability] = useState<RoomTypeAvailability[]>([])
+  const [loadingTabData, setLoadingTabData] = useState(false)
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -591,9 +687,64 @@ export default function HotelCrechePage() {
     fetchReservations()
   }, [fetchConfig, fetchReservations])
 
+  // Carrega tipos de quarto do painel e disponibilidade de hoje ao trocar de aba
+  const fetchRoomTypesForTab = useCallback(async () => {
+    setLoadingTabData(true)
+    const today = getTodayYmd()
+    const tomorrow = shiftYmd(today, 1)
+    const [types, avail] = await Promise.all([
+      roomTypeService.list({ lodging_type: activeTab, is_active: true }).catch(() => []),
+      roomTypeService.getAvailability(activeTab, today, tomorrow).catch(() => []),
+    ])
+    setAllRoomTypes(types as RoomType[])
+    setTodayRoomAvailability(avail as RoomTypeAvailability[])
+    setSelectedRoomTypeFilter((prev) =>
+      prev === 'all' || (types as RoomType[]).some((t) => t.id === prev) ? prev : 'all',
+    )
+    setLoadingTabData(false)
+  }, [activeTab])
+
+  useEffect(() => {
+    setSelectedRoomTypeFilter('all')
+    fetchRoomTypesForTab()
+  }, [activeTab, fetchRoomTypesForTab])
+
+  // Carrega tipos de quarto disponíveis quando datas mudam no modal
+  useEffect(() => {
+    if (!newResOpen || !newCheckinDate || !newCheckoutDate) {
+      setRoomTypeOptions([])
+      setSelectedRoomTypeId('')
+      return
+    }
+    const checkoutForApi = activeTab === 'daycare' ? shiftYmd(newCheckoutDate, 1) : newCheckoutDate
+    if (checkoutForApi <= newCheckinDate) return
+
+    let cancelled = false
+    setLoadingRoomTypes(true)
+    roomTypeService
+      .getAvailability(activeTab, newCheckinDate, checkoutForApi)
+      .then((opts) => {
+        if (cancelled) return
+        setRoomTypeOptions(opts)
+        const preferred = selectedRoomTypeFilter !== 'all'
+          ? opts.find((o) => o.room_type_id === selectedRoomTypeFilter && o.available)
+          : null
+        const toSelect = preferred ?? opts.find((o) => o.available)
+        setSelectedRoomTypeId(toSelect?.room_type_id ?? '')
+        if (toSelect) setNewDailyRate(String(Number(toSelect.daily_rate).toFixed(2)))
+      })
+      .catch(() => { if (!cancelled) setRoomTypeOptions([]) })
+      .finally(() => { if (!cancelled) setLoadingRoomTypes(false) })
+
+    return () => { cancelled = true }
+  }, [newResOpen, newCheckinDate, newCheckoutDate, activeTab])
+
   const currentRes = reservations.filter((r) => r.type === activeTab)
-  const reservados = currentRes.filter((r) => r.status === 'confirmed' || r.status === 'needs_reschedule')
-  const hospedados = currentRes.filter((r) => r.status === 'checked_in')
+  const filteredRes = selectedRoomTypeFilter === 'all'
+    ? currentRes
+    : currentRes.filter((r) => r.room_type_id === selectedRoomTypeFilter)
+  const reservados = filteredRes.filter((r) => r.status === 'confirmed' || r.status === 'needs_reschedule')
+  const hospedados = filteredRes.filter((r) => r.status === 'checked_in')
 
   const computeAutoKennel = (target: LodgingReservation) => {
     const occupied = reservations
@@ -691,6 +842,8 @@ export default function HotelCrechePage() {
     setNewDailyRate('')
     setNewEmergencyContact('')
     setNewResError('')
+    setRoomTypeOptions([])
+    setSelectedRoomTypeId('')
     const today = getTodayYmd()
     const tomorrow = shiftYmd(today, 1)
     setNewCheckinDate(today)
@@ -738,24 +891,25 @@ export default function HotelCrechePage() {
       }
     }
 
+    if (roomTypeOptions.length > 0 && !selectedRoomTypeId) {
+      setNewResError('Selecione um tipo de quarto.')
+      return
+    }
+
+    const selectedOpt = roomTypeOptions.find((o) => o.room_type_id === selectedRoomTypeId)
+    if (selectedOpt && !selectedOpt.available) {
+      setNewResError('O tipo de quarto selecionado não possui vagas neste período.')
+      return
+    }
+
     setNewResLoading(true)
     setNewResError('')
     try {
-      const availability = await lodgingReservationService.checkAvailability(
-        activeTab,
-        newCheckinDate,
-        checkoutForApi,
-      )
-
-      if (!availability.available || availability.min_available_capacity <= 0) {
-        setNewResError('Sem vagas disponíveis para este período. Tente novas datas.')
-        return
-      }
-
       await lodgingReservationService.create({
         client_id: selectedClientId,
         pet_id: selectedPetId,
         type: activeTab,
+        ...(selectedRoomTypeId ? { room_type_id: selectedRoomTypeId } : {}),
         checkin_date: newCheckinDate,
         checkout_date: checkoutForApi,
         ...(newDailyRate ? { daily_rate: Number(newDailyRate.replace(',', '.')) } : {}),
@@ -775,15 +929,29 @@ export default function HotelCrechePage() {
     }
   }
 
-  if (loadingConfig) {
-    return (
-      <DashboardLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-[#1E62EC]" />
-        </div>
-      </DashboardLayout>
-    )
-  }
+  // ── KPI computados com base no filtro de tipo de quarto ─────────────────────
+  const kpiDiaria = (() => {
+    if (allRoomTypes.length === 0) return '—'
+    if (selectedRoomTypeFilter === 'all') {
+      const rates = allRoomTypes.map((rt) => Number(rt.daily_rate))
+      const min = Math.min(...rates)
+      const max = Math.max(...rates)
+      return min === max ? `R$ ${min.toFixed(2)}` : `R$ ${min.toFixed(2)}–${max.toFixed(2)}`
+    }
+    const rt = allRoomTypes.find((r) => r.id === selectedRoomTypeFilter)
+    return rt ? `R$ ${Number(rt.daily_rate).toFixed(2)}` : '—'
+  })()
+
+  const kpiVagas = (() => {
+    if (todayRoomAvailability.length === 0) return '—'
+    if (selectedRoomTypeFilter === 'all') {
+      return String(todayRoomAvailability.reduce((s, a) => s + a.available_capacity, 0))
+    }
+    const avail = todayRoomAvailability.find((a) => a.room_type_id === selectedRoomTypeFilter)
+    return avail != null ? String(avail.available_capacity) : '—'
+  })()
+
+  if (loadingConfig) return <PageSkeleton />
 
   const noneEnabled = !config?.hotel_enabled && !config?.daycare_enabled
 
@@ -833,13 +1001,8 @@ export default function HotelCrechePage() {
                   )}
                 </div>
 
-                {/* Rate + check-in info pills */}
+                {/* Horários pills */}
                 <div className="hidden sm:flex items-center gap-2">
-                  {(isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate) && (
-                    <span className={cn('rounded-lg border px-2.5 py-1 text-xs font-medium', accentBg, accentText, 'border-transparent')}>
-                      R$ {Number(isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate).toFixed(2)}/dia
-                    </span>
-                  )}
                   <span className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:bg-[#212225] px-2.5 py-1 text-xs text-[#727B8E]">
                     Entrada: {isHotel ? config?.hotel_checkin_time : config?.daycare_checkin_time}
                   </span>
@@ -849,36 +1012,70 @@ export default function HotelCrechePage() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleOpenNewRes}
-                className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1a55d4] transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-                Nova Reserva
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Filtro por tipo de quarto */}
+                {loadingTabData ? (
+                  <Sk className="h-[34px] w-36 rounded-lg" />
+                ) : allRoomTypes.length > 0 ? (
+                  <select
+                    value={selectedRoomTypeFilter}
+                    onChange={(e) => setSelectedRoomTypeFilter(e.target.value)}
+                    className="h-[34px] rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#212225] dark:border-[#40485A] px-2.5 text-xs text-[#434A57] dark:text-[#f5f9fc] focus:outline-none focus:border-[#1E62EC] cursor-pointer"
+                  >
+                    <option value="all">Todos os tipos</option>
+                    {allRoomTypes.map((rt) => (
+                      <option key={rt.id} value={rt.id}>{rt.name}</option>
+                    ))}
+                  </select>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleOpenNewRes}
+                  className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1a55d4] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nova Reserva
+                </button>
+              </div>
             </div>
 
             {/* ─── Stats bar ─── */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[
-                { label: 'Aguardando check-in', value: reservados.length, color: 'text-[#1E62EC]', bg: 'bg-[#1E62EC]/5 dark:bg-[#1E62EC]/10', border: 'border-[#1E62EC]/10' },
-                { label: 'Hospedados agora', value: hospedados.length, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-950/20', border: 'border-green-200 dark:border-green-800/30' },
-                { label: 'Diária', value: (isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate) ? `R$ ${Number(isHotel ? config?.hotel_daily_rate : config?.daycare_daily_rate).toFixed(2)}` : '—', color: accentText, bg: accentBg, border: 'border-transparent' },
-                { label: 'Horário de entrada', value: isHotel ? config?.hotel_checkin_time : config?.daycare_checkin_time, color: 'text-[#434A57] dark:text-[#f5f9fc]', bg: 'bg-[#F4F6F9] dark:bg-[#212225]', border: 'border-[#727B8E]/10' },
+                { label: 'Aguardando check-in', value: loadingRes ? null : reservados.length, color: 'text-[#1E62EC]', bg: 'bg-[#1E62EC]/5 dark:bg-[#1E62EC]/10', border: 'border-[#1E62EC]/10' },
+                { label: 'Hospedados agora', value: loadingRes ? null : hospedados.length, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-950/20', border: 'border-green-200 dark:border-green-800/30' },
+                { label: 'Diária', value: loadingTabData ? null : kpiDiaria, color: accentText, bg: accentBg, border: 'border-transparent' },
+                { label: 'Vagas restantes (hoje)', value: loadingTabData ? null : kpiVagas, color: 'text-[#434A57] dark:text-[#f5f9fc]', bg: 'bg-[#F4F6F9] dark:bg-[#212225]', border: 'border-[#727B8E]/10' },
               ].map((stat, i) => (
                 <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: i * 0.05 }}
                   className={cn('rounded-xl border p-3.5', stat.bg, stat.border)}>
                   <p className="text-[11px] font-medium text-[#727B8E] dark:text-[#8a94a6]">{stat.label}</p>
-                  <p className={cn('mt-1.5 text-2xl font-bold', stat.color)}>{stat.value}</p>
+                  {stat.value === null
+                    ? <Sk className="mt-2 h-8 w-16" />
+                    : <p className={cn('mt-1.5 text-2xl font-bold truncate', stat.color)}>{stat.value}</p>
+                  }
                 </motion.div>
               ))}
             </div>
 
             {/* ─── Two-column reservation lists ─── */}
             {loadingRes ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-[#1E62EC]" />
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                {[0, 1].map((col) => (
+                  <div key={col} className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
+                    <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3.5">
+                      <Sk className="h-8 w-8 shrink-0 rounded-lg" />
+                      <div className="flex-1 space-y-1.5">
+                        <Sk className="h-4 w-24" />
+                        <Sk className="h-3 w-32" />
+                      </div>
+                      <Sk className="h-7 w-8 rounded-lg" />
+                    </div>
+                    <div className="bg-[#F4F6F9]/40 dark:bg-[#212225]/40 p-3 space-y-2">
+                      {[0, 1, 2].map((j) => <ReservationCardSkeleton key={j} />)}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -1079,6 +1276,63 @@ export default function HotelCrechePage() {
               o dia seguinte ao último dia como fim do período no sistema. Horários: {config?.daycare_checkin_time ?? '—'} —{' '}
               {config?.daycare_checkout_time ?? '—'}.
             </p>
+          )}
+
+          {/* Tipo de Quarto */}
+          {newCheckinDate && newCheckoutDate && (
+            <div>
+              <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Tipo de quarto</p>
+              {loadingRoomTypes ? (
+                <div className="flex items-center gap-2 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#1E62EC]" />
+                  <span className="text-sm text-[#727B8E]">Verificando disponibilidade...</span>
+                </div>
+              ) : roomTypeOptions.length === 0 ? (
+                <p className="rounded-lg bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  Nenhum tipo de quarto configurado. Configure em Configurações → Hospedagem.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {roomTypeOptions.map((opt) => (
+                    <button
+                      key={opt.room_type_id}
+                      type="button"
+                      disabled={!opt.available || newResLoading}
+                      onClick={() => {
+                        setSelectedRoomTypeId(opt.room_type_id)
+                        setNewDailyRate(String(Number(opt.daily_rate).toFixed(2)))
+                      }}
+                      className={cn(
+                        'flex items-center justify-between rounded-lg border px-3 py-2.5 text-sm transition-colors text-left',
+                        selectedRoomTypeId === opt.room_type_id
+                          ? 'border-[#1E62EC] bg-[#1E62EC]/5'
+                          : opt.available
+                          ? 'border-[#727B8E]/20 hover:border-[#1E62EC]/40 dark:border-[#40485A]'
+                          : 'border-[#727B8E]/10 opacity-50 cursor-not-allowed',
+                      )}
+                    >
+                      <div>
+                        <span className={cn('font-medium', selectedRoomTypeId === opt.room_type_id ? 'text-[#1E62EC]' : 'text-[#434A57] dark:text-[#f5f9fc]')}>
+                          {opt.room_type_name}
+                        </span>
+                        {!opt.available && <span className="ml-2 text-xs text-red-500">Sem vagas</span>}
+                        {opt.available && opt.available_capacity <= 2 && (
+                          <span className="ml-2 text-xs text-amber-500">Últimas {opt.available_capacity} vaga(s)</span>
+                        )}
+                      </div>
+                      <div className="text-right ml-3 shrink-0">
+                        <p className={cn('font-semibold', selectedRoomTypeId === opt.room_type_id ? 'text-[#1E62EC]' : 'text-[#434A57] dark:text-[#f5f9fc]')}>
+                          R$ {Number(opt.daily_rate).toFixed(2)}/dia
+                        </p>
+                        <p className="text-xs text-[#727B8E]">
+                          Total: R$ {Number(opt.total_amount).toFixed(2)}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Diária */}
