@@ -8,14 +8,16 @@ declare module '@whiskeysockets/baileys/lib/Utils/index.js' {
     options?: Record<string, unknown>
   ): Promise<{ version: [number, number, number]; isLatest?: boolean }>
 
+  // `any`: o Baileys usa tipos internos (AuthenticationCreds, SignalKeyStore) que o subpath não exporta bem;
+  // unknown quebraria o assign em makeWASocket({ auth: { creds, keys } }).
   export function makeCacheableSignalKeyStore(
-    store: unknown,
-    logger?: unknown,
-    cache?: unknown
-  ): unknown
+    store: any,
+    logger?: any,
+    cache?: any
+  ): any
 
   export function useMultiFileAuthState(folder: string): Promise<{
-    state: { creds: unknown; keys: unknown }
+    state: { creds: any; keys: any }
     saveCreds: () => Promise<void>
   }>
 }
