@@ -1,10 +1,10 @@
-// @ts-ignore
-import makeWASocket, {
-  DisconnectReason,
+import makeWASocket from '@whiskeysockets/baileys'
+import { DisconnectReason } from '@whiskeysockets/baileys/lib/Types/index.js'
+import {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
-} from '@whiskeysockets/baileys'
+} from '@whiskeysockets/baileys/lib/Utils/index.js'
 import { Boom } from '@hapi/boom'
 import path from 'path'
 import fs from 'fs'
