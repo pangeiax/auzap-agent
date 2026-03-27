@@ -2,6 +2,18 @@ import { useState, useCallback, useEffect } from 'react'
 import { BrainMessage } from './brain.types'
 import { sendBrainMessage, fetchBrainSuggestions } from './brain.api'
 
+/** Em HTTP (não-localhost), `crypto.randomUUID` costuma não existir; fallback evita quebra em produção. */
+function newBrainMessageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 /** Alinhadas às tools do second brain — usadas até carregar sugestões do servidor. */
 const FALLBACK_SUGGESTIONS = [
   'Como está minha agenda de hoje, com quem já confirmou?',
@@ -40,8 +52,8 @@ export function useBrain() {
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || loading) return
 
-    const userMsg: BrainMessage = { id: crypto.randomUUID(), role: 'user', content: text }
-    const loadingMsg: BrainMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', loading: true }
+    const userMsg: BrainMessage = { id: newBrainMessageId(), role: 'user', content: text }
+    const loadingMsg: BrainMessage = { id: newBrainMessageId(), role: 'assistant', content: '', loading: true }
 
     setMessages(prev => [...prev, userMsg, loadingMsg])
     setLoading(true)
@@ -52,12 +64,12 @@ export function useBrain() {
 
       setMessages(prev => [
         ...prev.slice(0, -1),
-        { id: crypto.randomUUID(), role: 'assistant', content: result.reply },
+        { id: newBrainMessageId(), role: 'assistant', content: result.reply },
       ])
     } catch {
       setMessages(prev => [
         ...prev.slice(0, -1),
-        { id: crypto.randomUUID(), role: 'assistant', content: 'Não consegui processar sua pergunta. Tente novamente.' },
+        { id: newBrainMessageId(), role: 'assistant', content: 'Não consegui processar sua pergunta. Tente novamente.' },
       ])
     } finally {
       setLoading(false)
