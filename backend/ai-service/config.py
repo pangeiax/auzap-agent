@@ -6,6 +6,7 @@ load_dotenv()
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+OPENAI_MODEL_ADVANCED = os.getenv("OPENAI_MODEL_ADVANCED", "gpt-5")
 
 # Redis Configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
