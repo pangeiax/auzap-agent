@@ -234,13 +234,19 @@ def _pet_display_name_error(name: str) -> str | None:
 
 
 def _price_key_from_db_size(size_db: str) -> str | None:
-    return {"P": "small", "M": "medium", "G": "large", "GG": "large"}.get(size_db)
+    return {"P": "small", "M": "medium", "G": "large", "GG": "xlarge"}.get(size_db)
 
 
 def _porte_label_for_key(price_key: str | None) -> str | None:
     if not price_key:
         return None
-    return {"small": "pequeno", "medium": "médio", "large": "grande"}.get(price_key)
+    return {
+        "small": "pequeno",
+        "medium": "médio",
+        "large": "grande",
+        "xlarge": "extra grande",
+        "extra_large": "extra grande",
+    }.get(price_key)
 
 
 def _services_pricing_snapshot(cur, company_id: int, size_db: str) -> str:

@@ -165,11 +165,16 @@ REGRAS:
 • Creche: checkout é fim exclusivo; use `last_day_client` / retirada da tool ao explicar.
 • NUNCA peça diária "ao cliente" — vem da config/tool.
 
-Responda sempre em português brasileiro, de forma amigável e profissional."""
+Responda sempre em português brasileiro, de forma amigável e profissional.
+
+FORMATO DE RESPOSTA:
+Nunca use markdown nas respostas: sem headers (###), sem negrito (**), sem listas com hífen (-) ou asterisco (*), sem tabelas.
+Responda sempre em texto simples, máximo 3 linhas por mensagem.
+Se precisar listar horários ou opções, separe por vírgula ou em linhas simples sem marcadores."""
 
     return Agent(
         name="Lodging Agent",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, max_tokens=700),
         instructions=instructions,
         tools=tools,
         tool_call_limit=12,

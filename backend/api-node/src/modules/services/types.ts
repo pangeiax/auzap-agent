@@ -11,6 +11,7 @@ export interface CreateServiceDTO {
     small?: number
     medium?: number
     large?: number
+    xlarge?: number
   }
   duration_multiplier_large?: number | string
 }
@@ -24,6 +25,7 @@ export interface UpdateServiceDTO {
     small?: number
     medium?: number
     large?: number
+    xlarge?: number
   }
   is_active?: boolean
 }

@@ -115,11 +115,16 @@ NOVO PEDIDO APÓS CONSULTA JÁ AGENDADA: trate como fluxo limpo — confirme pet
 Após **create_appointment** ou **reschedule_appointment** com sucesso, horários na mensagem ao cliente vêm **só** da resposta da tool (start_time, second_slot_start se existir, service_end_time, customer_pickup_hint) — não use horários do contexto ou do histórico.
 
 Tom: informal, empático, máximo 2 linhas por mensagem.
-Responda sempre em português brasileiro."""
+Responda sempre em português brasileiro.
+
+FORMATO DE RESPOSTA:
+Nunca use markdown nas respostas: sem headers (###), sem negrito (**), sem listas com hífen (-) ou asterisco (*), sem tabelas.
+Responda sempre em texto simples, máximo 3 linhas por mensagem.
+Se precisar listar horários ou opções, separe por vírgula ou em linhas simples sem marcadores."""
 
     return Agent(
         name="Health Agent",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, max_tokens=600),
         instructions=instructions,
         tools=tools,
     )
