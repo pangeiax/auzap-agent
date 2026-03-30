@@ -1,6 +1,6 @@
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
-from config import OPENAI_MODEL
+from config import OPENAI_MODEL, OPENAI_MODEL_ADVANCED
 from prompts.sales_prompt import build_sales_prompt
 from tools.booking_tools import build_booking_tools
 from tools.client_tools import build_client_tools
@@ -19,7 +19,7 @@ def build_sales_agent(context: dict, router_ctx: dict) -> Agent:
 
     return Agent(
         name="Sales Agent",
-        model=OpenAIChat(id="gpt-5"),
+        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, max_tokens=500),
         instructions=build_sales_prompt(context, router_ctx),
         tools=[get_services, set_pet_size],
     )

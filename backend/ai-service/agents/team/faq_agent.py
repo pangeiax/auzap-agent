@@ -18,7 +18,7 @@ def build_faq_agent(context: dict, router_ctx: dict) -> Agent:
 
     return Agent(
         name="FAQ Agent",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, max_tokens=500),
         instructions=build_faq_prompt(context, router_ctx),
         tools=[search_knowledge_base, get_services, set_pet_size],
     )

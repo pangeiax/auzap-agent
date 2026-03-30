@@ -231,7 +231,7 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     # ── 1. Router ────────────────────────────────
     router = Agent(
         name="Router",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIChat(id=OPENAI_MODEL, max_tokens=300),
         instructions=build_router_prompt(context),
     )
 

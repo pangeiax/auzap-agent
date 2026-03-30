@@ -5,14 +5,14 @@ from prompts.service_cadastro import (
 
 
 def _normalize_size_for_price(raw) -> str | None:
-    """Alinha porte do banco (P/M/G/GG ou inglês) às chaves price_by_size (small/medium/large)."""
+    """Alinha porte do banco (P/M/G/GG ou inglês) às chaves price_by_size (small/medium/large/xlarge)."""
     if raw is None:
         return None
     s = str(raw).strip()
     if not s:
         return None
     low = s.lower()
-    if low in ("small", "medium", "large"):
+    if low in ("small", "medium", "large", "xlarge", "extra_large"):
         return low
     u = s.upper()
     if u == "P":
@@ -22,13 +22,15 @@ def _normalize_size_for_price(raw) -> str | None:
     if u == "G":
         return "large"
     if u == "GG":
-        return "large"
+        return "xlarge"
     if low in ("pequeno", "mini"):
         return "small"
     if low in ("médio", "medio"):
         return "medium"
     if low in ("grande",):
         return "large"
+    if low in ("gigante", "gg"):
+        return "xlarge"
     return None
 
 
@@ -40,7 +42,13 @@ def _format_porte_label(raw) -> str:
     if not s:
         return "?"
     key = _normalize_size_for_price(raw)
-    labels = {"small": "pequeno", "medium": "médio", "large": "grande"}
+    labels = {
+        "small": "pequeno",
+        "medium": "médio",
+        "large": "grande",
+        "xlarge": "extra grande",
+        "extra_large": "extra grande",
+    }
     if key:
         return labels.get(key, s)
     u = s.upper()
@@ -83,7 +91,7 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
         pets_lines = "nenhum"
         pet_count = 0
 
-    # Serviços com preço correto por porte — encontra o porte do pet ativo (normaliza P/M/G → small/medium/large)
+    # Serviços com preço correto por porte — normaliza P/M/G/GG → small/medium/large/xlarge
     active_pet_size = None
     match = None
     if active_pet:
@@ -102,7 +110,14 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
             if active_pet_size:
                 price = f"R${sz.get(active_pet_size, '?')}"
             else:
-                price = f"P:R${sz.get('small','?')} M:R${sz.get('medium','?')} G:R${sz.get('large','?')}"
+                gg_val = sz.get("xlarge")
+                if gg_val is None:
+                    gg_val = sz.get("extra_large")
+                gg_s = f"R${gg_val}" if gg_val is not None else "?"
+                price = (
+                    f"P:R${sz.get('small','?')} M:R${sz.get('medium','?')} "
+                    f"G:R${sz.get('large','?')} GG:{gg_s}"
+                )
         elif s.get("price"):
             price = f"R${s['price']}"
         else:
@@ -360,4 +375,9 @@ NUNCA diga ao cliente que houve "erro", "problema técnico" ou "dificuldades". R
 • "incomplete_pet: true" → o pet está sem espécie ou porte → informe o cliente quais campos faltam e peça que complete o cadastro antes de agendar
 • error_code **client_same_start_conflict** → o cliente já tem **outro** serviço marcado com o mesmo horário de início; ofereça outro horário ou combine remarcar/cancelar o existente (não force a tool)
 • "Falha ao salvar" → tente novamente com os mesmos dados antes de desistir
-• Só desista após 2 tentativas — diga apenas: 'Deixa eu verificar com a equipe e te confirmo em breve'"""
+• Só desista após 2 tentativas — diga apenas: 'Deixa eu verificar com a equipe e te confirmo em breve'
+
+FORMATO DE RESPOSTA:
+Nunca use markdown nas respostas: sem headers (###), sem negrito (**), sem listas com hífen (-) ou asterisco (*), sem tabelas.
+Responda sempre em texto simples, máximo 3 linhas por mensagem.
+Se precisar listar horários ou opções, separe por vírgula ou em linhas simples sem marcadores."""

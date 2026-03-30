@@ -11,6 +11,8 @@ export interface Service {
     small?: number
     medium?: number
     large?: number
+    /** Preço para porte GG (extra grande); mesma chave usada no agendamento. */
+    xlarge?: number
   } | null
   /** Usually number; API may send Prisma Decimal as string until normalized in serviceService. */
   durationMultiplierLarge?: number | string | null
@@ -31,6 +33,7 @@ export interface ServiceCreate {
     small?: number
     medium?: number
     large?: number
+    xlarge?: number
   }
   duration_multiplier_large?: number | string
   block_ai_schedule?: boolean
@@ -47,6 +50,7 @@ export interface ServiceUpdate {
     small?: number
     medium?: number
     large?: number
+    xlarge?: number
   } | null
   is_active?: boolean
   duration_multiplier_large?: number | null

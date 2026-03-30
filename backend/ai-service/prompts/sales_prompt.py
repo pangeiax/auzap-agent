@@ -5,14 +5,14 @@ from prompts.service_cadastro import (
 
 
 def _normalize_size_for_price_key(raw) -> str | None:
-    """Alinha porte do banco (P/M/G/GG, PT/EN) às chaves de price_by_size (small/medium/large)."""
+    """Alinha porte do banco (P/M/G/GG, PT/EN) às chaves de price_by_size (small/medium/large/xlarge)."""
     if raw is None:
         return None
     s = str(raw).strip()
     if not s:
         return None
     low = s.lower()
-    if low in ("small", "medium", "large"):
+    if low in ("small", "medium", "large", "xlarge", "extra_large"):
         return low
     u = s.upper()
     if u == "P":
@@ -22,20 +22,28 @@ def _normalize_size_for_price_key(raw) -> str | None:
     if u == "G":
         return "large"
     if u == "GG":
-        return "large"
+        return "xlarge"
     if low in ("pequeno", "mini"):
         return "small"
     if low in ("médio", "medio"):
         return "medium"
     if low in ("grande",):
         return "large"
+    if low in ("gigante", "gg"):
+        return "xlarge"
     return None
 
 
 def _porte_label_pt(price_key: str | None) -> str | None:
     if not price_key:
         return None
-    return {"small": "pequeno", "medium": "médio", "large": "grande"}.get(price_key)
+    return {
+        "small": "pequeno",
+        "medium": "médio",
+        "large": "grande",
+        "xlarge": "extra grande",
+        "extra_large": "extra grande",
+    }.get(price_key)
 
 
 def build_sales_prompt(context: dict, router_ctx: dict) -> str:
@@ -50,7 +58,7 @@ def build_sales_prompt(context: dict, router_ctx: dict) -> str:
     active_pet = router_ctx.get("active_pet")
     # Não preenche active_pet só porque há 1 pet — alinhado ao booking (evita presumir pet após ciclo encerrado).
 
-    # Determina porte do pet ativo para exibir o preço correto (DB usa P/M/G; JSON usa small/medium/large)
+    # Determina porte do pet ativo para exibir o preço correto (DB: P/M/G/GG; JSON: small/medium/large/xlarge)
     price_key = None
     active_pet_size_label = None
     pet_missing_size = False
@@ -173,7 +181,12 @@ SERVIÇOS DISPONÍVEIS (preços/duração — detalhes e políticas no cadastro 
 • Se o cliente demonstrar interesse em agendar, sugira de forma natural: "Quer que eu já separe um horário?"
 • Agendamento pelo WhatsApp: para o **mesmo** pet, combinamos **um serviço por vez**; para **vários** pets no mesmo serviço, marca-se **um pet por vez** conforme a agenda (capacidade do horário).
 • NUNCA invente preços — use APENAS os dados acima
-• Se o cliente perguntar sobre serviço que não está na lista, informe que não está disponível e ofereça as alternativas"""
+• Se o cliente perguntar sobre serviço que não está na lista, informe que não está disponível e ofereça as alternativas
+
+FORMATO DE RESPOSTA:
+Nunca use markdown nas respostas: sem headers (###), sem negrito (**), sem listas com hífen (-) ou asterisco (*), sem tabelas.
+Responda sempre em texto simples, máximo 3 linhas por mensagem.
+Se precisar listar horários ou opções, separe por vírgula ou em linhas simples sem marcadores."""
 
 
 def build_faq_prompt(context: dict, router_ctx: dict) -> str:
@@ -342,7 +355,12 @@ SERVIÇOS E PREÇOS (valores/duração — detalhes e políticas no cadastro aci
 • Se não encontrar a resposta em nenhuma fonte → diga que não tem essa informação no momento e ofereça ajudar com outra coisa — NUNCA invente
 • Se a dúvida puder ser resolvida agendando algo → sugira naturalmente ao final
 • Política de marcação (para alinhar expectativa): **um serviço por vez** para o mesmo pet; **vários pets** no mesmo serviço — um de cada vez na conversa de agendamento. Não agende você mesmo (use o fluxo do assistente de agendamento/saúde).
-• Quando o cliente perguntar endereço ou telefone → responda diretamente com os dados acima"""
+• Quando o cliente perguntar endereço ou telefone → responda diretamente com os dados acima
+
+FORMATO DE RESPOSTA:
+Nunca use markdown nas respostas: sem headers (###), sem negrito (**), sem listas com hífen (-) ou asterisco (*), sem tabelas.
+Responda sempre em texto simples, máximo 3 linhas por mensagem.
+Se precisar listar horários ou opções, separe por vírgula ou em linhas simples sem marcadores."""
 
 
 def build_escalation_prompt(context: dict, router_ctx: dict) -> str:
@@ -377,4 +395,9 @@ Após a tool com sucesso:
 • Diga de forma natural que vai alinhar com a equipe e retorna em breve
 • NUNCA mencione "bot" ou "IA"
 • NUNCA prometa horário exato — só "em breve"
-• Prefira sem emoji"""
+• Prefira sem emoji
+
+FORMATO DE RESPOSTA:
+Nunca use markdown nas respostas: sem headers (###), sem negrito (**), sem listas com hífen (-) ou asterisco (*), sem tabelas.
+Responda sempre em texto simples, máximo 3 linhas por mensagem.
+Se precisar listar horários ou opções, separe por vírgula ou em linhas simples sem marcadores."""

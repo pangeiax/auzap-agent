@@ -262,7 +262,7 @@ model PetshopService {
   durationMin Int       @default(60) @map("duration_min")
   price       Decimal?  @db.Decimal(10, 2)
   priceBySize Json?     @map("price_by_size")
-  // Formato: {"P": 50.00, "M": 70.00, "G": 90.00, "GG": 110.00}
+  // Formato típico: {"small","medium","large","xlarge"} (xlarge = GG)
   requiresVet Boolean   @default(false) @map("requires_vet")
   durationMultiplierLarge Decimal? @map("duration_multiplier_large") @db.Decimal(3, 1)
   blockAiSchedule    Boolean  @default(false) @map("block_ai_schedule")
