@@ -11,7 +11,7 @@ load_dotenv()
 from context.loader import load_context
 from memory.redis_memory import get_history, save_message, clear_history
 from agents.router import run_router
-from timezone_br import today_sao_paulo
+from timezone_br import calendar_dates_reference_pt, today_sao_paulo, weekday_label_pt
 
 logging.basicConfig(
     level=logging.INFO,
@@ -145,19 +145,11 @@ async def run_agent(req: AgentRequest):
         context = await load_context(req.company_id, req.client_phone)
 
         # Injeta data atual em America/Sao_Paulo
-        _PT_WEEKDAYS = [
-            "Segunda-feira",
-            "Terça-feira",
-            "Quarta-feira",
-            "Quinta-feira",
-            "Sexta-feira",
-            "Sábado",
-            "Domingo",
-        ]
         _today_brt = today_sao_paulo()
         context["today"] = _today_brt.strftime("%d/%m/%Y")
         context["today_iso"] = _today_brt.isoformat()
-        context["today_weekday"] = _PT_WEEKDAYS[_today_brt.weekday()]
+        context["today_weekday"] = weekday_label_pt(_today_brt)
+        context["calendar_dates_reference"] = calendar_dates_reference_pt(_today_brt, 45)
 
         # 2. Se houver imagem, descreve via vision e monta mensagem enriquecida
         message_for_agent = req.message

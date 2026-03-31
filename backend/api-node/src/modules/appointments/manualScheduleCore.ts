@@ -33,6 +33,28 @@ function slotDateKeyBR(slotDate: Date): string {
   return slotDate.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
 }
 
+/** Mesmo cliente não pode ter dois atendimentos ativos com início no mesmo slot (data+hora da grade). */
+async function clientAppointmentConflictSameSlot(
+  companyId: number,
+  clientId: string,
+  slotDate: Date,
+  slotTime: Date,
+): Promise<string | null> {
+  const existing = await prisma.petshopAppointment.findFirst({
+    where: {
+      companyId,
+      clientId,
+      status: { notIn: ['completed', 'cancelled'] },
+      slotId: { not: null },
+      slot: { slotDate, slotTime },
+    },
+    select: { service: { select: { name: true } } },
+  })
+  if (!existing) return null
+  const n = existing.service?.name?.trim()
+  return n || 'Serviço'
+}
+
 export type ManualScheduleInput = {
   client_id: string
   pet_id: string
@@ -95,6 +117,19 @@ export async function createManualScheduleAppointment(
     return { ok: false, message: 'Horário sem vagas disponíveis.' }
   }
 
+  const conflictPrimary = await clientAppointmentConflictSameSlot(
+    companyId,
+    cid,
+    slot.slotDate,
+    slot.slotTime,
+  )
+  if (conflictPrimary) {
+    return {
+      ok: false,
+      message: `Já existe agendamento de «${conflictPrimary}» neste mesmo horário para este cliente. Cancele ou remarque antes de marcar outro serviço no mesmo horário.`,
+    }
+  }
+
   const slotKey = slotDateKeyBR(slot.slotDate)
   if (scheduled_date && scheduled_date !== slotKey) {
     return {
@@ -139,6 +174,19 @@ export async function createManualScheduleAppointment(
       return {
         ok: false,
         message: 'O horário seguinte está lotado; escolha outro início de horário para pets G/GG.',
+      }
+    }
+
+    const conflictSecond = await clientAppointmentConflictSameSlot(
+      companyId,
+      cid,
+      secondSlot.slotDate,
+      secondSlot.slotTime,
+    )
+    if (conflictSecond) {
+      return {
+        ok: false,
+        message: `No horário do segundo bloco já existe «${conflictSecond}» para este cliente. Escolha outro início ou ajuste o agendamento existente.`,
       }
     }
   }

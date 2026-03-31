@@ -93,9 +93,10 @@ async def load_context(company_id: int, client_phone: str) -> dict:
         if client:
             cur.execute(
                 """
-                SELECT id, name, species, breed, size, weight_kg, gender
+                SELECT id, name, species, breed, size, weight_kg, gender, created_at
                 FROM petshop_pets
                 WHERE company_id = %s AND client_id = %s AND is_active = TRUE
+                ORDER BY created_at DESC NULLS LAST, id DESC
                 """,
                 (company_id, client["id"]),
             )

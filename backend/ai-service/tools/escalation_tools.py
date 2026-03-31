@@ -19,7 +19,10 @@ def build_escalation_tools(company_id: int, client_id: str) -> list:
         ser transferido, ou for B2B/spam claro; **ou**
         (2) Você **ofereceu** nesta conversa o auxílio de um **especialista da loja** (dúvida fora do cadastro,
         **ou** fechamento de reserva de hotel/creche), e o cliente **aceitou** de forma clara (ex.: "sim", "quero", "pode",
-        "encaminha", "manda pra alguém da loja").
+        "encaminha", "manda pra alguém da loja"); **ou**
+        (3) No **cadastro de pet**, o cliente quer tratar de **animal que não é cachorro nem gato** (coelho, pássaro,
+        cavalo, etc.): você **explicou** que por aqui só cadastramos cão/gato, **ofereceu** encaminhar para a equipe,
+        e o cliente **aceitou** explicitamente — **nunca** chame sem esse aceite.
 
         **Não** chame para saudações ("oi", "olá", "olá pessoal"), conversa casual, ou enquanto o cliente
         ainda só **perguntou** e você ainda **não** ofereceu especialista (nessa fase responda ou ofereça ajuda).

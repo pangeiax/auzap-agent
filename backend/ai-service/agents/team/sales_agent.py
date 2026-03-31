@@ -23,7 +23,7 @@ def build_sales_agent(context: dict, router_ctx: dict) -> Agent:
 
     return Agent(
         name="Sales Agent",
-        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, **get_max_tokens_param(OPENAI_MODEL_ADVANCED, 800)),
+        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, **get_max_tokens_param(OPENAI_MODEL_ADVANCED, 5000)),
         instructions=build_sales_prompt(context, router_ctx),
         tools=tools,
     )

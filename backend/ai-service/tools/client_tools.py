@@ -11,7 +11,7 @@ from memory.tool_result_cache import (
     cache_invalidate_client_pets,
     cache_set_client_pets,
 )
-from tools.booking_tools import _extract_double_pair_id
+from tools.booking_tools import _effective_service_duration_minutes, _extract_double_pair_id
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
 logger = logging.getLogger("ai-service.tools.client")
@@ -336,6 +336,16 @@ def _merge_upcoming_appointment_rows(rows: list) -> list:
     Une pares __DOUBLE_PAIR__ em um único item com faixa de horário,
     para o agente não confundir dois registros (ex.: 15h e 16h) com dois serviços.
     """
+
+    def _eff_from_row(row: dict) -> int:
+        return _effective_service_duration_minutes(
+            {
+                "duration_min": row.get("duration_min"),
+                "duration_multiplier_large": row.get("duration_multiplier_large"),
+            },
+            {"size": row.get("pet_size")},
+        )
+
     by_id = {str(r["id"]): r for r in rows}
     consumed: set[str] = set()
     out: list = []
@@ -353,11 +363,11 @@ def _merge_upcoming_appointment_rows(rows: list) -> list:
             consumed.add(str(partner["id"]))
             t_a = slot_time_to_hhmm(r.get("start_time_raw"))
             t_b = slot_time_to_hhmm(partner.get("start_time_raw"))
-            dur = int(r.get("duration_min") or 60)
             first, second = (r, partner) if t_a <= t_b else (partner, r)
             t1 = slot_time_to_hhmm(first.get("start_time_raw"))
             t2 = slot_time_to_hhmm(second.get("start_time_raw"))
-            end_br = hhmm_after_minutes(t2, dur)
+            dur_eff = _eff_from_row(first)
+            end_br = hhmm_after_minutes(t1, dur_eff)
             out.append(
                 {
                     "id": str(first["id"]),
@@ -369,12 +379,13 @@ def _merge_upcoming_appointment_rows(rows: list) -> list:
                     "start_time": t1,
                     "second_slot_start": t2,
                     "service_end_time": end_br,
+                    "service_duration_minutes": dur_eff,
                     "uses_double_slot": True,
                 }
             )
             continue
         st = slot_time_to_hhmm(r.get("start_time_raw"))
-        dur = int(r.get("duration_min") or 60)
+        dur_eff = _eff_from_row(r)
         out.append(
             {
                 "id": rid,
@@ -383,7 +394,8 @@ def _merge_upcoming_appointment_rows(rows: list) -> list:
                 "service_name": r.get("service_name"),
                 "pet_name": r.get("pet_name"),
                 "start_time": st,
-                "service_end_time": hhmm_after_minutes(st, dur) if st else None,
+                "service_end_time": hhmm_after_minutes(st, dur_eff) if st else None,
+                "service_duration_minutes": dur_eff,
                 "uses_double_slot": False,
             }
         )
@@ -443,6 +455,9 @@ def build_client_tools(company_id: int, client_id: str) -> list:
 
         PROIBIDO inventar dados: nome genérico (gato, cachorro 1), raça "Sem raça definida"
         sem o cliente ter dito que não sabe, ou porte padrão — o sistema rejeita nomes inválidos.
+
+        Se o cliente **já informou** os quatro campos em mensagens anteriores (mesmo em várias linhas),
+        **chame esta tool** em vez de perguntar de novo o mesmo dado — repetir pergunta já respondida é erro.
 
         Args:
             name: Nome/apelido do pet dado pelo dono (NÃO pode ser uma raça)
@@ -780,6 +795,8 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                     COALESCE(sl.slot_time, sch.start_time) AS start_time_raw,
                     svc.name AS service_name,
                     COALESCE(svc.duration_min, 60) AS duration_min,
+                    svc.duration_multiplier_large,
+                    p.size AS pet_size,
                     p.name AS pet_name
                 FROM petshop_appointments a
                 JOIN petshop_services svc ON svc.id = a.service_id

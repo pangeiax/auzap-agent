@@ -18,6 +18,126 @@ _UUID_RE = re.compile(
 def _is_uuid(val) -> bool:
     return bool(val and _UUID_RE.match(str(val)))
 
+
+def _fmt_time_hhmm(t) -> str | None:
+    if t is None:
+        return None
+    return str(t)[:5]
+
+
+def _lodging_offerings_for_catalog(cur, company_id: int) -> list[dict]:
+    """
+    Hotel/creche para o catálogo (não são linhas de petshop_services).
+    Alinhado à listagem de sales_prompt / faq (room types + fallback).
+    """
+    cur.execute(
+        """
+        SELECT hotel_enabled, hotel_daily_rate, hotel_checkin_time, hotel_checkout_time,
+               daycare_enabled, daycare_daily_rate, daycare_checkin_time, daycare_checkout_time
+        FROM petshop_lodging_config
+        WHERE company_id = %s
+        """,
+        (company_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return []
+    cfg = dict(row)
+    for f in (
+        "hotel_checkin_time",
+        "hotel_checkout_time",
+        "daycare_checkin_time",
+        "daycare_checkout_time",
+    ):
+        cfg[f] = _fmt_time_hhmm(cfg.get(f))
+
+    cur.execute(
+        """
+        SELECT lodging_type, name, description, daily_rate
+        FROM petshop_room_types
+        WHERE company_id = %s AND is_active = TRUE
+        ORDER BY lodging_type, daily_rate ASC NULLS LAST, name
+        """,
+        (company_id,),
+    )
+    rt_rows = [dict(r) for r in cur.fetchall()]
+
+    def _rate_label(val) -> str:
+        if val is None:
+            return "consultar"
+        try:
+            return f"R${float(val):.2f}/dia"
+        except (TypeError, ValueError):
+            return "consultar"
+
+    out: list[dict] = []
+    if cfg.get("hotel_enabled"):
+        cin = cfg.get("hotel_checkin_time") or ""
+        cout = cfg.get("hotel_checkout_time") or ""
+        hours_hint = f"check-in {cin}, check-out {cout}" if cin and cout else None
+        hotel_rts = [r for r in rt_rows if r.get("lodging_type") == "hotel"]
+        if hotel_rts:
+            for rt in hotel_rts:
+                desc = (rt.get("description") or "").strip()
+                out.append(
+                    {
+                        "catalog_kind": "lodging",
+                        "lodging_type": "hotel",
+                        "name": f"Hotel — {rt['name']}",
+                        "description": desc or "Hospedagem noturna",
+                        "daily_rate_label": _rate_label(rt.get("daily_rate")),
+                        "hours_hint": hours_hint,
+                        "note": "Reserva pelo fluxo de hospedagem (não use create_appointment).",
+                    }
+                )
+        else:
+            out.append(
+                {
+                    "catalog_kind": "lodging",
+                    "lodging_type": "hotel",
+                    "name": "Hotel para pets",
+                    "description": "Hospedagem noturna com acompanhamento",
+                    "daily_rate_label": _rate_label(cfg.get("hotel_daily_rate")),
+                    "hours_hint": hours_hint,
+                    "note": "Reserva pelo fluxo de hospedagem (não use create_appointment).",
+                }
+            )
+
+    if cfg.get("daycare_enabled"):
+        cin = cfg.get("daycare_checkin_time") or ""
+        cout = cfg.get("daycare_checkout_time") or ""
+        hours_hint = f"entrada {cin}, saída {cout}" if cin and cout else None
+        daycare_rts = [r for r in rt_rows if r.get("lodging_type") == "daycare"]
+        if daycare_rts:
+            for rt in daycare_rts:
+                desc = (rt.get("description") or "").strip()
+                out.append(
+                    {
+                        "catalog_kind": "lodging",
+                        "lodging_type": "daycare",
+                        "name": f"Creche — {rt['name']}",
+                        "description": desc or "Cuidado diurno",
+                        "daily_rate_label": _rate_label(rt.get("daily_rate")),
+                        "hours_hint": hours_hint,
+                        "note": "Reserva pelo fluxo de creche (não use create_appointment).",
+                    }
+                )
+        else:
+            out.append(
+                {
+                    "catalog_kind": "lodging",
+                    "lodging_type": "daycare",
+                    "name": "Creche diurna",
+                    "description": "Cuidado diurno enquanto o tutor trabalha",
+                    "daily_rate_label": _rate_label(cfg.get("daycare_daily_rate")),
+                    "hours_hint": hours_hint,
+                    "note": "Reserva pelo fluxo de creche (não use create_appointment).",
+                }
+            )
+
+    return out
+
+
 # URL interna do backend Node (Docker network)
 BACKEND_INTERNAL_URL = os.getenv("BACKEND_INTERNAL_URL", "http://backend:3000")
 
@@ -131,18 +251,21 @@ def _strip_internal_appointment_notes(notes) -> str | None:
     return out or None
 
 
-def _client_conflict_same_start(
+def _client_conflict_same_slot_start(
     cur,
     company_id,
     client_id,
-    scheduled_start,
+    slot_date,
+    slot_time,
     exclude_appointment_ids: set | None = None,
 ) -> dict | None:
     """
-    Outro agendamento ativo do mesmo cliente com o mesmo instante de início (scheduled_date).
-    Evita dois serviços diferentes no mesmo horário para o mesmo tutor.
+    Outro agendamento ativo do mesmo cliente começando no **mesmo** slot (data + hora da grade).
+
+    Importante: `petshop_appointments.scheduled_date` no banco é só DATE (sem hora). Comparar com
+    datetime cheio fazia a validação falhar e permitia dois serviços às 16h no mesmo dia.
     """
-    if scheduled_start is None or not client_id:
+    if slot_date is None or slot_time is None or not client_id:
         return None
     ex = exclude_appointment_ids or set()
     cur.execute(
@@ -150,12 +273,15 @@ def _client_conflict_same_start(
         SELECT a.id::text AS id, s.name AS service_name
         FROM petshop_appointments a
         JOIN petshop_services s ON s.id = a.service_id AND s.company_id = a.company_id
+        JOIN petshop_slots sl ON sl.id = a.slot_id
         WHERE a.company_id = %s AND a.client_id = %s
           AND a.status NOT IN ('completed', 'cancelled')
-          AND a.scheduled_date = %s
+          AND a.slot_id IS NOT NULL
+          AND sl.slot_date = %s
+          AND sl.slot_time = %s
         ORDER BY a.id
         """,
-        (company_id, client_id, scheduled_start),
+        (company_id, client_id, slot_date, slot_time),
     )
     for row in cur.fetchall() or []:
         rid = str(row["id"])
@@ -179,6 +305,27 @@ def _requires_consecutive_slots(service_row: dict, pet_row: dict) -> bool:
         return False
     size = (pet_row.get("size") or "").strip().upper()
     return size in ("G", "GG")
+
+
+def _effective_service_duration_minutes(
+    service_row: dict, pet_row: dict | None
+) -> int:
+    """
+    Duração total do serviço para o pet: pets G/GG com duration_multiplier_large > 1
+    usam duration_min * multiplicador (ex.: 60 → 120 min). P/M ou sem multiplicador → duration_min.
+    """
+    base = int(service_row.get("duration_min") or 60)
+    if not pet_row:
+        return base
+    mult = service_row.get("duration_multiplier_large")
+    try:
+        m = float(mult) if mult is not None else 1.0
+    except (TypeError, ValueError):
+        m = 1.0
+    size = (pet_row.get("size") or "").strip().upper()
+    if size in ("G", "GG") and m > 1:
+        return max(base, int(round(base * m)))
+    return base
 
 
 def build_booking_tools(company_id: int, client_id) -> list:
@@ -208,15 +355,27 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
     def get_services() -> dict:
         """
-        Retorna lista de serviços ativos do petshop.
-        Chamar em silêncio para validar o serviço antes de pedir dados do pet.
-        Serviços com block_ai_schedule=true NÃO devem ser agendados pelo bot.
+        Retorna serviços ativos (`services`) e, quando existir cadastro, ofertas de hospedagem em
+        `lodging_offerings` (hotel/creche — não usam create_appointment).
+
+        Ao responder pedido de **catálogo**, **lista de serviços**, **o que vocês fazem/oferecem** ou
+        equivalente: cite **todos** os itens de `services` **e** **todos** de `lodging_offerings`
+        (uma linha por item) — **não** omita hospedagem só porque é outro fluxo.
+
+        Serviços com block_ai_schedule=true NÃO devem ser agendados pelo bot via create_appointment.
         """
         cached = cache_get_services(company_id)
-        if cached is not None:
-            return {**cached, "from_cache": True}
         with get_connection() as conn:
             cur = conn.cursor()
+            lodging_offerings = _lodging_offerings_for_catalog(cur, company_id)
+            if cached is not None:
+                out = {
+                    "services": cached["services"],
+                    "count": cached["count"],
+                    "lodging_offerings": lodging_offerings,
+                    "lodging_offerings_count": len(lodging_offerings),
+                }
+                return {**out, "from_cache": True}
             cur.execute(
                 """
                 SELECT
@@ -239,8 +398,14 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 (company_id,),
             )
             services = cur.fetchall()
-        out = {"services": [dict(s) for s in services], "count": len(services)}
-        cache_set_services(company_id, out)
+        svc_list = [dict(s) for s in services]
+        out = {
+            "services": svc_list,
+            "count": len(svc_list),
+            "lodging_offerings": lodging_offerings,
+            "lodging_offerings_count": len(lodging_offerings),
+        }
+        cache_set_services(company_id, {"services": svc_list, "count": len(svc_list)})
         return out
 
     def _try_generate_slots() -> bool:
@@ -311,7 +476,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
         specialty_id: str,
         target_date: str,
         service_id=None,
-        pet_id: str = None,
+        pet_id: str | None = None,
     ) -> dict:
         """
         Retorna horários disponíveis para uma especialidade em uma data específica.
@@ -322,7 +487,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 Se vier errado (ex.: número), ainda assim passe **service_id** — o sistema resolve a especialidade pelo serviço.
             target_date: Data no formato YYYY-MM-DD
             service_id: ID numérico do serviço (get_services) — obrigatório para G/GG com duração dobrada; também corrige specialty_id inválido
-            pet_id: UUID do pet — use junto com service_id para aplicar a regra de dois slots consecutivos
+            pet_id: UUID do pet (obrigatório). Chame get_client_pets antes — sem pet_id a tool não roda a lógica completa.
         """
         try:
             parsed_date = date.fromisoformat(target_date)
@@ -331,6 +496,21 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "available": False,
                 "message": "Data inválida. Use o formato YYYY-MM-DD.",
             }
+
+        pid_norm = (str(pet_id).strip() if pet_id is not None else "") or ""
+        if not pid_norm or not _is_uuid(pid_norm):
+            return {
+                "available": False,
+                "closed_days": [],
+                "full_days": [],
+                "available_times": [],
+                "message": (
+                    "pet_id é obrigatório (UUID do pet). Chame get_client_pets e use o campo id do animal "
+                    "antes de get_available_times."
+                ),
+                "missing_pet_id": True,
+            }
+        pet_id = pid_norm
 
         # Data "hoje" em America/Sao_Paulo
         today = today_sao_paulo()
@@ -600,21 +780,27 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
     def create_appointment(
         pet_id: str,
-        service_id: int,
         slot_id: str,
+        service_id: int | None = None,
         confirmed: bool = False,
-        notes: str = None,
+        notes: str | None = None,
     ) -> dict:
         """
-        Cria um agendamento. Exige confirmed=True — nunca criar sem confirmação explícita do cliente.
+        Cria **um** agendamento por chamada. Se o cliente pedir vários serviços de uma vez, o assistente
+        informa que faz um por vez e trata o primeiro antes de outro `create_appointment`.
+
+        Exige confirmed=True — nunca criar sem confirmação explícita do cliente.
+
+        Se já existir agendamento ativo para o **mesmo pet e mesmo serviço**, a tool falha com
+        error_code **use_reschedule_instead** — use **reschedule_appointment**, não uma segunda create.
 
         Em success=true a resposta traz **pet_name**, **service_name**, **appointment_date** (YYYY-MM-DD),
         **canonical_summary** e **start_time** exatamente como gravados — use na mensagem ao cliente.
 
         Args:
             pet_id: ID do pet (obtido via get_client_pets)
-            service_id: ID do serviço (obtido via get_services)
             slot_id: ID do slot (obtido via get_available_times)
+            service_id: ID numérico do serviço (get_services); obrigatório na prática — se None, a tool retorna erro claro
             confirmed: Deve ser True — só confirmar após aceite explícito do cliente
             notes: Observações opcionais
         """
@@ -634,13 +820,23 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "message": "Cliente não identificado. Não é possível criar o agendamento.",
             }
 
+        if service_id is None:
+            return {
+                "success": False,
+                "missing_service_id": True,
+                "message": (
+                    "service_id é obrigatório (número inteiro do catálogo). Chame get_services e use o campo "
+                    "`id` do serviço deste agendamento — um serviço por chamada a create_appointment."
+                ),
+            }
+
         # service_id é integer no banco
         try:
             service_id = int(service_id)
         except (ValueError, TypeError):
             return {
                 "success": False,
-                "message": "service_id deve ser um número inteiro válido.",
+                "message": "service_id deve ser um número inteiro válido (id numérico de get_services).",
             }
 
         logger.info(
@@ -742,6 +938,40 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     "incomplete_pet": True,
                     "missing_fields": missing_pet_fields,
                     "message": f"Cadastro do pet incompleto. Faltam: {', '.join(missing_pet_fields)}. O cliente deve completar o cadastro antes de agendar.",
+                }
+
+            # Evita duplicar compromisso quando o cliente pediu "remarcar" e o modelo chamou create em vez de reschedule
+            cur.execute(
+                """
+                SELECT a.id, a.scheduled_date,
+                       COALESCE(sl.slot_time, sch.start_time) AS start_time_raw
+                FROM petshop_appointments a
+                LEFT JOIN petshop_slots sl ON sl.id = a.slot_id
+                LEFT JOIN petshop_schedules sch ON sch.id = a.schedule_id
+                WHERE a.company_id = %s AND a.client_id = %s
+                  AND a.pet_id = %s AND a.service_id = %s
+                  AND a.status IN ('pending', 'confirmed')
+                  AND a.scheduled_date >= CURRENT_DATE
+                ORDER BY a.scheduled_date,
+                    COALESCE(sl.slot_time, sch.start_time) NULLS LAST
+                LIMIT 6
+                """,
+                (company_id, client_id, pet_id, service_id),
+            )
+            active_same = cur.fetchall()
+            if active_same:
+                primary = str(active_same[0]["id"])
+                return {
+                    "success": False,
+                    "error_code": "use_reschedule_instead",
+                    "message": (
+                        "Já existe agendamento ativo (pendente ou confirmado) para este pet e este serviço. "
+                        "Para mudar só data ou horário, use reschedule_appointment com appointment_id desse "
+                        "compromisso (veja get_upcoming_appointments) e new_slot_id do novo horário — "
+                        "não use create_appointment, senão ficam dois agendamentos no sistema."
+                    ),
+                    "appointment_id_for_reschedule": primary,
+                    "active_rows_found": len(active_same),
                 }
 
             # Verifica vaga no slot
@@ -881,8 +1111,13 @@ def build_booking_tools(company_id: int, client_id) -> list:
             else:
                 scheduled_date = None
 
-            clash = _client_conflict_same_start(
-                cur, company_id, client_id, scheduled_date, None
+            clash = _client_conflict_same_slot_start(
+                cur,
+                company_id,
+                client_id,
+                slot_row.get("slot_date"),
+                slot_row.get("slot_time"),
+                None,
             )
             if clash:
                 return {
@@ -900,8 +1135,13 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     slot_row["slot_date"],
                     second_row["slot_time"],
                 )
-                clash2 = _client_conflict_same_start(
-                    cur, company_id, client_id, second_scheduled, None
+                clash2 = _client_conflict_same_slot_start(
+                    cur,
+                    company_id,
+                    client_id,
+                    slot_row["slot_date"],
+                    second_row.get("slot_time"),
+                    None,
                 )
                 if clash2:
                     return {
@@ -999,7 +1239,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 (client_id, company_id),
             )
 
-            dur = int(service_row.get("duration_min") or 60)
+            eff_dur = _effective_service_duration_minutes(service_row, pet_row)
             start_br = slot_time_to_hhmm(slot_row.get("slot_time"))
             appt_date_iso = _date_iso(slot_row.get("slot_date"))
             pet_nm = (pet_row.get("name") or "").strip() or "Pet"
@@ -1011,6 +1251,8 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 # Horários canônicos — a mensagem ao cliente DEVE usar estes campos
                 "start_time": start_br,
                 "uses_double_slot": bool(need_double and second_row),
+                # Duração total para este pet (G/GG + multiplicador → já dobrada na prática)
+                "service_duration_minutes": eff_dur,
                 # Gravado no banco — use na fala ao cliente (evita Lucio na conversa × Thigas no INSERT)
                 "pet_name": pet_nm,
                 "service_name": svc_nm,
@@ -1024,30 +1266,34 @@ def build_booking_tools(company_id: int, client_id) -> list:
             if need_double and second_row:
                 sec_br = slot_time_to_hhmm(second_row.get("slot_time"))
                 success_payload["second_slot_start"] = sec_br
-                end_br = hhmm_after_minutes(sec_br, dur)
+                end_br = hhmm_after_minutes(start_br, eff_dur)
                 success_payload["service_end_time"] = end_br
                 success_payload["customer_pickup_hint"] = (
                     f"O serviço ocupa dois horários seguidos: início {start_br}, "
                     f"segundo bloco a partir de {sec_br}; previsão de término ~{end_br} "
-                    f"(para buscar o pet, combine com o petshop — em geral após {end_br})."
+                    f"(duração total ~{eff_dur} min para o porte deste pet; "
+                    f"para buscar, combine com o petshop — em geral após {end_br})."
                 )
             else:
-                end_br = hhmm_after_minutes(start_br, dur)
+                end_br = hhmm_after_minutes(start_br, eff_dur)
                 success_payload["service_end_time"] = end_br
                 success_payload["customer_pickup_hint"] = (
                     f"Previsão de término do serviço ~{end_br} "
-                    f"(início {start_br}; duração base {dur} min)."
+                    f"(início {start_br}; duração prevista ~{eff_dur} min para este pet)."
                 )
             return success_payload
 
     def reschedule_appointment(
-        appointment_id: str,
-        new_slot_id: str,
+        appointment_id: str | None = None,
+        new_slot_id: str | None = None,
         confirmed: bool = False,
-        reason: str = None,
+        reason: str | None = None,
     ) -> dict:
         """
-        Remarca um agendamento: cancela o registro atual e cria no novo horário na **mesma transação**
+        Remarca **um** agendamento por chamada. Se o cliente pedir remarcar vários de uma vez, o assistente
+        informa que faz um por vez e executa `reschedule_appointment` para o primeiro antes do próximo.
+
+        Cancela o registro atual e cria no novo horário na **mesma transação**
         (evita dois agendamentos ativos ou falha entre cancelar e criar).
 
         Use quando o cliente quiser **trocar data/horário** de um agendamento já existente.
@@ -1066,16 +1312,34 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "success": False,
                 "message": "Aguardando confirmação explícita do cliente antes de remarcar.",
             }
-        if not appointment_id or not str(appointment_id).strip():
-            return {"success": False, "message": "appointment_id é obrigatório."}
-        if not new_slot_id or not str(new_slot_id).strip():
-            return {"success": False, "message": "new_slot_id é obrigatório."}
-        if not _is_uuid(str(appointment_id).strip()):
+
+        aid = (str(appointment_id).strip() if appointment_id is not None else "") or ""
+        nid = (str(new_slot_id).strip() if new_slot_id is not None else "") or ""
+
+        if not aid:
+            return {
+                "success": False,
+                "missing_appointment_id": True,
+                "message": (
+                    "appointment_id é obrigatório (UUID). Chame get_upcoming_appointments e use o campo `id` "
+                    "do compromisso que está sendo remarcado — um agendamento por chamada a reschedule_appointment."
+                ),
+            }
+        if not nid:
+            return {
+                "success": False,
+                "missing_new_slot_id": True,
+                "message": (
+                    "new_slot_id é obrigatório (UUID do slot novo). Chame get_available_times na data desejada "
+                    "e use o slot_id do horário escolhido."
+                ),
+            }
+        if not _is_uuid(aid):
             return {
                 "success": False,
                 "message": "appointment_id inválido. Use o id retornado por get_upcoming_appointments.",
             }
-        if not _is_uuid(str(new_slot_id).strip()):
+        if not _is_uuid(nid):
             return {
                 "success": False,
                 "message": "new_slot_id inválido. Chame get_available_times e use o slot_id da lista.",
@@ -1087,8 +1351,6 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "message": "Cliente não identificado. Não é possível remarcar.",
             }
 
-        aid = str(appointment_id).strip()
-        nid = str(new_slot_id).strip()
         cancel_note = (reason or "Remarcação via assistente").strip()
 
         logger.info(
@@ -1309,8 +1571,13 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 else:
                     scheduled_date = None
 
-                clash_r = _client_conflict_same_start(
-                    cur, company_id, client_id, scheduled_date, ids_to_cancel_set
+                clash_r = _client_conflict_same_slot_start(
+                    cur,
+                    company_id,
+                    client_id,
+                    slot_row.get("slot_date"),
+                    slot_row.get("slot_time"),
+                    ids_to_cancel_set,
                 )
                 if clash_r:
                     return {
@@ -1328,11 +1595,12 @@ def build_booking_tools(company_id: int, client_id) -> list:
                         slot_row["slot_date"],
                         second_row["slot_time"],
                     )
-                    clash_r2p = _client_conflict_same_start(
+                    clash_r2p = _client_conflict_same_slot_start(
                         cur,
                         company_id,
                         client_id,
-                        second_scheduled_rs,
+                        slot_row["slot_date"],
+                        second_row.get("slot_time"),
                         ids_to_cancel_set,
                     )
                     if clash_r2p:
@@ -1445,7 +1713,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     (client_id, company_id),
                 )
 
-                dur = int(service_row.get("duration_min") or 60)
+                eff_dur = _effective_service_duration_minutes(service_row, pet_row)
                 start_br = slot_time_to_hhmm(slot_row.get("slot_time"))
                 appt_date_rs = _date_iso(slot_row.get("slot_date"))
                 pet_nmr = (pet_row.get("name") or "").strip() or "Pet"
@@ -1458,6 +1726,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     "message": "Agendamento remarcado com sucesso!",
                     "start_time": start_br,
                     "uses_double_slot": bool(need_double and second_row),
+                    "service_duration_minutes": eff_dur,
                     "pet_name": pet_nmr,
                     "service_name": svc_nmr,
                     "appointment_date": appt_date_rs,
@@ -1470,19 +1739,20 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 if need_double and second_row:
                     sec_br = slot_time_to_hhmm(second_row.get("slot_time"))
                     payload["second_slot_start"] = sec_br
-                    end_br = hhmm_after_minutes(sec_br, dur)
+                    end_br = hhmm_after_minutes(start_br, eff_dur)
                     payload["service_end_time"] = end_br
                     payload["customer_pickup_hint"] = (
                         f"O serviço ocupa dois horários seguidos: início {start_br}, "
                         f"segundo bloco a partir de {sec_br}; previsão de término ~{end_br} "
-                        f"(para buscar o pet, combine com o petshop — em geral após {end_br})."
+                        f"(duração total ~{eff_dur} min para o porte deste pet; "
+                        f"para buscar, combine com o petshop — em geral após {end_br})."
                     )
                 else:
-                    end_br = hhmm_after_minutes(start_br, dur)
+                    end_br = hhmm_after_minutes(start_br, eff_dur)
                     payload["service_end_time"] = end_br
                     payload["customer_pickup_hint"] = (
                         f"Previsão de término do serviço ~{end_br} "
-                        f"(início {start_br}; duração base {dur} min)."
+                        f"(início {start_br}; duração prevista ~{eff_dur} min para este pet)."
                     )
                 return payload
         except Exception as exc:

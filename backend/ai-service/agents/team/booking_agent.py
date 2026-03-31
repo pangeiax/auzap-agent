@@ -22,7 +22,7 @@ def build_booking_agent(context: dict, router_ctx: dict) -> Agent:
 
     return Agent(
         name="Booking Agent",
-        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, **get_max_tokens_param(OPENAI_MODEL_ADVANCED, 1200)),
+        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, **get_max_tokens_param(OPENAI_MODEL_ADVANCED, 2000)),
         instructions=build_booking_prompt(context, router_ctx),
         tools=tools,
     )

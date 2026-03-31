@@ -127,7 +127,7 @@ def build_booking_tool_cache_hint(context: dict) -> str:
         "Só **get_services** abaixo. **Não** há cache de pets na entrada — para pets (lista, UUID, porte, "
         "confirmar se um **nome** existe) chame **get_client_pets** neste turno quando o fluxo exigir.",
         "Se a mensagem atual não exige catálogo novo (ex.: confirmação com mesmo serviço), pode usar o JSON "
-        "de serviços **sem** chamar get_services de novo. Chame get_services de novo se mudou o serviço ou houver dúvida.",
+        "de serviços **sem** chamar get_services de novo. **Exceção:** pedido de **lista completa** / **tudo que o petshop oferece** / **quais serviços** → chame **get_services** neste turno (o JSON abaixo pode não trazer `lodging_offerings`; a tool devolve hotel/creche quando existir).",
     ]
     lines.append("Último get_services:")
     lines.append(_json_dumps(svc))

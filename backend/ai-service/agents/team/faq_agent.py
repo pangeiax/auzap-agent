@@ -5,7 +5,6 @@ from config import OPENAI_MODEL
 from prompts.sales_prompt import build_faq_prompt
 from tools.faq_tools import search_knowledge_base
 from tools.booking_tools import build_booking_tools
-from tools.client_tools import build_client_tools
 from utils.model_utils import get_max_tokens_param
 
 
@@ -17,13 +16,11 @@ def build_faq_agent(context: dict, router_ctx: dict) -> Agent:
         tools = []
     else:
         get_services = build_booking_tools(company_id, client_id)[1]
-        client_tools = build_client_tools(company_id, client_id)
-        set_pet_size = client_tools[2]
-        tools = [search_knowledge_base, get_services, set_pet_size]
+        tools = [search_knowledge_base, get_services]
 
     return Agent(
         name="FAQ Agent",
-        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 800)),
+        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 1500)),
         instructions=build_faq_prompt(context, router_ctx),
         tools=tools,
     )

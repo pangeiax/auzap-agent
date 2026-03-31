@@ -111,6 +111,23 @@ def build_lodging_agent(context: dict, router_ctx: dict) -> Agent:
         max_description_chars=DEFAULT_MAX_CADASTRO_DESCRIPTION_CHARS,
     )
 
+    today_disp = context.get("today", "")
+    today_wd = context.get("today_weekday", "")
+    cal = (context.get("calendar_dates_reference") or "").strip()
+    date_header_parts = []
+    if today_disp:
+        date_header_parts.append(f"DATA HOJE: {today_disp} ({today_wd}).")
+    if cal:
+        date_header_parts.append(cal)
+    date_header = ""
+    if date_header_parts:
+        date_header = (
+            "\n"
+            + "\n".join(date_header_parts)
+            + "\n\n• **Dia da semana:** só diga sexta/sábado/etc. para uma data se constar na tabela **CALENDÁRIO** "
+            "acima ou no retorno das tools; caso contrário cite só **DD/MM/AAAA** ou **YYYY-MM-DD**.\n\n"
+        )
+
     date_gate = ""
     if not has_router_dates:
         date_gate = f"""
@@ -127,6 +144,17 @@ PERÍODO e get_kennel_availability ({type_label}) — Roteador sem check-in/chec
 """
 
     instructions = f"""Você é {assistant_name}, assistente de hospedagem de {company_name}.
+{date_header}━━━ ESCOPO DESTE AGENTE ━━━
+FAZ: informar sobre hotel e creche, verificar disponibilidade (get_kennel_availability),
+  encaminhar ao especialista para efetivar reserva.
+NÃO FAZ: banho, tosa, consulta, vacina → se o cliente perguntar esses serviços, diga:
+  "Para isso te direciono na sequência — um assunto de cada vez!"
+NÃO FAZ: confirmar reserva no sistema → nunca diga "reserva confirmada", "fechei sua vaga"
+  ou equivalente sem escalate_to_human com sucesso.
+NÃO FAZ: calcular valor total sem check-in e check-out confirmados.
+NÃO FAZ: confirmar "mesmo quarto para vários pets" sem orientar para especialista quando
+  a descrição do room_type indicar essa restrição.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **Escopo:** Esclarecer hotel e creche usando o CADASTRO e as tools. Valores e vagas de `get_kennel_availability` são **informativos** — **não** significam reserva fechada no sistema.
 
@@ -213,7 +241,7 @@ Se precisar listar horários ou opções, separe por vírgula ou em linhas simpl
 
     return Agent(
         name="Lodging Agent",
-        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 1000)),
+        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 5000)),
         instructions=instructions,
         tools=tools,
         tool_call_limit=12,

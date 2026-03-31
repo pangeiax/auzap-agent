@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime, timedelta, timezone
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from config import OPENAI_MODEL_ROUTER
@@ -146,8 +146,8 @@ def _resolve_service_and_pet_ids(context: dict, router_ctx: dict) -> tuple:
 
 def _booking_availability_snapshot_block(context: dict, router_ctx: dict) -> str:
     """
-    Pré-executa get_available_times e injeta JSON na entrada do especialista (booking_agent e health_agent).
-    Evita respostas sem tool e negações inventadas sobre horários.
+    Pré-executa get_available_times e injeta JSON na entrada do especialista.
+    Usado em booking_agent e health_agent quando há data + slots no plano — evita negações inventadas.
     """
     stage = router_ctx.get("stage") or ""
     if stage == "COMPLETED":
@@ -231,6 +231,239 @@ DEFAULT_ROUTER_CTX = {
 }
 
 
+def _message_looks_like_time_or_schedule_confirm(message: str) -> bool:
+    """Heurística para follow-ups de agendamento (horário, amanhã, confirmação)."""
+    ml = (message or "").strip().lower()
+    if not ml:
+        return False
+    if re.search(r"\b\d{1,2}\s*h\b", ml):
+        return True
+    if re.search(r"às\s*\d", ml) or re.search(r"\bas\s+\d", ml):
+        return True
+    if any(
+        x in ml
+        for x in (
+            "amanhã",
+            "amanha",
+            "pode ser",
+            "confirm",
+            "prefiro",
+        )
+    ):
+        return True
+    if re.fullmatch(r"(sim|ok|beleza|isso|pode)\.?[\s!]*", ml):
+        return True
+    return False
+
+
+def _coerce_onboarding_to_booking_when_service_schedule(
+    message: str, router_ctx: dict, history: list | None
+) -> dict:
+    """
+    onboarding_agent não expõe create_appointment/get_available_times.
+    O router às vezes mantém onboarding após create_pet ou por confundir «cadastrar banho» com cadastro de pet —
+    o modelo então «confirma» agendamento sem gravar. Corrige para booking_agent quando a intenção é claramente agenda.
+    """
+    if router_ctx.get("agent") != "onboarding_agent":
+        return router_ctx
+
+    m = (message or "").strip().lower()
+    hist = (_format_history(history or []) or "").lower()
+
+    if re.search(
+        r"\b(cadastrar|cadastra)\b.*\b(outro|novo|um)\s+pet\b|\b(outro|novo)\s+pet\b",
+        m,
+    ) and not re.search(r"\b(banho|tosa|hidrata)\b", m):
+        return router_ctx
+    if re.search(
+        r"\b(cadastrar|cadastra)\b.*\b(me\s+u\s+)?(cachorro|gato|pet|cãozinho|gatinho|cao)\b",
+        m,
+    ) and not re.search(r"\b(banho|tosa|hidrata)\b", m):
+        return router_ctx
+
+    grooming = ("banho", "tosa", "hidrata")
+    has_grooming_msg = any(g in m for g in grooming)
+    has_grooming_hist = any(g in hist for g in grooming)
+    schedule_cue = any(
+        b in m
+        for b in (
+            "agendar",
+            "marcar",
+            "marca ",
+            "marque",
+            "quero ",
+            "preciso ",
+            "cadastrar",
+            "cadastra",
+            "horário",
+            "horario",
+        )
+    ) or re.search(r"\b\d{1,2}\s*h\b", m)
+    schedule_context = has_grooming_hist and (
+        re.search(r"\d{1,2}:\d{2}", hist)
+        or "horário" in hist
+        or "horario" in hist
+        or "horários" in hist
+        or "horarios" in hist
+    )
+
+    force = False
+    if has_grooming_msg and schedule_cue:
+        force = True
+    elif (has_grooming_msg or has_grooming_hist) and schedule_context and _message_looks_like_time_or_schedule_confirm(
+        message
+    ):
+        force = True
+
+    if not force:
+        return router_ctx
+
+    logger.warning(
+        "Correção de roteamento: onboarding_agent → booking_agent (agenda de banho/tosa sem tools de booking) | msg=%.100r",
+        message,
+    )
+    out = dict(router_ctx)
+    out["agent"] = "booking_agent"
+    if (out.get("specialty_type") or "regular") not in ("health", "lodging"):
+        out["specialty_type"] = "regular"
+
+    raw_rt = router_ctx.get("required_tools")
+    rt = list(normalize_required_tools(raw_rt) or [])
+    if rt == ["none"]:
+        rt = []
+    for token in ("pets", "services"):
+        if token not in rt:
+            rt.append(token)
+    slots_hint = any(
+        x in m
+        for x in (
+            "amanhã",
+            "amanha",
+            "hoje",
+            "às",
+            "horário",
+            "horario",
+            "sext",
+            "segund",
+            "terç",
+            "quart",
+            "quint",
+        )
+    ) or bool(re.search(r"\b\d{1,2}\s*h\b", m))
+    if slots_hint and "slots" not in rt:
+        rt.append("slots")
+    if (
+        router_ctx.get("awaiting_confirmation")
+        or "confirm" in m
+        or re.fullmatch(r"(sim|ok|beleza|isso|pode)\.?[\s!]*", m.strip().lower())
+    ) and "appointments" not in rt:
+        rt.append("appointments")
+
+    out["required_tools"] = rt if rt else None
+
+    st = (router_ctx.get("stage") or "").upper()
+    if st == "PET_REGISTRATION" and (has_grooming_msg or has_grooming_hist):
+        out["stage"] = "SCHEDULING" if router_ctx.get("date_mentioned") else "SERVICE_SELECTION"
+
+    return out
+
+
+def _pet_created_at_utc(ct) -> datetime | None:
+    if ct is None:
+        return None
+    if isinstance(ct, datetime):
+        if ct.tzinfo is None:
+            return ct.replace(tzinfo=timezone.utc)
+        return ct.astimezone(timezone.utc)
+    if isinstance(ct, str):
+        try:
+            s = ct.replace("Z", "+00:00")
+            d = datetime.fromisoformat(s)
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            return d.astimezone(timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _message_mentions_pet_name(message: str, name: str) -> bool:
+    n = (name or "").strip()
+    if len(n) < 2:
+        return False
+    return (
+        re.search(rf"(?<!\w){re.escape(n)}(?!\w)", message or "", re.IGNORECASE)
+        is not None
+    )
+
+
+def _ensure_active_pet_when_booking(
+    router_ctx: dict, context: dict, message: str
+) -> dict:
+    """
+    booking_agent e health_agent usam `active_pet` no prompt e em `_resolve_service_and_pet_ids`
+    (pré-carga de horários). Se o Roteador deixar active_pet vazio (ex.: «novo ciclo» após create_pet),
+    infere: nome citado na mensagem, pet único do cliente, ou o mais recentemente cadastrado
+    (created_at nos últimos 7 dias).
+    """
+    if router_ctx.get("agent") not in ("booking_agent", "health_agent"):
+        return router_ctx
+    if router_says_conversation_only(router_ctx):
+        return router_ctx
+    if (router_ctx.get("active_pet") or "").strip():
+        return router_ctx
+
+    pets = context.get("pets") or []
+    if not pets:
+        return router_ctx
+
+    sorted_by_len = sorted(
+        pets,
+        key=lambda p: len((p.get("name") or "").strip()),
+        reverse=True,
+    )
+    for p in sorted_by_len:
+        name = (p.get("name") or "").strip()
+        if name and _message_mentions_pet_name(message, name):
+            out = dict(router_ctx)
+            out["active_pet"] = name
+            logger.info("active_pet inferido (nome na mensagem): %s", name)
+            return out
+
+    if len(pets) == 1:
+        name = (pets[0].get("name") or "").strip()
+        if name:
+            out = dict(router_ctx)
+            out["active_pet"] = name
+            logger.info("active_pet inferido (único pet do cliente): %s", name)
+            return out
+
+    now = datetime.now(timezone.utc)
+    recent_cutoff = now - timedelta(days=7)
+    best = None
+    best_ts: datetime | None = None
+    for p in pets:
+        ts = _pet_created_at_utc(p.get("created_at"))
+        if ts is None or ts < recent_cutoff:
+            continue
+        if best_ts is None or ts > best_ts:
+            best_ts = ts
+            best = p
+
+    if best:
+        name = (best.get("name") or "").strip()
+        if name:
+            out = dict(router_ctx)
+            out["active_pet"] = name
+            logger.info(
+                "active_pet inferido (cadastro recente ≤7d, mais novo): %s",
+                name,
+            )
+            return out
+
+    return router_ctx
+
+
 async def run_router(message: str, context: dict, history: list) -> dict:
     """
     1. Router classifica intenção e extrai contexto acumulado (JSON)
@@ -240,7 +473,7 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     # ── 1. Router ────────────────────────────────
     router = Agent(
         name="Router",
-        model=OpenAIChat(id=OPENAI_MODEL_ROUTER, **get_max_tokens_param(OPENAI_MODEL_ROUTER, 500)),
+        model=OpenAIChat(id=OPENAI_MODEL_ROUTER, **get_max_tokens_param(OPENAI_MODEL_ROUTER, 1200)),
         instructions=build_router_prompt(context),
     )
 
@@ -249,6 +482,8 @@ async def run_router(message: str, context: dict, history: list) -> dict:
 
     router_response = router.run(router_input)
     router_ctx = _parse_router_response(router_response.content)
+    router_ctx = _coerce_onboarding_to_booking_when_service_schedule(message, router_ctx, history)
+    router_ctx = _ensure_active_pet_when_booking(router_ctx, context, message)
     router_model = _agent_configured_model_id(router)
 
     agent_name = router_ctx.get("agent", "onboarding_agent")
@@ -275,9 +510,13 @@ async def run_router(message: str, context: dict, history: list) -> dict:
         cache_hint = build_booking_tool_cache_hint(context)
         if cache_hint:
             base_input = base_input + cache_hint
-    # Mesma pré-carga de get_available_times do booking — health_agent também agenda e
-    # antes só recebia lista “na cabeça” do modelo ou dependia 100% da tool na hora.
-    # Só health_agent: snapshot evita negativa inventada. Só quando o router pede slots (ou legado sem lista).
+        # Mesma pré-carga do health: sem isso o modelo lista ou nega horários sem JSON da tool.
+        if router_ctx.get("required_tools") is None or router_wants_category(
+            router_ctx, "slots"
+        ):
+            snap = _booking_availability_snapshot_block(context, router_ctx)
+            if snap:
+                base_input = base_input + snap
     if agent_name == "health_agent" and (
         router_ctx.get("required_tools") is None
         or router_wants_category(router_ctx, "slots")
