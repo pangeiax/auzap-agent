@@ -4,7 +4,8 @@ import re
 from datetime import date as date_cls
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
-from config import OPENAI_MODEL
+from config import OPENAI_MODEL_ROUTER
+from utils.model_utils import get_max_tokens_param
 from prompts.router_prompt import build_router_prompt
 from agents.team.onboarding_agent import build_onboarding_agent
 from agents.team.booking_agent import build_booking_agent
@@ -13,6 +14,14 @@ from agents.team.sales_agent import build_sales_agent
 from agents.team.escalation_agent import build_escalation_agent
 from agents.team.lodging_agent import build_lodging_agent
 from agents.team.health_agent import build_health_agent
+from agents.router_tool_plan import (
+    build_router_tools_instruction_block,
+    format_required_tools_for_log,
+    normalize_required_tools,
+    router_says_conversation_only,
+    router_wants_category,
+)
+from memory.tool_result_cache import build_booking_tool_cache_hint
 from tools.booking_tools import fetch_available_times_snapshot
 
 logger = logging.getLogger("ai-service.router")
@@ -231,7 +240,7 @@ async def run_router(message: str, context: dict, history: list) -> dict:
     # ── 1. Router ────────────────────────────────
     router = Agent(
         name="Router",
-        model=OpenAIChat(id=OPENAI_MODEL, max_completion_tokens=300),
+        model=OpenAIChat(id=OPENAI_MODEL_ROUTER, **get_max_tokens_param(OPENAI_MODEL_ROUTER, 500)),
         instructions=build_router_prompt(context),
     )
 
@@ -244,7 +253,7 @@ async def run_router(message: str, context: dict, history: list) -> dict:
 
     agent_name = router_ctx.get("agent", "onboarding_agent")
     logger.info(
-        "Router decidiu → model=%s | agent=%s | stage=%s | active_pet=%s | service=%s | date=%s | awaiting_confirmation=%s",
+        "Router decidiu → model=%s | agent=%s | stage=%s | active_pet=%s | service=%s | date=%s | awaiting_confirmation=%s | required_tools=%s",
         router_model,
         agent_name,
         router_ctx.get("stage"),
@@ -252,15 +261,27 @@ async def run_router(message: str, context: dict, history: list) -> dict:
         router_ctx.get("service"),
         router_ctx.get("date_mentioned"),
         router_ctx.get("awaiting_confirmation"),
+        format_required_tools_for_log(router_ctx),
     )
 
     # ── 2. Especialista ───────────────────────────
     logger.info("Invocando especialista → %s", agent_name)
     specialist = _build_specialist(agent_name, context, router_ctx)
-    base_input = _build_specialist_input(message, history, router_ctx)
+    base_input = (
+        _build_specialist_input(message, history, router_ctx)
+        + build_router_tools_instruction_block(router_ctx)
+    )
+    if agent_name == "booking_agent" and not router_says_conversation_only(router_ctx):
+        cache_hint = build_booking_tool_cache_hint(context)
+        if cache_hint:
+            base_input = base_input + cache_hint
     # Mesma pré-carga de get_available_times do booking — health_agent também agenda e
     # antes só recebia lista “na cabeça” do modelo ou dependia 100% da tool na hora.
-    if agent_name in ("booking_agent", "health_agent"):
+    # Só health_agent: snapshot evita negativa inventada. Só quando o router pede slots (ou legado sem lista).
+    if agent_name == "health_agent" and (
+        router_ctx.get("required_tools") is None
+        or router_wants_category(router_ctx, "slots")
+    ):
         snap = _booking_availability_snapshot_block(context, router_ctx)
         if snap:
             base_input = base_input + snap
@@ -322,7 +343,12 @@ def _parse_router_response(content: str) -> dict:
         if parsed.get("agent") not in VALID_AGENTS:
             logger.warning("Router retornou agente inválido=%r — usando faq_agent", parsed.get("agent"))
             parsed["agent"] = "faq_agent"
-        return {**DEFAULT_ROUTER_CTX, **parsed}
+        merged = {**DEFAULT_ROUTER_CTX, **parsed}
+        if "required_tools" in parsed:
+            merged["required_tools"] = normalize_required_tools(parsed.get("required_tools"))
+        else:
+            merged["required_tools"] = None
+        return merged
     except Exception:
         logger.warning("Falha ao parsear JSON do router — usando DEFAULT_ROUTER_CTX. content=%.200r", content)
         return DEFAULT_ROUTER_CTX.copy()

@@ -5,6 +5,7 @@ import urllib.request
 import json
 from datetime import date, datetime, timedelta
 from db import get_connection
+from memory.tool_result_cache import cache_get_services, cache_set_services
 from timezone_br import now_sao_paulo_naive, today_sao_paulo
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
@@ -26,6 +27,14 @@ MAX_AGENDA_DAYS_AHEAD = 90
 logger = logging.getLogger("ai-service.tools.booking")
 
 DOUBLE_PAIR_PREFIX = "__DOUBLE_PAIR__:"
+
+
+def _date_iso(d) -> str | None:
+    if d is None:
+        return None
+    if hasattr(d, "isoformat"):
+        return d.isoformat()
+    return str(d)
 
 
 def _price_key_for_pet_size(raw: str | None) -> str | None:
@@ -203,6 +212,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
         Chamar em silêncio para validar o serviço antes de pedir dados do pet.
         Serviços com block_ai_schedule=true NÃO devem ser agendados pelo bot.
         """
+        cached = cache_get_services(company_id)
+        if cached is not None:
+            return {**cached, "from_cache": True}
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -227,7 +239,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 (company_id,),
             )
             services = cur.fetchall()
-        return {"services": [dict(s) for s in services], "count": len(services)}
+        out = {"services": [dict(s) for s in services], "count": len(services)}
+        cache_set_services(company_id, out)
+        return out
 
     def _try_generate_slots() -> bool:
         """Tenta gerar slots via endpoint interno. Retorna True se bem-sucedido."""
@@ -594,6 +608,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
         """
         Cria um agendamento. Exige confirmed=True — nunca criar sem confirmação explícita do cliente.
 
+        Em success=true a resposta traz **pet_name**, **service_name**, **appointment_date** (YYYY-MM-DD),
+        **canonical_summary** e **start_time** exatamente como gravados — use na mensagem ao cliente.
+
         Args:
             pet_id: ID do pet (obtido via get_client_pets)
             service_id: ID do serviço (obtido via get_services)
@@ -686,7 +703,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
             # Valida service_id — busca preço fixo, preço por porte e multiplier G/GG
             cur.execute(
                 """
-                SELECT id, price, price_by_size, duration_multiplier_large, duration_min
+                SELECT id, name, price, price_by_size, duration_multiplier_large, duration_min
                 FROM petshop_services
                 WHERE id = %s AND company_id = %s AND is_active = TRUE
             """,
@@ -701,7 +718,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
             # Valida pet_id — busca também campos obrigatórios para agendamento
             cur.execute(
-                "SELECT id, size, species, breed FROM petshop_pets WHERE id = %s AND client_id = %s AND company_id = %s AND is_active = TRUE",
+                "SELECT id, name, size, species, breed FROM petshop_pets WHERE id = %s AND client_id = %s AND company_id = %s AND is_active = TRUE",
                 (pet_id, client_id, company_id),
             )
             pet_row = cur.fetchone()
@@ -984,6 +1001,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
             dur = int(service_row.get("duration_min") or 60)
             start_br = slot_time_to_hhmm(slot_row.get("slot_time"))
+            appt_date_iso = _date_iso(slot_row.get("slot_date"))
+            pet_nm = (pet_row.get("name") or "").strip() or "Pet"
+            svc_nm = (service_row.get("name") or "").strip() or "Serviço"
             success_payload: dict = {
                 "success": True,
                 "appointment_id": str(appointment_id),
@@ -991,6 +1011,15 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 # Horários canônicos — a mensagem ao cliente DEVE usar estes campos
                 "start_time": start_br,
                 "uses_double_slot": bool(need_double and second_row),
+                # Gravado no banco — use na fala ao cliente (evita Lucio na conversa × Thigas no INSERT)
+                "pet_name": pet_nm,
+                "service_name": svc_nm,
+                "appointment_date": appt_date_iso,
+                "canonical_summary": (
+                    f"{svc_nm} para {pet_nm} no dia {appt_date_iso} às {start_br}"
+                    if appt_date_iso
+                    else f"{svc_nm} para {pet_nm} às {start_br}"
+                ),
             }
             if need_double and second_row:
                 sec_br = slot_time_to_hhmm(second_row.get("slot_time"))
@@ -1128,7 +1157,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
                 cur.execute(
                     """
-                    SELECT id, price, price_by_size, duration_multiplier_large, duration_min
+                    SELECT id, name, price, price_by_size, duration_multiplier_large, duration_min
                     FROM petshop_services
                     WHERE id = %s AND company_id = %s AND is_active = TRUE
                     """,
@@ -1143,7 +1172,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
                 cur.execute(
                     """
-                    SELECT id, size, species, breed FROM petshop_pets
+                    SELECT id, name, size, species, breed FROM petshop_pets
                     WHERE id = %s AND client_id = %s AND company_id = %s AND is_active = TRUE
                     """,
                     (pet_id, client_id, company_id),
@@ -1418,6 +1447,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
 
                 dur = int(service_row.get("duration_min") or 60)
                 start_br = slot_time_to_hhmm(slot_row.get("slot_time"))
+                appt_date_rs = _date_iso(slot_row.get("slot_date"))
+                pet_nmr = (pet_row.get("name") or "").strip() or "Pet"
+                svc_nmr = (service_row.get("name") or "").strip() or "Serviço"
                 payload: dict = {
                     "success": True,
                     "rescheduled": True,
@@ -1426,6 +1458,14 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     "message": "Agendamento remarcado com sucesso!",
                     "start_time": start_br,
                     "uses_double_slot": bool(need_double and second_row),
+                    "pet_name": pet_nmr,
+                    "service_name": svc_nmr,
+                    "appointment_date": appt_date_rs,
+                    "canonical_summary": (
+                        f"{svc_nmr} para {pet_nmr} no dia {appt_date_rs} às {start_br}"
+                        if appt_date_rs
+                        else f"{svc_nmr} para {pet_nmr} às {start_br}"
+                    ),
                 }
                 if need_double and second_row:
                     sec_br = slot_time_to_hhmm(second_row.get("slot_time"))

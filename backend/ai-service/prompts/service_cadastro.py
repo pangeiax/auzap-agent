@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import json
 
+# Limite de caracteres por descrição nos agentes que ainda enviam texto longo (evita CRM com romances).
+DEFAULT_MAX_CADASTRO_DESCRIPTION_CHARS = 900
 
 CADASTRO_SERVICOS_INTRO = (
     "Use o texto abaixo como fonte de verdade ao explicar o que cada serviço inclui, "
     "restrições, encaminhamento a humano ou canal. Pode parafrasear sem alterar o sentido."
+)
+
+CADASTRO_SERVICOS_INTRO_COMPACT = (
+    "Resumo operacional (sem descrições longas): use para listar nomes, bloqueios e pré-requisitos. "
+    "Para o que cada serviço inclui no detalhe, o cliente pode perguntar e você responde com o que souber do histórico "
+    "ou indique o especialista — o agente de agendamento/vendas recebe o cadastro completo quando aplicável."
 )
 
 CADASTRO_HOSPEDAGEM_INTRO = (
@@ -15,17 +23,38 @@ CADASTRO_HOSPEDAGEM_INTRO = (
     "encaminhamento a humano e o que pode ser combinado por este canal."
 )
 
+CADASTRO_HOSPEDAGEM_INTRO_COMPACT = (
+    "Resumo operacional de tipos de quarto (sem textos longos duplicados). "
+    "Detalhes completos de planos e políticas vão ao lodging_agent / faq quando o fluxo for hospedagem."
+)
 
-def build_petshop_services_cadastro_block(services: list | None) -> str:
+
+def _truncate_text(text: str, max_len: int | None) -> str:
+    if not max_len or len(text) <= max_len:
+        return text
+    return text[: max_len - 1].rstrip() + "…"
+
+
+def _normalize_desc_for_dedupe(desc: str) -> str:
+    return " ".join(desc.split())
+
+
+def build_petshop_services_cadastro_block(
+    services: list | None,
+    *,
+    include_descriptions: bool = True,
+    max_description_chars: int | None = None,
+) -> str:
     """Descrições e flags de `petshop_services` — vazio se não houver serviços."""
     rows = services or []
     if not rows:
         return ""
 
+    intro = CADASTRO_SERVICOS_INTRO if include_descriptions else CADASTRO_SERVICOS_INTRO_COMPACT
     lines = [
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         "CADASTRO DO PETSHOP — SERVIÇOS (banco de dados)",
-        CADASTRO_SERVICOS_INTRO,
+        intro,
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
     for s in rows:
@@ -42,29 +71,74 @@ def build_petshop_services_cadastro_block(services: list | None) -> str:
                 extra += f" (pré-requisito: {dep})"
             head += extra
         lines.append(head)
+        if not include_descriptions:
+            continue
         desc = (s.get("description") or "").strip()
         if desc:
-            lines.append(f"  Descrição cadastrada:\n  {desc}")
+            out = _truncate_text(desc, max_description_chars)
+            lines.append(f"  Descrição cadastrada:\n  {out}")
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     return "\n".join(lines)
 
 
-def _append_room_type_lines(lines: list, r: dict) -> None:
+def _append_room_type_lines(
+    lines: list,
+    r: dict,
+    *,
+    include_descriptions: bool,
+    max_description_chars: int | None,
+    dedupe_descriptions: bool,
+    prev_desc_norm: str | None,
+    prev_room_label: str,
+) -> tuple[str | None, str]:
+    """Acrescenta linhas de um room type; devolve (novo prev_desc_norm, novo prev_room_label)."""
     name = r.get("name") or ""
     dr = r.get("daily_rate")
     dr_s = f"{float(dr):.2f}" if dr is not None else "—"
     lt = (r.get("lodging_type") or "").lower()
     label = "Hotel" if lt == "hotel" else "Creche" if lt == "daycare" else lt or "?"
-    lines.append(f"\n• [{label}] {name} — diária R$ {dr_s}")
-    desc = (r.get("description") or "").strip()
-    if desc:
-        lines.append(f"  Descrição cadastrada:\n  {desc}")
-    feats = r.get("features")
-    if feats not in (None, {}, []):
-        try:
-            lines.append("  Features (cadastro): " + json.dumps(feats, ensure_ascii=False))
-        except (TypeError, ValueError):
-            lines.append(f"  Features (cadastro): {feats}")
+    room_label = f"[{label}] {name}"
+    lines.append(f"\n• {room_label} — diária R$ {dr_s}")
+
+    new_prev_norm = prev_desc_norm
+    new_prev_label = prev_room_label
+
+    if include_descriptions:
+        desc = (r.get("description") or "").strip()
+        if desc:
+            dn = _normalize_desc_for_dedupe(desc)
+            if (
+                dedupe_descriptions
+                and prev_desc_norm is not None
+                and dn == prev_desc_norm
+                and prev_room_label
+            ):
+                lines.append(
+                    f"  (Mesma descrição cadastrada que «{prev_room_label}» — omitida aqui para evitar repetição.)"
+                )
+                new_prev_norm = prev_desc_norm
+                new_prev_label = prev_room_label
+            else:
+                out = _truncate_text(desc, max_description_chars)
+                lines.append(f"  Descrição cadastrada:\n  {out}")
+                new_prev_norm = dn
+                new_prev_label = room_label
+        else:
+            new_prev_norm = None
+            new_prev_label = room_label
+
+    if include_descriptions:
+        feats = r.get("features")
+        if feats not in (None, {}, []):
+            try:
+                feat_str = json.dumps(feats, ensure_ascii=False)
+            except (TypeError, ValueError):
+                feat_str = str(feats)
+            if max_description_chars and len(feat_str) > max_description_chars:
+                feat_str = _truncate_text(feat_str, max_description_chars)
+            lines.append(f"  Features (cadastro): {feat_str}")
+
+    return new_prev_norm, new_prev_label
 
 
 def build_lodging_room_types_cadastro_block(
@@ -73,6 +147,9 @@ def build_lodging_room_types_cadastro_block(
     filter_lodging_type: str | None = None,
     title: str = "CADASTRO DO PETSHOP — HOSPEDAGEM (tipos de quarto / espaço)",
     intro: str | None = None,
+    include_descriptions: bool = True,
+    max_description_chars: int | None = None,
+    dedupe_descriptions: bool = True,
 ) -> str:
     rows = list(lodging_room_types or [])
     if filter_lodging_type:
@@ -95,7 +172,9 @@ def build_lodging_room_types_cadastro_block(
     if not rows:
         return ""
 
-    intro = intro or CADASTRO_HOSPEDAGEM_INTRO
+    if intro is None:
+        intro = CADASTRO_HOSPEDAGEM_INTRO if include_descriptions else CADASTRO_HOSPEDAGEM_INTRO_COMPACT
+
     lines = [
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         title,
@@ -103,9 +182,20 @@ def build_lodging_room_types_cadastro_block(
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
+    prev_desc_norm: str | None = None
+    prev_room_label = ""
+
     if filter_lodging_type:
         for r in rows:
-            _append_room_type_lines(lines, r)
+            prev_desc_norm, prev_room_label = _append_room_type_lines(
+                lines,
+                r,
+                include_descriptions=include_descriptions,
+                max_description_chars=max_description_chars,
+                dedupe_descriptions=dedupe_descriptions,
+                prev_desc_norm=prev_desc_norm,
+                prev_room_label=prev_room_label,
+            )
     else:
         last_lt = None
         for r in rows:
@@ -114,7 +204,17 @@ def build_lodging_room_types_cadastro_block(
                 sub = "Hotel (hospedagem)" if lt == "hotel" else "Creche (daycare)" if lt == "daycare" else lt
                 lines.append(f"\n── {sub} ──")
                 last_lt = lt
-            _append_room_type_lines(lines, r)
+                prev_desc_norm = None
+                prev_room_label = ""
+            prev_desc_norm, prev_room_label = _append_room_type_lines(
+                lines,
+                r,
+                include_descriptions=include_descriptions,
+                max_description_chars=max_description_chars,
+                dedupe_descriptions=dedupe_descriptions,
+                prev_desc_norm=prev_desc_norm,
+                prev_room_label=prev_room_label,
+            )
 
     lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     return "\n".join(lines)

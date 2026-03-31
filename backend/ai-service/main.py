@@ -22,6 +22,39 @@ logger = logging.getLogger("ai-service")
 
 app = FastAPI(title="Petshop AI Service")
 
+_OPENAI_ERROR_PATTERNS = [
+    "Could not finish the message",
+    "max_tokens or model output limit was reached",
+    "max_completion_tokens",
+    "context length exceeded",
+    "rate limit reached",
+    "too many requests",
+    "the model produced invalid content",
+    "content_filter",
+]
+
+
+def _is_openai_error_message(reply: str) -> bool:
+    if not reply:
+        return False
+    return any(p.lower() in reply.lower() for p in _OPENAI_ERROR_PATTERNS)
+
+
+def _connection_fallback_reply(context: dict) -> str:
+    """
+    Mensagem ao cliente quando a IA falha (OpenAI/timeout/erro do agente).
+    Inclui telefone do petshop quando cadastrado.
+    """
+    phone = (context.get("petshop_phone") or "").strip()
+    company = (context.get("company_name") or "o estabelecimento").strip()
+    base = (
+        "Estamos com uma instabilidade na conexão por aqui e não consegui seguir com seu atendimento agora. "
+        f"O ideal é falar direto com {company}"
+    )
+    if phone:
+        return f"{base} pelo telefone {phone}."
+    return f"{base} pelos canais oficiais da loja."
+
 _openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
@@ -149,11 +182,24 @@ async def run_agent(req: AgentRequest):
         await save_message(req.company_id, req.client_phone, "user", message_for_agent)
 
         # 5. Executa o router agent
-        result = await run_router(
-            message=message_for_agent,
-            context=context,
-            history=history,
-        )
+        try:
+            result = await run_router(
+                message=message_for_agent,
+                context=context,
+                history=history,
+            )
+        except Exception:
+            logger.exception(
+                "run_router falhou | company_id=%s | phone=%s",
+                req.company_id,
+                req.client_phone,
+            )
+            fallback = _connection_fallback_reply(context)
+            return AgentResponse(
+                reply=fallback,
+                agent_used="system",
+                stage=None,
+            )
 
         models = result.get("llm_models") or {}
         logger.info(
@@ -165,16 +211,25 @@ async def run_agent(req: AgentRequest):
         )
 
         # 6. Salva resposta do agente no histórico
-        await save_message(
-            req.company_id, req.client_phone, "assistant", result["reply"]
-        )
+        reply = result["reply"]
+        if _is_openai_error_message(reply):
+            logger.warning(
+                "Resposta de erro da OpenAI não salva | agent=%s | reply=%.120r",
+                result["agent_used"],
+                reply,
+            )
+            reply = _connection_fallback_reply(context)
+        else:
+            await save_message(req.company_id, req.client_phone, "assistant", reply)
 
         return AgentResponse(
-            reply=result["reply"],
+            reply=reply,
             agent_used=result["agent_used"],
             stage=result.get("router_ctx", {}).get("stage"),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(
             "Erro ao processar mensagem | company_id=%s | phone=%s",

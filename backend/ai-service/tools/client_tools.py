@@ -6,6 +6,11 @@ import redis as sync_redis
 
 from config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
 from db import get_connection
+from memory.tool_result_cache import (
+    cache_get_client_pets,
+    cache_invalidate_client_pets,
+    cache_set_client_pets,
+)
 from tools.booking_tools import _extract_double_pair_id
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
@@ -396,6 +401,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         Lista os pets ativos do cliente.
         Chamar SEMPRE antes de cadastrar um pet para evitar duplicatas.
         """
+        if client_id:
+            cached = cache_get_client_pets(company_id, str(client_id))
+            if cached is not None:
+                return {**cached, "from_cache": True}
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -408,7 +417,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                 (company_id, client_id),
             )
             pets = cur.fetchall()
-        return {"pets": [dict(p) for p in pets], "count": len(pets)}
+        out = {"pets": [dict(p) for p in pets], "count": len(pets)}
+        if client_id:
+            cache_set_client_pets(company_id, str(client_id), out)
+        return out
 
     def create_pet(name: str, species: str, breed: str, size: str) -> dict:
         """
@@ -587,6 +599,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
 
         _pet_size_gate_delete(company_id, client_id, name_key)
 
+        cache_invalidate_client_pets(company_id, str(client_id))
         return {
             "success": True,
             "pet_id": str(pet_id),
@@ -698,6 +711,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             _pet_size_gate_set(company_id, client_id, pet_name.strip(), size_db)
 
         if updated:
+            cache_invalidate_client_pets(company_id, str(client_id))
             return {
                 **base_out,
                 "pet_updated": True,
