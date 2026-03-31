@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { BrainMessage } from './brain.types'
 import { sendBrainMessage, fetchBrainSuggestions } from './brain.api'
+import { splitAssistantReply } from './parseAssistantStructured'
 
 /** Em HTTP (não-localhost), `crypto.randomUUID` costuma não existir; fallback evita quebra em produção. */
 function newBrainMessageId(): string {
@@ -14,16 +15,18 @@ function newBrainMessageId(): string {
   })
 }
 
-/** Alinhadas às tools do second brain — usadas até carregar sugestões do servidor. */
+/** Alinhadas ao segundo cérebro (agenda, faturamento, hotel/creche, clientes, sentimento) e ao resumo do contexto — até carregar sugestões do servidor. */
 const FALLBACK_SUGGESTIONS = [
-  'Como está minha agenda de hoje, com quem já confirmou?',
-  'Quais agendamentos estão previstos para os próximos 7 dias?',
-  'Quanto faturei mês a mês nos últimos 6 meses?',
-  'Quais serviços mais faturam e qual o ticket médio de cada um?',
-  'Há vagas no hotel ou na creche nos próximos 14 dias?',
-  'Quais clientes estão há mais de 45 dias sem agendar?',
+  'Quem está na minha agenda hoje e o que já está confirmado?',
+  'Quais agendamentos pendentes nos próximos 7 dias?',
+  'Como foi meu faturamento mês a mês nos últimos 6 meses?',
+  'Quais serviços mais puxam o faturamento e qual o ticket médio?',
+  'Tem vaga de hotel e creche nos próximos 14 dias?',
+  'Quais tutores sumiram há mais de 45 dias para eu planejar reativação?',
   'Quais pets fazem aniversário nos próximos 7 dias?',
-  'Quais clientes aparecem com risco alto de churn neste mês?',
+  'Quem aparece com risco alto de churn neste mês segundo o sentimento?',
+  'Tenho atendimentos concluídos sem valor registrado no caixa?',
+  'Qual minha conversão pelo WhatsApp e quantos clientes ativos eu tenho?',
 ]
 
 function pickTwoRandom(pool: string[]): string[] {
@@ -61,10 +64,16 @@ export function useBrain() {
     try {
       const history = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }))
       const result = await sendBrainMessage(text, history)
+      const { displayText, structured } = splitAssistantReply(result.reply)
 
       setMessages(prev => [
         ...prev.slice(0, -1),
-        { id: newBrainMessageId(), role: 'assistant', content: result.reply },
+        {
+          id: newBrainMessageId(),
+          role: 'assistant',
+          content: displayText || result.reply,
+          ...(structured ? { structured } : {}),
+        },
       ])
     } catch {
       setMessages(prev => [

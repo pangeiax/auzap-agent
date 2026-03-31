@@ -20,6 +20,7 @@ import { roomTypeRouter } from './modules/lodgings/roomTypeRoutes'
 import settingsRoutes from './modules/settings/settingsRoutes'
 import sentimentRoutes from './modules/sentiment/sentiment.routes'
 import brainRoutes from './modules/brain/brain.routes'
+import campaignRoutes from './modules/campaigns/campaigns.routes'
 
 dotenv.config()
 
@@ -58,5 +59,6 @@ app.use('/room-types', roomTypeRouter)
 app.use('/settings', settingsRoutes)
 app.use('/sentiment', sentimentRoutes)
 app.use('/brain', brainRoutes)
+app.use('/campaigns', campaignRoutes)
 
 export default app

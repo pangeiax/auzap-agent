@@ -5,8 +5,9 @@ import { Markdown } from '@/components/atoms/Markdown'
 import { SpeechVisualization } from '@/components/molecules/SpeechVisualization'
 import { ScrollIndicator } from '@/components/atoms/ScrollIndicator'
 import { getImage } from '@/assets/images'
-import { cn } from '@/lib/cn'
 import { useBrain } from './useBrain'
+import type { BrainMessage } from './brain.types'
+import { CampaignDraft } from './CampaignDraft'
 
 interface Props {
   userName: string;
@@ -42,37 +43,55 @@ function TypingIndicator() {
   )
 }
 
-function ChatBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
-  const isSent = role === 'user'
+function UserBubble({ content }: { content: string }) {
   return (
-    <div className={cn('flex min-w-0 items-end gap-2 sm:gap-4', isSent ? 'flex-row-reverse' : 'flex-row')}>
-      {!isSent && (
-        <img
-          src={getImage('logo_main').src}
-          alt="AuZap.IA logo"
-          width={55}
-          height={60}
-          className="hidden shrink-0 sm:block"
-        />
-      )}
+    <div className="flex min-w-0 items-end gap-2 sm:gap-4 flex-row-reverse">
       <div
-        className={cn(
-          'px-6 py-3.5 text-sm leading-6',
-          isSent
-            ? 'rounded-[23px_0px_23px_23px] bg-[#0F172A] text-white'
-            : 'rounded-[0px_23px_23px_23px] border border-[#727B8E1A] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc]'
-        )}
+        className="rounded-[23px_0px_23px_23px] bg-[#0F172A] px-6 py-3.5 text-sm leading-6 text-white"
         style={{ maxWidth: 'min(100%, 586px)' }}
       >
-        <Markdown
-          className={cn(
-            isSent
-              ? 'prose-invert [&_*]:text-white [&_code]:bg-white/10 [&_pre]:bg-white/10'
-              : '[&_*]:text-[#434A57] dark:[&_*]:text-[#f5f9fc] [&_code]:bg-gray-100 dark:[&_code]:bg-gray-800 [&_pre]:bg-gray-100 dark:[&_pre]:bg-gray-800',
-          )}
-        >
+        <Markdown className="prose-invert [&_*]:text-white [&_code]:bg-white/10 [&_pre]:bg-white/10">
           {content}
         </Markdown>
+      </div>
+    </div>
+  )
+}
+
+function AssistantBubble({ msg }: { msg: BrainMessage }) {
+  return (
+    <div className="flex min-w-0 items-end gap-2 sm:gap-4 flex-row">
+      <img
+        src={getImage('logo_main').src}
+        alt="AuZap.IA logo"
+        width={55}
+        height={60}
+        className="hidden shrink-0 sm:block"
+      />
+      <div
+        className="rounded-[0px_23px_23px_23px] border border-[#727B8E1A] bg-white px-6 py-3.5 text-sm leading-6 text-[#434A57] dark:border-[#40485A] dark:bg-[#1A1B1D] dark:text-[#f5f9fc]"
+        style={{ maxWidth: 'min(100%, 586px)' }}
+      >
+        {msg.content.trim().length > 0 && (
+          <Markdown className="[&_*]:text-[#434A57] dark:[&_*]:text-[#f5f9fc] [&_code]:bg-gray-100 dark:[&_code]:bg-gray-800 [&_pre]:bg-gray-100 dark:[&_pre]:bg-gray-800">
+            {msg.content}
+          </Markdown>
+        )}
+        {msg.structured?.type === 'campaign_draft' && (
+          <CampaignDraft
+            clients={msg.structured.clients}
+            message={msg.structured.message}
+            onClose={() => {}}
+          />
+        )}
+        {msg.structured?.type === 'appointment_created' && (
+          <div className="mt-3 rounded-xl border border-[#727B8E1A] bg-gray-50 px-4 py-3 text-xs dark:border-[#40485A] dark:bg-[#141518]">
+            <p className="font-medium text-[#434A57] dark:text-[#f5f9fc]">Agendamento criado</p>
+            <p className="mt-1 text-[#727B8E] dark:text-[#8a94a6]">
+              ID: {msg.structured.appointment_id} · Data: {msg.structured.scheduled_date}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -135,10 +154,14 @@ export function BrainChat({ userName, assistantName = 'AuZap' }: Props) {
                 ref={chatContainerRef}
                 className="mb-8 flex w-full max-w-[775px] mx-auto flex-col gap-7 overflow-y-auto h-[min(50vh,450px)] sm:h-[450px] scrollbar-hide"
               >
-                {messages.map(msg =>
-                  msg.loading
-                    ? <TypingIndicator key={msg.id} />
-                    : <ChatBubble key={msg.id} role={msg.role} content={msg.content} />
+                {messages.map((msg) =>
+                  msg.loading ? (
+                    <TypingIndicator key={msg.id} />
+                  ) : msg.role === 'user' ? (
+                    <UserBubble key={msg.id} content={msg.content} />
+                  ) : (
+                    <AssistantBubble key={msg.id} msg={msg} />
+                  ),
                 )}
               </div>
             </motion.div>

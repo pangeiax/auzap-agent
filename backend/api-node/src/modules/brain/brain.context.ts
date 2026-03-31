@@ -16,6 +16,10 @@ async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
   const today = todayBR()
   const in14days = futureDateBR(14)
 
+  const since7d = new Date()
+  since7d.setDate(since7d.getDate() - 7)
+  const since7dIso = since7d.toISOString()
+
   const [
     pendingConf,
     petBirthdays,
@@ -23,6 +27,8 @@ async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
     hotelAlmostFull,
     lostClients,
     unchargedAppointments,
+    cancellationSpree,
+    absentHighValue,
   ] = await Promise.allSettled([
 
     // 1. Confirmações pendentes hoje
@@ -74,6 +80,24 @@ async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
       WHERE company_id = ${companyId}
         AND status = 'completed'
         AND price_charged IS NULL
+    `,
+
+    // 7. Cancelamentos em série (últimos 7 dias)
+    prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) as count
+      FROM petshop_appointments
+      WHERE company_id = ${companyId}
+        AND status = 'cancelled'
+        AND cancelled_at IS NOT NULL
+        AND cancelled_at >= ${since7dIso}::timestamptz
+    `,
+
+    // 8. Clientes ausentes há 30+ dias (reativação)
+    prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) as count
+      FROM dashboard_client_recurrence
+      WHERE company_id = ${companyId}
+        AND days_absent >= 30
     `,
   ])
 
@@ -148,6 +172,30 @@ async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
         type: 'warning',
         message: `${count} atendimento${count > 1 ? 's' : ''} finalizado${count > 1 ? 's' : ''} sem valor registrado — isso afeta o faturamento do dashboard.`,
         action: 'Quais atendimentos estão sem valor registrado?',
+      })
+    }
+  }
+
+  // Alerta 7 — cancelamentos em série (7 dias)
+  if (cancellationSpree.status === 'fulfilled') {
+    const count = Number(cancellationSpree.value[0]?.count ?? 0)
+    if (count >= 3) {
+      alerts.push({
+        type: 'warning',
+        message: `${count} cancelamentos nos últimos 7 dias — acima do normal.`,
+        action: 'Analisar os cancelamentos recentes',
+      })
+    }
+  }
+
+  // Alerta 8 — clientes ausentes 30+ dias
+  if (absentHighValue.status === 'fulfilled') {
+    const count = Number(absentHighValue.value[0]?.count ?? 0)
+    if (count > 0) {
+      alerts.push({
+        type: 'critical',
+        message: `${count} cliente(s) com mais de 30 dias sem comparecer — priorize reativação.`,
+        action: 'Ver clientes de alto valor sumidos',
       })
     }
   }
@@ -258,21 +306,41 @@ Quando houver alertas críticos ou importantes, mencione-os naturalmente na resp
 🔔 ALERTAS ATIVOS:
 ${alertsBlock}
 
-Você tem acesso a ferramentas para buscar informações detalhadas quando o usuário pedir.`
+Você tem acesso a ferramentas para buscar informações detalhadas quando o usuário pedir.
+
+FLUXO DE AGENDAMENTO MANUAL:
+Quando o usuário quiser agendar para um cliente:
+1. Perguntar se o cliente já existe no sistema
+2. Se SIM → search_clients pelo nome → mostrar opções → confirmar qual é
+3. Se NÃO → coletar nome, telefone (qualquer formato) e email (opcional) → confirmar dados antes de criar → create_client
+4. Com o client_id → get_client_pets_for_scheduling → perguntar para qual pet
+5. list_active_services para obter service_id, depois pergunta data → get_available_times com target_date, service_id e pet_id
+6. Mostrar resumo e aguardar confirmação → create_manual_appointment (scheduled_date deve ser YYYY-MM-DD e coincidir com o dia do slot)
+
+NORMALIZAÇÃO DE TELEFONE:
+Antes de create_client, confirme o número com o usuário. A tool create_client usa só dígitos (ex.: 5511999999999).
+
+CAMPANHA DE REATIVAÇÃO:
+1. Identificar alvos (get_high_value_lost_clients ou lista na conversa)
+2. Redigir texto natural
+3. create_campaign_draft com client_ids e message_template — o painel mostrará envio pelo WhatsApp conectado (Baileys)
+
+CASO COMPLETO (ex.: "agenda banho para o Rex do João amanhã"):
+search_clients → get_client_pets_for_scheduling → list_active_services + get_available_times → create_manual_appointment. Não repetir o que o usuário já informou.`
 }
 
-/** Frases alinhadas às tools em brain.tools.ts (quando não há alertas suficientes). */
+/** Frases alinhadas às tools em brain.tools.ts e ao resumo operacional do petshop (quando não há alertas suficientes). */
 export const BRAIN_SUGGESTION_FALLBACKS = [
-  'Como está minha agenda de hoje, com quem já confirmou?',
-  'Quais agendamentos estão previstos para os próximos 7 dias?',
-  'Quanto faturei mês a mês nos últimos 6 meses?',
-  'Quais serviços mais faturam e qual o ticket médio de cada um?',
-  'Há vagas no hotel ou na creche nos próximos 14 dias?',
-  'Quais clientes estão há mais de 45 dias sem agendar?',
+  'Quem está na minha agenda hoje e o que já está confirmado?',
+  'Quais agendamentos pendentes nos próximos 7 dias?',
+  'Como foi meu faturamento mês a mês nos últimos 6 meses?',
+  'Quais serviços mais puxam o faturamento e qual o ticket médio?',
+  'Tem vaga de hotel e creche nos próximos 14 dias?',
+  'Quais tutores sumiram há mais de 45 dias para eu planejar reativação?',
   'Quais pets fazem aniversário nos próximos 7 dias?',
-  'Quais clientes aparecem com risco alto de churn neste mês?',
-  'Quais atendimentos concluídos estão sem valor registrado?',
-  'Liste os clientes que a dashboard marca como sumidos (mais de 60 dias).',
+  'Quem aparece com risco alto de churn neste mês segundo o sentimento?',
+  'Tenho atendimentos concluídos sem valor registrado no caixa?',
+  'Qual minha conversão pelo WhatsApp e quantos clientes ativos eu tenho?',
 ] as const
 
 function shuffle<T>(arr: T[]): T[] {

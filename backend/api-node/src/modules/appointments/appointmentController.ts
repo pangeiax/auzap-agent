@@ -1,6 +1,9 @@
 import { Request, Response } from 'express'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
+import { isUuidString, parseOptionalUuid } from '../../lib/uuidValidation'
+import { computeAvailableSlotsResponse } from './availableSlotsQuery'
+import { createManualScheduleAppointment } from './manualScheduleCore'
 
 function petSizeNeedsLargeDurationMultiplier(
   size: string | null | undefined,
@@ -183,8 +186,20 @@ export async function listAppointments(req: Request, res: Response) {
 
     const where: any = { companyId }
     if (status) where.status = status
-    if (client_id) where.clientId = client_id
-    if (pet_id) where.petId = pet_id
+    if (client_id) {
+      const cid = String(client_id).trim()
+      if (!isUuidString(cid)) {
+        return res.status(400).json({ error: 'client_id deve ser um UUID válido' })
+      }
+      where.clientId = cid
+    }
+    if (pet_id) {
+      const pid = String(pet_id).trim()
+      if (!isUuidString(pid)) {
+        return res.status(400).json({ error: 'pet_id deve ser um UUID válido' })
+      }
+      where.petId = pid
+    }
     if (phone) {
       where.client = {
         is: {
@@ -244,6 +259,7 @@ export async function getAvailableDates(req: Request, res: Response) {
 
     const serviceIdRaw = req.query.service_id
     const petIdRaw = req.query.pet_id ? String(req.query.pet_id) : undefined
+    const petId = parseOptionalUuid(petIdRaw)
 
     let specialtyId: string | undefined
     let needConsecutivePair = false
@@ -255,9 +271,9 @@ export async function getAvailableDates(req: Request, res: Response) {
       })
       specialtyId = service?.specialtyId ?? undefined
 
-      if (petIdRaw && service) {
+      if (petId && service) {
         const pet = await prisma.petshopPet.findFirst({
-          where: { id: petIdRaw, companyId },
+          where: { id: petId, companyId },
           select: { size: true },
         })
         needConsecutivePair = requiresConsecutiveSlotsBooking({
@@ -348,94 +364,21 @@ export async function getAvailableSlots(req: Request, res: Response) {
       return res.status(400).json({ error: 'date deve estar no formato YYYY-MM-DD' })
     }
 
-    const [year, month, day] = date.split('-').map(Number)
-    const slotDate = new Date(Date.UTC(year!, month! - 1, day!))
-
     const serviceIdRaw = req.query.service_id
     const petIdRaw = req.query.pet_id ? String(req.query.pet_id) : undefined
 
-    let specialtyId: string | undefined
-    let needConsecutivePair = false
-
-    if (serviceIdRaw) {
-      const service = await prisma.petshopService.findFirst({
-        where: { id: Number(serviceIdRaw), companyId },
-        select: { specialtyId: true, durationMultiplierLarge: true },
-      })
-      specialtyId = service?.specialtyId ?? undefined
-
-      if (petIdRaw && service) {
-        const pet = await prisma.petshopPet.findFirst({
-          where: { id: petIdRaw, companyId },
-          select: { size: true },
-        })
-        needConsecutivePair = requiresConsecutiveSlotsBooking({
-          durationMultiplierLarge: service.durationMultiplierLarge,
-          petSize: pet?.size,
-        })
-      }
-    }
-
-    const whereClause: Prisma.PetshopSlotWhereInput = {
+    const result = await computeAvailableSlotsResponse(
       companyId,
-      slotDate,
-      ...(specialtyId ? { specialtyId } : {}),
-    }
-
-    // Para validar pares (próximo slot pode estar bloqueado/lotado), buscamos todos os slots do dia+especialidade.
-    const allDaySlots = await prisma.petshopSlot.findMany({
-      where: whereClause,
-      orderBy: { slotTime: 'asc' },
-    })
-
-    const ordered = orderedSlotsSameDaySpecialty(allDaySlots as SlotRow[])
-
-    const bookableIds = new Set(
-      ordered
-        .filter((s) => !s.isBlocked && s.maxCapacity - s.usedCapacity > 0)
-        .map((s) => s.id),
+      date,
+      serviceIdRaw as string | undefined,
+      petIdRaw,
     )
 
-    let candidateStarters = ordered.filter((s) => bookableIds.has(s.id))
-
-    if (needConsecutivePair && specialtyId) {
-      candidateStarters = candidateStarters.filter((slot) => {
-        const next = findNextSlotInOrderedDay(ordered, slot.id)
-        if (!next) return false
-        if (next.isBlocked) return false
-        if (next.maxCapacity - next.usedCapacity <= 0) return false
-        return true
-      })
+    if ('error' in result) {
+      return res.status(400).json({ error: result.error })
     }
 
-    const availableSlots = candidateStarters.map((slot) => {
-      const next =
-        needConsecutivePair && specialtyId
-          ? findNextSlotInOrderedDay(ordered, slot.id)
-          : null
-      const remFirst = slot.maxCapacity - slot.usedCapacity
-      const remSecond = next ? next.maxCapacity - next.usedCapacity : remFirst
-      return {
-        slot_id: slot.id,
-        specialty_id: slot.specialtyId,
-        time: formatTimeLabel(slot.slotTime),
-        capacity: slot.maxCapacity,
-        remaining_capacity:
-          next != null ? Math.min(remFirst, remSecond) : remFirst,
-        ...(next
-          ? {
-              uses_consecutive_slots: true as const,
-              paired_slot_time: formatTimeLabel(next.slotTime),
-            }
-          : {}),
-      }
-    })
-
-    res.json({
-      date,
-      available_slots: availableSlots,
-      total_available: availableSlots.length,
-    })
+    res.json(result)
   } catch (error) {
     console.error('Error getting available slots:', error)
     res.status(500).json({ error: 'Failed to get available slots' })
@@ -446,7 +389,10 @@ export async function getAvailableSlots(req: Request, res: Response) {
 export async function getAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
-    const id = req.params.id!
+    const id = req.params.id!.trim()
+    if (!isUuidString(id)) {
+      return res.status(400).json({ error: 'id do agendamento deve ser um UUID válido' })
+    }
 
     const appointment = await prisma.petshopAppointment.findUnique({
       where: { id },
@@ -476,7 +422,6 @@ export async function scheduleAppointment(req: Request, res: Response) {
       slot_id,
       scheduled_at,
       notes,
-      status = 'pending',
     } = req.body
 
     if (!client_id || !pet_id || !service_id || !scheduled_at) {
@@ -485,149 +430,40 @@ export async function scheduleAppointment(req: Request, res: Response) {
       })
     }
 
-    // Validate slot and check remaining capacity
     if (!slot_id) {
       return res.status(400).json({ error: 'slot_id é obrigatório' })
     }
 
-    const [service, pet] = await Promise.all([
-      prisma.petshopService.findFirst({
-        where: { id: Number(service_id), companyId },
-      }),
-      prisma.petshopPet.findFirst({ where: { id: pet_id, companyId } }),
-    ])
+    const scheduled_date = new Date(scheduled_at).toLocaleString('sv-SE', {
+      timeZone: 'America/Sao_Paulo',
+    }).slice(0, 10)
 
-    if (!service) {
-      return res.status(404).json({ error: 'Serviço não encontrado' })
-    }
-    if (!pet) {
-      return res.status(404).json({ error: 'Pet não encontrado' })
-    }
-
-    const slot = await prisma.petshopSlot.findUnique({ where: { id: slot_id } })
-    if (!slot || slot.companyId !== companyId) {
-      return res.status(404).json({ error: 'Horário não encontrado' })
-    }
-    if (slot.maxCapacity - slot.usedCapacity <= 0) {
-      return res.status(409).json({ error: 'Horário sem vagas disponíveis' })
-    }
-
-    const scheduledDate = new Date(scheduled_at)
-
-    const needDouble = requiresConsecutiveSlotsBooking({
-      durationMultiplierLarge: service.durationMultiplierLarge,
-      petSize: pet.size,
+    const result = await createManualScheduleAppointment(companyId, {
+      client_id,
+      pet_id,
+      service_id: Number(service_id),
+      slot_id,
+      scheduled_date,
+      notes,
     })
 
-    let secondSlot: (typeof slot) | null = null
-    if (needDouble) {
-      const daySlots = await prisma.petshopSlot.findMany({
-        where: {
-          companyId,
-          slotDate: slot.slotDate,
-          specialtyId: slot.specialtyId,
-        },
-        orderBy: { slotTime: 'asc' },
-      })
-      const ordered = orderedSlotsSameDaySpecialty(daySlots as SlotRow[])
-      secondSlot = findNextSlotInOrderedDay(ordered, slot_id) as typeof slot | null
-      if (!secondSlot) {
-        return res.status(409).json({
-          error:
-            'Este serviço exige dois horários consecutivos para pets G/GG; não há segundo horário disponível após o selecionado.',
-        })
-      }
-      if (secondSlot.isBlocked) {
-        return res.status(409).json({
-          error:
-            'O horário seguinte está bloqueado; escolha outro início de horário para pets G/GG.',
-        })
-      }
-      if (secondSlot.maxCapacity - secondSlot.usedCapacity <= 0) {
-        return res.status(409).json({
-          error:
-            'O horário seguinte está lotado; escolha outro início de horário para pets G/GG.',
-        })
-      }
+    if (!result.ok) {
+      const msg = result.message
+      const code =
+        msg.includes('não encontrado') || msg.includes('não coincide')
+          ? 404
+          : msg.includes('vagas') || msg.includes('lotado') || msg.includes('bloqueado') || msg.includes('consecutivos')
+            ? 409
+            : 400
+      return res.status(code).json({ error: msg })
     }
 
-    let priceCharged: number | null = null
-    const priceBySize = service.priceBySize as Record<string, number> | null
-    if (priceBySize && pet.size && priceBySize[pet.size] != null) {
-      priceCharged = Number(priceBySize[pet.size])
-    } else if (service.price != null) {
-      priceCharged = Number(service.price)
-    }
+    const appointment = await prisma.petshopAppointment.findUniqueOrThrow({
+      where: { id: result.appointment_id },
+      include: appointmentInclude,
+    })
 
-    if (!needDouble) {
-      const appointment = await prisma.petshopAppointment.create({
-        data: {
-          companyId,
-          clientId: client_id,
-          petId: pet_id,
-          serviceId: Number(service_id),
-          slotId: slot_id,
-          scheduledDate,
-          status,
-          notes: notes ?? null,
-          priceCharged,
-          source: 'manual',
-        },
-        include: appointmentInclude,
-      })
-
-      return res.status(201).json(shapeAppointment(appointment))
-    }
-
-    // Transação com timeout maior: 3 writes + 1 read com joins; Docker/DB lento pode estourar 5s default.
-    const appointmentPrimary = await prisma.$transaction(
-      async (tx) => {
-        const primary = await tx.petshopAppointment.create({
-          data: {
-            companyId,
-            clientId: client_id,
-            petId: pet_id,
-            serviceId: Number(service_id),
-            slotId: slot_id,
-            scheduledDate,
-            status,
-            notes: notes ?? null,
-            priceCharged,
-            source: 'manual',
-          },
-          select: { id: true },
-        })
-
-        const secondary = await tx.petshopAppointment.create({
-          data: {
-            companyId,
-            clientId: client_id,
-            petId: pet_id,
-            serviceId: Number(service_id),
-            slotId: secondSlot!.id,
-            scheduledDate,
-            status,
-            notes: mergeNotesWithDoublePair(notes, primary.id),
-            priceCharged,
-            source: 'manual',
-          },
-          select: { id: true },
-        })
-
-        await tx.petshopAppointment.update({
-          where: { id: primary.id },
-          data: { notes: mergeNotesWithDoublePair(notes, secondary.id) },
-        })
-
-        return tx.petshopAppointment.findUniqueOrThrow({
-          where: { id: primary.id },
-          include: appointmentInclude,
-        })
-      },
-      { maxWait: 10_000, timeout: 20_000 },
-    )
-
-    res.status(201).json(shapeAppointment(appointmentPrimary))
+    return res.status(201).json(shapeAppointment(appointment))
   } catch (error) {
     console.error('Error scheduling appointment:', error)
     res.status(500).json({ error: 'Failed to schedule appointment' })

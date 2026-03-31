@@ -1,4 +1,7 @@
 import { prisma } from '../../lib/prisma'
+import { isUuidString, parseOptionalUuid } from '../../lib/uuidValidation'
+import { computeAvailableSlotsResponse } from '../appointments/availableSlotsQuery'
+import { createManualScheduleAppointment } from '../appointments/manualScheduleCore'
 
 function todayBR(): string {
   return new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
@@ -122,7 +125,177 @@ export const TOOLS = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
-] as const
+  {
+    type: 'function',
+    function: {
+      name: 'get_cancellations_analysis',
+      description:
+        'Retorna análise de cancelamentos recentes. Use quando o usuário perguntar sobre cancelamentos ou quando houver alerta de cancelamentos em série.',
+      parameters: {
+        type: 'object',
+        properties: {
+          days: { type: 'number', description: 'Janela em dias. Padrão: 7.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_revenue_forecast',
+      description:
+        'Projeta o faturamento do mês atual com base no ritmo de agendamentos concluídos até hoje. Use para projeção, meta ou tendência do mês.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_best_clients',
+      description:
+        'Retorna ranking dos melhores clientes por valor gasto e frequência de visitas (concluídos).',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Quantidade de clientes. Padrão: 5.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_idle_slots',
+      description:
+        'Identifica dias da semana com menor volume de agendamentos nos últimos 60 dias. Use para promoção ou ajuste de capacidade.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_high_value_lost_clients',
+      description:
+        'Clientes com histórico de gasto que estão ausentes há mais de X dias. Ideal para campanhas de reativação.',
+      parameters: {
+        type: 'object',
+        properties: {
+          min_days: { type: 'number', description: 'Mínimo de dias ausente. Padrão: 30.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_campaign_draft',
+      description:
+        'Monta draft de campanha de reativação: retorna JSON type campaign_draft para o painel enviar pelo WhatsApp. Use com client_ids e message_template.',
+      parameters: {
+        type: 'object',
+        properties: {
+          client_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'IDs (UUID) dos clientes alvo.',
+          },
+          message_template: { type: 'string', description: 'Texto sugerido da mensagem.' },
+        },
+        required: ['client_ids', 'message_template'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_clients',
+      description: 'Busca clientes pelo nome (agendamento manual).',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string', description: 'Nome parcial ou completo.' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_client',
+      description:
+        'Cria cliente novo. Telefone em dígitos (ex.: 5511999999999). Email opcional.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          phone: { type: 'string' },
+          email: { type: 'string' },
+        },
+        required: ['name', 'phone'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_client_pets_for_scheduling',
+      description: 'Lista pets ativos do cliente para agendamento manual.',
+      parameters: {
+        type: 'object',
+        properties: { client_id: { type: 'string', description: 'UUID do cliente.' } },
+        required: ['client_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_active_services',
+      description:
+        'Lista serviços ativos com id numérico e nome. Use para obter service_id antes de get_available_times.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_available_times',
+      description:
+        'Horários livres em uma data (YYYY-MM-DD). Passe service_id e, se possível, pet_id para regras de porte G/GG.',
+      parameters: {
+        type: 'object',
+        properties: {
+          target_date: { type: 'string', description: 'Data YYYY-MM-DD.' },
+          service_id: { type: 'number', description: 'ID do serviço.' },
+          pet_id: { type: 'string', description: 'UUID do pet (opcional mas recomendado).' },
+        },
+        required: ['target_date', 'service_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_manual_appointment',
+      description:
+        'Cria agendamento na plataforma após confirmar slot com get_available_times. Retorna JSON type appointment_created.',
+      parameters: {
+        type: 'object',
+        properties: {
+          client_id: { type: 'string' },
+          pet_id: { type: 'string' },
+          service_id: { type: 'number' },
+          slot_id: { type: 'string' },
+          scheduled_date: { type: 'string', description: 'YYYY-MM-DD (deve bater com a data do slot).' },
+          notes: { type: 'string' },
+        },
+        required: ['client_id', 'pet_id', 'service_id', 'slot_id', 'scheduled_date'],
+      },
+    },
+  },
+]
 
 export async function executeTool(name: string, args: any, companyId: number): Promise<string> {
   switch (name) {
@@ -264,7 +437,7 @@ export async function executeTool(name: string, args: any, companyId: number): P
 
     case 'get_client_info': {
       const searchName = `%${args.name}%`
-      const clients = await prisma.$queryRaw<Array<{ id: number; name: string; phone: string; last_message_at: string | null }>>`
+      const clients = await prisma.$queryRaw<Array<{ id: string; name: string | null; phone: string; last_message_at: string | null }>>`
         SELECT id, name, phone, last_message_at
         FROM clients
         WHERE company_id = ${companyId}
@@ -278,7 +451,7 @@ export async function executeTool(name: string, args: any, companyId: number): P
       const pets = await prisma.$queryRaw<Array<{ name: string; species: string; breed: string | null; size: string | null }>>`
         SELECT name, species, breed, size
         FROM petshop_pets
-        WHERE client_id = ${client.id}
+        WHERE client_id = ${client.id}::uuid
           AND is_active = true
       `
 
@@ -286,7 +459,7 @@ export async function executeTool(name: string, args: any, companyId: number): P
         SELECT scheduled_date, service_name, status
         FROM dashboard_appointment_metrics
         WHERE company_id = ${companyId}
-          AND client_id = ${client.id}
+          AND client_id = ${client.id}::uuid
           AND status = 'completed'
         ORDER BY scheduled_date DESC
         LIMIT 3
@@ -446,6 +619,365 @@ export async function executeTool(name: string, args: any, companyId: number): P
           const date = new Date(String(a.scheduled_date) + 'T12:00:00').toLocaleDateString('pt-BR')
           return `• ${date} — ${clientMap[a.client_id] ?? 'Cliente'}`
         }).join('\n')
+    }
+
+    case 'get_cancellations_analysis': {
+      const days = args.days ?? 7
+      const since = new Date()
+      since.setDate(since.getDate() - days)
+      const sinceIso = since.toISOString()
+
+      const rows = await prisma.$queryRaw<
+        Array<{ scheduled_date: Date | string; cancel_reason: string | null; service_id: number; client_id: string }>
+      >`
+        SELECT scheduled_date, cancel_reason, service_id, client_id
+        FROM petshop_appointments
+        WHERE company_id = ${companyId}
+          AND status = 'cancelled'
+          AND cancelled_at IS NOT NULL
+          AND cancelled_at >= ${sinceIso}::timestamptz
+      `
+
+      if (!rows || rows.length === 0) return `Nenhum cancelamento nos últimos ${days} dias.`
+
+      const serviceIds = [...new Set(rows.map((d) => d.service_id))]
+      const services = await prisma.petshopService.findMany({
+        where: { id: { in: serviceIds }, companyId },
+        select: { id: true, name: true },
+      })
+      const svcMap = Object.fromEntries(services.map((s) => [s.id, s.name]))
+
+      const byReason: Record<string, number> = {}
+      for (const a of rows) {
+        const r = a.cancel_reason || 'Motivo não informado'
+        byReason[r] = (byReason[r] ?? 0) + 1
+      }
+
+      const lines = Object.entries(byReason)
+        .sort(([, a], [, b]) => b - a)
+        .map(([reason, count]) => `• ${reason}: ${count}x`)
+
+      return `${rows.length} cancelamento(s) nos últimos ${days} dias:\n${lines.join('\n')}\n\nServiços: ${rows
+        .map((a) => svcMap[a.service_id] ?? `#${a.service_id}`)
+        .filter((v, i, arr) => arr.indexOf(v) === i)
+        .join(', ')}`
+    }
+
+    case 'get_revenue_forecast': {
+      const today = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
+      const startOfMonth = `${today.slice(0, 7)}-01`
+      const dayOfMonth = parseInt(today.slice(8, 10), 10)
+      const y = parseInt(today.slice(0, 4), 10)
+      const m = parseInt(today.slice(5, 7), 10)
+      const daysInMonth = new Date(y, m, 0).getDate()
+
+      const appts = await prisma.$queryRaw<Array<{ price_charged: unknown; service_id: number }>>`
+        SELECT price_charged, service_id
+        FROM petshop_appointments
+        WHERE company_id = ${companyId}
+          AND status = 'completed'
+          AND scheduled_date >= ${startOfMonth}::date
+          AND scheduled_date <= ${today}::date
+      `
+
+      const svcList = await prisma.petshopService.findMany({
+        where: { companyId },
+        select: { id: true, price: true },
+      })
+      const svcMap = Object.fromEntries(svcList.map((s) => [s.id, Number(s.price ?? 0)]))
+
+      const realized = (appts ?? []).reduce((sum, a) => {
+        return sum + Number(a.price_charged ?? svcMap[a.service_id] ?? 0)
+      }, 0)
+
+      const dailyRate = dayOfMonth > 0 ? realized / dayOfMonth : 0
+      const projected = dailyRate * daysInMonth
+
+      return `Faturamento realizado até hoje (dia ${dayOfMonth}): R$ ${realized.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\nProjeção para o mês (${daysInMonth} dias): R$ ${projected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\nRitmo diário atual: R$ ${dailyRate.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/dia`
+    }
+
+    case 'get_best_clients': {
+      const limit = args.limit ?? 5
+      const appts = await prisma.$queryRaw<Array<{ client_id: string; price_charged: unknown; service_id: number }>>`
+        SELECT client_id, price_charged, service_id
+        FROM petshop_appointments
+        WHERE company_id = ${companyId}
+          AND status = 'completed'
+      `
+
+      const svcList = await prisma.petshopService.findMany({
+        where: { companyId },
+        select: { id: true, price: true },
+      })
+      const svcMap = Object.fromEntries(svcList.map((s) => [s.id, Number(s.price ?? 0)]))
+
+      const clientStats: Record<string, { total: number; visits: number }> = {}
+      for (const a of appts ?? []) {
+        if (!clientStats[a.client_id]) clientStats[a.client_id] = { total: 0, visits: 0 }
+        clientStats[a.client_id]!.total += Number(a.price_charged ?? svcMap[a.service_id] ?? 0)
+        clientStats[a.client_id]!.visits++
+      }
+
+      const top = Object.entries(clientStats)
+        .sort(([, a], [, b]) => b.total - a.total)
+        .slice(0, limit)
+
+      const clientIds = top.map(([id]) => id)
+      if (clientIds.length === 0) return 'Sem clientes com histórico de atendimentos concluídos.'
+
+      const clients = await prisma.client.findMany({
+        where: { id: { in: clientIds }, companyId },
+        select: { id: true, name: true },
+      })
+      const clientMap = Object.fromEntries(clients.map((c) => [c.id, c.name]))
+
+      return (
+        `Top ${limit} clientes por faturamento:\n` +
+        top
+          .map(
+            ([id, s], i) =>
+              `${i + 1}. ${clientMap[id] ?? 'Cliente'} — R$ ${s.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${s.visits} visitas)`,
+          )
+          .join('\n')
+      )
+    }
+
+    case 'get_idle_slots': {
+      const since = new Date()
+      since.setDate(since.getDate() - 60)
+      const sinceStr = since.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
+
+      const data = await prisma.$queryRaw<Array<{ scheduled_date: Date | string }>>`
+        SELECT scheduled_date
+        FROM petshop_appointments
+        WHERE company_id = ${companyId}
+          AND status <> 'cancelled'
+          AND scheduled_date >= ${sinceStr}::date
+      `
+
+      if (!data || data.length === 0) return 'Dados insuficientes para análise de ociosidade.'
+
+      const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+      const byDay: Record<number, number> = {}
+      for (const a of data) {
+        const dstr = typeof a.scheduled_date === 'string' ? a.scheduled_date : a.scheduled_date.toISOString().slice(0, 10)
+        const dow = new Date(`${dstr}T12:00:00`).getDay()
+        byDay[dow] = (byDay[dow] ?? 0) + 1
+      }
+
+      const sorted = Object.entries(byDay).sort(([, a], [, b]) => a - b)
+      const idle = sorted.slice(0, 3).map(
+        ([dow, count]) => `• ${DAYS[parseInt(dow, 10)]}: ${count} agendamentos nos últimos 60 dias`,
+      )
+
+      return `Dias com menor volume de agendamentos (últimos 60 dias):\n${idle.join('\n')}\n\nSugestão: considere promoções ou ajuste de capacidade nesses dias.`
+    }
+
+    case 'get_high_value_lost_clients': {
+      const minDays = args.min_days ?? 30
+
+      const appts = await prisma.$queryRaw<Array<{ client_id: string; price_charged: unknown; service_id: number }>>`
+        SELECT client_id, price_charged, service_id
+        FROM petshop_appointments
+        WHERE company_id = ${companyId}
+          AND status = 'completed'
+      `
+
+      const svcList = await prisma.petshopService.findMany({
+        where: { companyId },
+        select: { id: true, price: true },
+      })
+      const svcMap = Object.fromEntries(svcList.map((s) => [s.id, Number(s.price ?? 0)]))
+
+      const stats: Record<string, number> = {}
+      for (const a of appts ?? []) {
+        stats[a.client_id] = (stats[a.client_id] ?? 0) + Number(a.price_charged ?? svcMap[a.service_id] ?? 0)
+      }
+
+      const lost = await prisma.$queryRaw<
+        Array<{ client_id: string; client_name: string | null; days_absent: number; phone: string | null }>
+      >`
+        SELECT client_id, client_name, days_absent, phone
+        FROM dashboard_client_recurrence
+        WHERE company_id = ${companyId}
+          AND days_absent >= ${minDays}
+      `
+
+      if (!lost || lost.length === 0) return `Nenhum cliente sumido há mais de ${minDays} dias.`
+
+      const ranked = lost
+        .map((c) => ({ ...c, total: stats[c.client_id] ?? 0 }))
+        .filter((c) => c.total > 0)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10)
+
+      if (ranked.length === 0) return 'Nenhum cliente de alto valor sumido no período.'
+
+      return ranked
+        .map(
+          (c) =>
+            `• ${c.client_name ?? 'Cliente'} — R$ ${c.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} histórico — sumido há ${c.days_absent} dias — tel: ${c.phone ?? '—'}`,
+        )
+        .join('\n')
+    }
+
+    case 'create_campaign_draft': {
+      const client_ids: string[] = args.client_ids ?? []
+      const message_template: string = args.message_template ?? ''
+      if (!client_ids.length) return 'Nenhum cliente selecionado para a campanha.'
+
+      const found = await prisma.client.findMany({
+        where: { companyId, id: { in: client_ids } },
+        select: { id: true, name: true, phone: true },
+      })
+
+      if (!found.length) return 'Nenhum cliente encontrado com os IDs fornecidos.'
+
+      return JSON.stringify({
+        type: 'campaign_draft',
+        clients: found.map((c) => ({
+          id: c.id,
+          name: c.name ?? 'Cliente',
+          phone: c.phone,
+        })),
+        message: message_template,
+        total: found.length,
+      })
+    }
+
+    case 'search_clients': {
+      const q = String(args.name ?? '').trim()
+      if (!q) return JSON.stringify({ type: 'clients_not_found', name: args.name })
+
+      const data = await prisma.client.findMany({
+        where: {
+          companyId,
+          name: { contains: q, mode: 'insensitive' },
+        },
+        select: { id: true, name: true, phone: true },
+        take: 5,
+      })
+
+      if (!data.length) return JSON.stringify({ type: 'clients_not_found', name: q })
+
+      return JSON.stringify({
+        type: 'clients_found',
+        clients: data.map((c) => ({ id: c.id, name: c.name ?? '', phone: c.phone })),
+      })
+    }
+
+    case 'create_client': {
+      const phone = String(args.phone).replace(/\D/g, '')
+      if (!phone) return 'Telefone inválido após normalização.'
+
+      try {
+        const data = await prisma.client.create({
+          data: {
+            companyId,
+            name: args.name,
+            phone,
+            email: args.email?.trim() || null,
+            source: 'manual',
+            conversationStage: 'initial',
+          },
+          select: { id: true, name: true, phone: true },
+        })
+
+        return JSON.stringify({
+          type: 'client_created',
+          client: { id: data.id, name: data.name, phone: data.phone },
+        })
+      } catch (e: any) {
+        if (e?.code === 'P2002') {
+          return 'Já existe cliente com este telefone nesta empresa. Use search_clients para localizar.'
+        }
+        return `Erro ao criar cliente: ${e?.message ?? String(e)}`
+      }
+    }
+
+    case 'get_client_pets_for_scheduling': {
+      const clientIdRaw = String(args.client_id ?? '').trim()
+      if (!isUuidString(clientIdRaw)) {
+        return JSON.stringify({
+          type: 'invalid_client_id',
+          message:
+            'client_id deve ser o UUID do cliente (campo id retornado por search_clients), não o nome nem o telefone.',
+        })
+      }
+      const pets = await prisma.petshopPet.findMany({
+        where: {
+          companyId,
+          clientId: clientIdRaw,
+          isActive: true,
+        },
+        select: { id: true, name: true, species: true, breed: true, size: true },
+      })
+
+      if (!pets.length) return JSON.stringify({ type: 'no_pets', client_id: clientIdRaw })
+
+      return JSON.stringify({
+        type: 'pets_found',
+        pets: pets.map((p) => ({
+          id: p.id,
+          name: p.name,
+          species: p.species,
+          breed: p.breed,
+          size: p.size,
+        })),
+      })
+    }
+
+    case 'list_active_services': {
+      const rows = await prisma.petshopService.findMany({
+        where: { companyId, isActive: true },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      })
+      if (!rows.length) return 'Nenhum serviço ativo cadastrado.'
+      return rows.map((s) => `• id ${s.id}: ${s.name}`).join('\n')
+    }
+
+    case 'get_available_times': {
+      const target_date = String(args.target_date ?? '')
+      const service_id = Number(args.service_id)
+      const petRaw = args.pet_id != null && args.pet_id !== '' ? String(args.pet_id) : undefined
+      const pet_id = parseOptionalUuid(petRaw)
+
+      if (!Number.isFinite(service_id)) return 'Informe service_id numérico válido (use list_active_services).'
+      if (petRaw && !pet_id) {
+        return 'pet_id inválido: use o UUID do pet (campo id de get_client_pets_for_scheduling), não o nome do animal.'
+      }
+
+      const result = await computeAvailableSlotsResponse(companyId, target_date, service_id, pet_id)
+      if ('error' in result) return `Erro: ${result.error}`
+      return JSON.stringify({
+        type: 'available_times',
+        date: result.date,
+        available_times: result.available_slots,
+        total_available: result.total_available,
+      })
+    }
+
+    case 'create_manual_appointment': {
+      const out = await createManualScheduleAppointment(companyId, {
+        client_id: String(args.client_id),
+        pet_id: String(args.pet_id),
+        service_id: Number(args.service_id),
+        slot_id: String(args.slot_id),
+        scheduled_date: String(args.scheduled_date),
+        notes: args.notes ?? null,
+      })
+
+      if (!out.ok) return `Erro ao criar agendamento: ${out.message}`
+
+      return JSON.stringify({
+        type: 'appointment_created',
+        appointment_id: out.appointment_id,
+        scheduled_date: out.scheduled_date,
+        service_id: args.service_id,
+        pet_id: args.pet_id,
+        client_id: args.client_id,
+      })
     }
 
     default:
