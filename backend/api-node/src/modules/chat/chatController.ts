@@ -5,6 +5,12 @@ import { prisma } from '../../lib/prisma'
 const CHAT_BUSINESS_MODEL =
   process.env.OPENAI_CHAT_BUSINESS_MODEL?.trim() || 'gpt-5-mini'
 
+function getMaxTokensParam(model: string, value: number): Record<string, number> {
+  return model.startsWith('gpt-5')
+    ? { max_completion_tokens: value }
+    : { max_tokens: value }
+}
+
 export async function chatBusiness(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
@@ -140,7 +146,7 @@ ${servicesText}
         model: CHAT_BUSINESS_MODEL,
         messages,
         temperature: 0.7,
-        max_tokens: 1000,
+        ...getMaxTokensParam(CHAT_BUSINESS_MODEL, 1000),
       }),
     })
 

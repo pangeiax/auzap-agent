@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma'
 import type { SentimentResult } from './sentiment.types'
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
-const SENTIMENT_MODEL = process.env.OPENAI_SENTIMENT_MODEL?.trim() || 'gpt-5-mini'
+const SENTIMENT_MODEL = 'gpt-4o-mini'
 
 const SYSTEM_PROMPT = `Você é um analista de relacionamento com clientes de petshops.
 Analise as mensagens abaixo e retorne SOMENTE um JSON válido, sem texto antes ou depois, sem markdown, sem blocos de código.
