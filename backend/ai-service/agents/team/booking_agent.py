@@ -5,6 +5,7 @@ from config import OPENAI_MODEL, OPENAI_MODEL_ADVANCED
 from prompts.specialists.booking import build_booking_prompt
 from tools.booking_tools import build_booking_tools
 from tools.client_tools import build_client_tools
+from tools.escalation_tools import build_escalation_tools
 from utils.model_utils import get_max_tokens_param
 
 
@@ -16,14 +17,16 @@ def build_booking_agent(context: dict, router_ctx: dict) -> Agent:
     if router_says_conversation_only(router_ctx) and stage_upper == "COMPLETED":
         tools = []
     else:
-        tools = build_booking_tools(company_id, client_id) + build_client_tools(
-            company_id, client_id
+        tools = (
+            build_booking_tools(company_id, client_id)
+            + build_client_tools(company_id, client_id)
+            + build_escalation_tools(company_id, client_id)
         )
 
     return Agent(
         name="Booking Agent",
-        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, **get_max_tokens_param(OPENAI_MODEL_ADVANCED, 2000)),
+        model=OpenAIChat(id=OPENAI_MODEL_ADVANCED, **get_max_tokens_param(OPENAI_MODEL_ADVANCED, 5000)),
         instructions=build_booking_prompt(context, router_ctx),
         tools=tools,
-        tool_call_limit=4,
+        tool_call_limit=7,
     )

@@ -15,5 +15,6 @@ def build_escalation_agent(context: dict, router_ctx: dict) -> Agent:
         model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 500)),
         instructions=build_escalation_prompt(context, router_ctx),
         tools=build_escalation_tools(company_id, client_id),
-        tool_call_limit=1,
+        # Tool + mensagem curta ao cliente após success
+        tool_call_limit=2,
     )

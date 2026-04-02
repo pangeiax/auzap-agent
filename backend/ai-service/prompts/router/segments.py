@@ -36,6 +36,8 @@ ROUTER_STATIC_B_TEMPLATE = """━━━ REGRAS-CHAVE DE ROTEAMENTO ━━━
 • Texto de cadastro dizendo "especialista", "equipe", "presencial" ou "falar com alguém" NÃO aciona escalation_agent por si só.
 • "Cadastrar banho/tosa/hidratação" significa AGENDAR serviço → `booking_agent`, nunca cadastro de pet.
 • A intenção principal da MENSAGEM ATUAL manda mais que o histórico, salvo continuidade óbvia do mesmo fluxo.
+• **Serviço (`service`)**: se o cliente **corrigir** ou **trocar** o serviço («é corte de unha», «quero agendar hidratação»), atualize `service` para o **nome exato do catálogo**. Em mensagens só com **horário** ou **sim** (sem novo serviço), **mantenha** o `service` já acordado no turno anterior — **não** volte ao serviço de uma remarcação antiga se o fluxo atual já mudou.
+• **Remarcar** (só data/hora do **mesmo** compromisso) ≠ **agendar outro serviço**: no primeiro caso mantenha o serviço do compromisso em `get_upcoming_appointments`; no segundo, `service` = o que o cliente pediu agora.
 
 ━━━ AGENTES ━━━
 `onboarding_agent`

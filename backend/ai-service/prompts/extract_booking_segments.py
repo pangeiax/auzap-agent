@@ -1,4 +1,8 @@
-"""Regenerate booking_prompt_rules_body.py from booking_prompt.py (optional maintenance)."""
+"""Legacy: regenerate booking_prompt_rules_body.py from an old inline booking_prompt layout.
+
+WARNING: booking_prompt_rules_body.py is now hand-maintained in sections.
+Running this script will OVERWRITE the reorganized file — only use after reconciling with the new structure.
+"""
 import json
 import re
 from pathlib import Path

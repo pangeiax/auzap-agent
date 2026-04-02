@@ -185,6 +185,54 @@ def _guardrail_booking(
     return result
 
 
+def _combine_recent_user_messages_for_service(
+    history: list, current_user_message: str, limit: int = 6
+) -> str:
+    msgs = [m.get("content") or "" for m in history if m.get("role") == "user"]
+    msgs = msgs[-limit:]
+    cur = (current_user_message or "").strip()
+    if cur and (not msgs or msgs[-1] != cur):
+        msgs.append(cur)
+    return " ".join(msgs).lower()
+
+
+def _user_stated_booking_service_keyword(combined_lower: str) -> str | None:
+    """Serviço que o cliente afirmou em texto recente (mais específico primeiro)."""
+    patterns = (
+        (r"\bcorte\s+de\s+unhas?\b", "corte de unha"),
+        (r"\bescova\w*\s+de\s+dentes?\b", "escovação de dentes"),
+        (r"\bhidrata\w*\b", "hidratação"),
+        (r"\bbenho\s+e\s+tosa\s+tesoura\b", "banho e tosa tesoura"),
+        (r"\bbenho\s+e\s+tosa\s+higi[eê]nica\b", "banho e tosa higiênica"),
+        (r"\bbenho\s+e\s+tosa\s+m[aá]quina\b", "banho e tosa máquina"),
+        (r"\bbenho\s+e\s+tosa\b", "banho e tosa"),
+        (r"\bbenho\b", "banho"),
+        (r"\btosa\b", "tosa"),
+        (r"\bconsulta\s+veterin\w*\b", "consulta veterinária"),
+        (r"\bconsulta\s+m[eé]dica\b", "consulta médica"),
+        (r"\bconsulta\b", "consulta"),
+        (r"\bvacina\b", "vacina"),
+        (r"\badestramento\b", "adestramento"),
+        (r"\bcirurgia\b", "cirurgia"),
+    )
+    for pat, label in patterns:
+        if re.search(pat, combined_lower, re.IGNORECASE):
+            return label
+    return None
+
+
+def _service_labels_compatible(a: str, b: str) -> bool:
+    al = (a or "").lower().strip()
+    bl = (b or "").lower().strip()
+    if not al or not bl:
+        return True
+    if al == bl:
+        return True
+    if al in bl or bl in al:
+        return True
+    return False
+
+
 def _guardrail_service_consistency(
     specialist_input: str,
     router_ctx: dict,
@@ -192,25 +240,76 @@ def _guardrail_service_consistency(
     current_user_message: str = "",
 ) -> str:
     """
-    Detecta quando o assistente estava ofertando horários para um serviço X e o router
-    extraiu um serviço Y diferente. Injeta o serviço correto para que o especialista
-    não confirme nem reagende o serviço errado.
-    Só injeta quando a mensagem **deste turno** parece ser seleção de horário.
-
-    O histórico passado ao /run não inclui a mensagem atual do cliente (ela vai só no
-    campo `message`); usar `current_user_message` evita tratar o turno anterior
-    (ex.: «às 7 e às 9») como se fosse «confirmo».
+    Alinha serviço ofertado nos slots com o Roteador e com correções explícitas do cliente.
+    Evita voltar ao «banho» de uma remarcação antiga depois que o cliente pediu «corte de unha».
     """
     last_user = (current_user_message or "").strip()
     if not last_user:
         last_user = next(
             (m["content"] for m in reversed(history) if m.get("role") == "user"), ""
         )
+    last_lower = last_user.lower()
+    router_service = (router_ctx.get("service") or "").strip().lower()
+    combined_user = _combine_recent_user_messages_for_service(
+        history, current_user_message, limit=6
+    )
+    user_kw = _user_stated_booking_service_keyword(combined_user)
+    active_service = _extract_active_service_from_last_slots_message(history)
+
+    # Cliente corrigiu o serviço — não forçar banner antigo de slots (ex. banho na remarcação)
+    if user_kw and active_service and not _service_labels_compatible(user_kw, active_service):
+        logger.info(
+            "GUARDRAIL serviço | cliente afirmou %r; banner antigo de slots era %r — não forçar banner",
+            user_kw,
+            active_service,
+        )
+        inj = [
+            "\n\n━━━ GUARDRAIL — SERVIÇO PELO CLIENTE ━━━",
+            f"Nas mensagens recentes o cliente deixou claro **{user_kw}**.",
+            f"**Não** trate como **{active_service}** só porque isso apareceu numa oferta de horários anterior.",
+        ]
+        if router_service and _service_labels_compatible(router_service, user_kw):
+            inj.append(
+                f"O Roteador indica serviço alinhado ('{router_service}'). "
+                "Use **get_services** + **get_available_times** com o **service_id** desse nome."
+            )
+        elif router_service and not _service_labels_compatible(router_service, user_kw):
+            inj.append(
+                f"Priorize o pedido do cliente (**{user_kw}**), não «{router_service}» se conflitar."
+            )
+        else:
+            inj.append(
+                "Resolva o nome exato em **get_services** e siga com esse **service_id**."
+            )
+        inj.append(
+            "Se for **só remarcar** o mesmo compromisso já existente, use **reschedule_appointment** "
+            "com o **appointment_id** desse serviço; se for **outro serviço** (novo), use **create_appointment** "
+            "— não misture os dois."
+        )
+        return specialist_input + "\n".join(inj)
+
+    # Turno só com horário: roteador já atualizou o serviço — não sobrescrever com banner velho
+    if (
+        _message_looks_like_time_selection(last_user)
+        and router_service
+        and active_service
+        and router_service != active_service
+    ):
+        logger.info(
+            "GUARDRAIL serviço | priorizando router_ctx.service=%r sobre banner %r (só horário)",
+            router_service,
+            active_service,
+        )
+        inj = [
+            "\n\n━━━ GUARDRAIL — SERVIÇO (ROTEADOR) ━━━",
+            f"Serviço vigente: **{router_service}** (Roteador).",
+            f"Ignore ofertas antigas que cite só **{active_service}** se o cliente já mudou de serviço antes.",
+            "Use **get_available_times** e o resumo com **esse** serviço.",
+        ]
+        return specialist_input + "\n".join(inj)
+
     if not _message_looks_like_time_selection(last_user):
         return specialist_input
-
-    router_service = (router_ctx.get("service") or "").strip().lower()
-    last_lower = last_user.lower()
 
     # Cliente citando dois serviços no mesmo turno — não forçar um único serviço do histórico
     if re.search(
@@ -235,7 +334,6 @@ def _guardrail_service_consistency(
         )
         return specialist_input
 
-    active_service = _extract_active_service_from_last_slots_message(history)
     if not active_service:
         return specialist_input
 
@@ -1296,14 +1394,16 @@ def _extract_active_service_from_last_slots_message(history: list) -> str | None
     Retorna None se não encontrar evidência clara.
     """
     service_patterns = [
+        (r"\b(corte\s+de\s+unhas?)\b", 1),
+        (r"\b(escova\w*\s+de\s+dentes?)\b", 1),
         # "para a hidratação", "para o banho", "para a tosa", etc.
         (r"\bpara\s+(?:a|o)\s+(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*)", 1),
         # "horários para hidratação", "horários para banho"
-        (r"\bhor[aá]rios?\s+para\s+(?:a?\s*)?(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*)", 1),
+        (r"\bhor[aá]rios?\s+para\s+(?:a?\s*)?(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*|corte\s+de\s+unhas?)", 1),
         # "da hidratação", "do banho" (quando fala de reagendar)
-        (r"\b(?:da|do)\s+(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*)\b", 1),
+        (r"\b(?:da|do)\s+(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*|corte\s+de\s+unhas?)\b", 1),
         # "a hidratação foi remarcada", "o banho ficou para"
-        (r"\b(?:a|o)\s+(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*)\s+(?:foi|ficou|está)", 1),
+        (r"\b(?:a|o)\s+(hidrata\w+|banho|tosa\w*|consulta\w*|vacina\w*|castração\w*|castrac\w*|corte\s+de\s+unhas?)\s+(?:foi|ficou|está)", 1),
     ]
 
     for msg in reversed(history):

@@ -93,7 +93,8 @@ def build_router_tools_instruction_block(router_ctx: dict) -> str:
             "Regra: NÃO chame get_services, get_client_pets, get_available_times, get_specialties, "
             "get_upcoming_appointments nem ferramentas de hospedagem/vagas neste turno. "
             "Responda com cumprimento, encerramento ou conversa curta usando só histórico e contexto já dito. "
-            "Exceções: (1) escalate_to_human se o cliente pedir atendente/humano de forma clara. "
+            "Exceções: (1) escalate_to_human se o cliente pedir atendente/humano de forma clara, "
+            "ou após aceite de encaminhamento (já fez pré-requisito e quer serviço block_ai_schedule). "
             "(2) **booking_agent** e **health_agent**: se a mensagem atual citar **nome de pet** a validar, "
             "chame **get_client_pets** mesmo com [none] — o prompt do agente manda.\n"
         )
@@ -109,5 +110,6 @@ def build_router_tools_instruction_block(router_ctx: dict) -> str:
         "Regra: priorize chamar só o que este turno exige; não dispare leituras de catálogo ou agenda "
         "que não sejam coerentes com a lista. Se faltar um dado e a lista não incluir a categoria, "
         "pergunte ao cliente ou responda o que couber sem inventar números/datas/preços.\n"
-        "Exceção: escalate_to_human se o cliente pedir humano.\n"
+        "Exceção: escalate_to_human se o cliente pedir humano, ou (booking/health) após **aceite** ao encaminhamento "
+        "quando **já fez pré-requisito** e quer serviço **block_ai_schedule** (fluxo SERVIÇOS BLOQUEADOS).\n"
     )

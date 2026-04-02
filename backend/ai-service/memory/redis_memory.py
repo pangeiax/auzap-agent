@@ -7,9 +7,10 @@ import redis.asyncio as aioredis
 # TTL do histórico: 24 horas
 HISTORY_TTL = 60 * 60 * 24
 
-# Máximo de mensagens mantidas no contexto do agente
-MAX_HISTORY_MESSAGES = 20
+# Últimas N mensagens (cruas) enviadas ao modelo; o restante fica no resumo rolante (Redis).
+MAX_HISTORY_MESSAGES = 6
 ROUTER_CTX_TTL = HISTORY_TTL
+SUMMARY_TTL = HISTORY_TTL
 
 
 def _redis_client():
@@ -30,6 +31,47 @@ def _key(company_id: int, client_phone: str) -> str:
 
 def _router_ctx_key(company_id: int, client_phone: str) -> str:
     return f"chat_router_ctx:{company_id}:{client_phone}"
+
+
+def _summary_key(company_id: int, client_phone: str) -> str:
+    return f"chat_summary:{company_id}:{client_phone}"
+
+
+async def get_summary_state(company_id: int, client_phone: str) -> dict | None:
+    r = _redis_client()
+    try:
+        raw = await r.get(_summary_key(company_id, client_phone))
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        return {
+            "text": str(data.get("text") or ""),
+            "covered": int(data.get("covered") or 0),
+        }
+    finally:
+        await r.aclose()
+
+
+async def set_summary_state(company_id: int, client_phone: str, text: str, covered: int) -> None:
+    r = _redis_client()
+    try:
+        payload = json.dumps({"text": text, "covered": covered}, ensure_ascii=False)
+        await r.set(_summary_key(company_id, client_phone), payload, ex=SUMMARY_TTL)
+    finally:
+        await r.aclose()
+
+
+async def delete_summary_state(company_id: int, client_phone: str) -> None:
+    r = _redis_client()
+    try:
+        await r.delete(_summary_key(company_id, client_phone))
+    finally:
+        await r.aclose()
 
 
 async def get_history(company_id: int, client_phone: str) -> List[dict]:
@@ -95,6 +137,10 @@ async def clear_history(company_id: int, client_phone: str):
     """
     r = _redis_client()
     try:
-        await r.delete(_key(company_id, client_phone), _router_ctx_key(company_id, client_phone))
+        await r.delete(
+            _key(company_id, client_phone),
+            _router_ctx_key(company_id, client_phone),
+            _summary_key(company_id, client_phone),
+        )
     finally:
         await r.aclose()

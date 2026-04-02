@@ -33,17 +33,17 @@ function slotDateKeyBR(slotDate: Date): string {
   return slotDate.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
 }
 
-/** Mesmo cliente não pode ter dois atendimentos ativos com início no mesmo slot (data+hora da grade). */
-async function clientAppointmentConflictSameSlot(
+/** Mesmo pet não pode ter dois atendimentos ativos com início no mesmo slot (data+hora da grade). Outros pets do mesmo dono podem se o slot tiver vaga. */
+async function petAppointmentConflictSameSlot(
   companyId: number,
-  clientId: string,
+  petId: string,
   slotDate: Date,
   slotTime: Date,
 ): Promise<string | null> {
   const existing = await prisma.petshopAppointment.findFirst({
     where: {
       companyId,
-      clientId,
+      petId,
       status: { notIn: ['completed', 'cancelled'] },
       slotId: { not: null },
       slot: { slotDate, slotTime },
@@ -117,16 +117,16 @@ export async function createManualScheduleAppointment(
     return { ok: false, message: 'Horário sem vagas disponíveis.' }
   }
 
-  const conflictPrimary = await clientAppointmentConflictSameSlot(
+  const conflictPrimary = await petAppointmentConflictSameSlot(
     companyId,
-    cid,
+    pid,
     slot.slotDate,
     slot.slotTime,
   )
   if (conflictPrimary) {
     return {
       ok: false,
-      message: `Já existe agendamento de «${conflictPrimary}» neste mesmo horário para este cliente. Cancele ou remarque antes de marcar outro serviço no mesmo horário.`,
+      message: `Este pet já tem «${conflictPrimary}» neste horário. Escolha outro encaixe ou remarque o que já está marcado.`,
     }
   }
 
@@ -177,16 +177,16 @@ export async function createManualScheduleAppointment(
       }
     }
 
-    const conflictSecond = await clientAppointmentConflictSameSlot(
+    const conflictSecond = await petAppointmentConflictSameSlot(
       companyId,
-      cid,
+      pid,
       secondSlot.slotDate,
       secondSlot.slotTime,
     )
     if (conflictSecond) {
       return {
         ok: false,
-        message: `No horário do segundo bloco já existe «${conflictSecond}» para este cliente. Escolha outro início ou ajuste o agendamento existente.`,
+        message: `No segundo bloco este pet já tem «${conflictSecond}». Escolha outro início ou ajuste o agendamento existente.`,
       }
     }
   }

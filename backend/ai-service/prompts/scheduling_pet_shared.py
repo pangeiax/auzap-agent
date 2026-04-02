@@ -76,7 +76,8 @@ Este prompt **não** traz lista de serviços, preços, pets, bloqueios nem dispo
 • **get_client_pets** — lista de pets com id (UUID), nome, espécie, raça, porte (size). Obrigatório antes de get_available_times / create_appointment se não tiver pet_id com certeza.
 • **get_available_times** — única fonte de horários livres; parâmetros: specialty_id, target_date (YYYY-MM-DD), service_id, pet_id.
 • **get_upcoming_appointments**, **create_appointment**, **reschedule_appointment**, **cancel_appointment** — conforme já descrito abaixo.
-Serviços **block_ai_schedule**: explique pré-requisito conforme **get_services**; se o cliente disser que já fez o pré-requisito, ofereça telefone{phone_hint} ou escalate_to_human se aceitar."""
+• **escalate_to_human** — em **SERVIÇOS BLOQUEADOS**: só depois que o cliente disser que **já fez** o pré-requisito e **quiser** o serviço bloqueado, você oferece humano; com **aceite** ao encaminhamento, chame na **mesma** rodada (`summary` + `last_message` literal).
+Serviços **block_ai_schedule**: siga **SERVIÇOS BLOQUEADOS** — agende o **pré-requisito** pela IA se existir; o **bloqueado** não; se já fez pré-requisito e quer o bloqueado → ofereça humano + **escalate_to_human** após aceite."""
 
 
 def build_health_pet_scheduling_section(petshop_phone: str) -> str:
@@ -88,7 +89,7 @@ O sistema também envia **«ROTEADOR — FERRAMENTAS DESTE TURNO»** quando apli
 Blocos **«CACHE RECENTE»** do servidor podem trazer `get_services`, `get_client_pets` e `get_upcoming_appointments` já executados neste turno; reutilize quando estiverem adequados, mas **nome novo de pet** continua exigindo `get_client_pets` de novo.
 **get_client_pets** = única fonte para saber se um nome está cadastrado; **nunca** diga "já está cadastrado" sem ter executado a tool nesta rodada.
 **escalate_to_human** — para cadastro só cão/gato: se o pet **não** for cachorro nem gato, ofereça encaminhamento e **só** chame a tool se o cliente **aceitar** explicitamente.
-**get_services**, **get_available_times**, **create_appointment**, **reschedule_appointment**, **cancel_appointment**, **get_upcoming_appointments** — uso conforme este prompt. Serviços com **block_ai_schedule**: não agende pela IA; explique e ofereça contato{phone}
+**get_services**, **get_available_times**, **create_appointment**, **reschedule_appointment**, **cancel_appointment**, **get_upcoming_appointments** — uso conforme este prompt. Serviços **block_ai_schedule**: bloco **SERVIÇOS BLOQUEADOS** — agende o **pré-requisito** normalmente; o serviço **bloqueado** não; se cliente já fez pré-requisito e quer o bloqueado → humano + **escalate_to_human** após aceite. Telefone complemento{phone}
 
 REGRA DO PET: {PET_RULE_PARAGRAPH}
 

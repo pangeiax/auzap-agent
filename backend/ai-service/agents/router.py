@@ -28,6 +28,7 @@ from memory.tool_result_cache import (
 )
 from tools.booking_tools import fetch_available_times_snapshot
 from agents.context_guard import (
+    _message_looks_like_time_selection,
     apply_guardrails,
     check_post_guardrails,
     parse_tool_result_dict,
@@ -646,6 +647,98 @@ def _ensure_active_pet_when_booking(
     return router_ctx
 
 
+def _longest_catalog_service_name_in_message(message: str, services: list) -> str | None:
+    """Nome exato do catálogo (get_services) mais longo contido na mensagem."""
+    mlow = (message or "").lower()
+    if not mlow or not services:
+        return None
+    best: str | None = None
+    blen = 0
+    for s in services:
+        name = (s.get("name") or "").strip()
+        if not name:
+            continue
+        nl = name.lower()
+        if nl in mlow and len(nl) >= blen:
+            best = name
+            blen = len(nl)
+    return best
+
+
+def _booking_scheduling_followup_no_new_service(message: str, services: list) -> bool:
+    """
+    True quando o cliente parece só escolher horário / confirmar, sem citar novo serviço.
+    Usado para não deixar o JSON do roteador «pular» de volta ao banho antigo.
+    """
+    if _longest_catalog_service_name_in_message(message, services):
+        return False
+    m = (message or "").strip().lower()
+    if not m:
+        return False
+    if re.search(
+        r"\b(remarc|reagend|cancel|outro\s+servi[cç]o|mudar\s+o\s+servi[cç]o|"
+        r"quero\s+agendar|agendar\s+outro)\b",
+        m,
+    ):
+        return False
+    if re.search(
+        r"\b(corte\s+de\s+unhas?|escova\w*\s+de\s+dentes?|hidrata\w*|"
+        r"banho\s+e\s+tosa|banho|tosa|consulta|vacina|adestram|cirurgia)\b",
+        m,
+    ):
+        return False
+    if _message_looks_like_time_selection(m):
+        return True
+    if re.fullmatch(r"(sim|ok|pode|confirmo?|isso|beleza)\.?[\s!]*", m, re.I):
+        return True
+    return False
+
+
+def _stabilize_booking_router_service(
+    message: str,
+    router_ctx: dict,
+    previous_router_ctx: dict | None,
+    context: dict,
+) -> dict:
+    """
+    Evita que, após o cliente corrigir o serviço (ex. corte de unha), um follow-up só com
+    horário («às 13 na sexta») faça o roteador voltar ao banho do fluxo de remarcação anterior.
+    """
+    if (router_ctx.get("agent") or "") not in ("booking_agent", "health_agent"):
+        return router_ctx
+    services = context.get("services") or []
+    out = dict(router_ctx)
+    named = _longest_catalog_service_name_in_message(message, services)
+    if named:
+        cur = (out.get("service") or "").strip()
+        if not cur or cur.lower() != named.lower():
+            logger.info(
+                "router | service alinhado ao texto do cliente: %r (antes %r)",
+                named,
+                cur or None,
+            )
+        out["service"] = named
+        return out
+
+    prev = previous_router_ctx if isinstance(previous_router_ctx, dict) else None
+    if not prev or (prev.get("agent") or "") not in ("booking_agent", "health_agent"):
+        return out
+    prev_svc = (prev.get("service") or "").strip()
+    if not prev_svc:
+        return out
+    if not _booking_scheduling_followup_no_new_service(message, services):
+        return out
+    cur_svc = (out.get("service") or "").strip()
+    if (not cur_svc) or (cur_svc.lower() != prev_svc.lower()):
+        logger.info(
+            "router | preservando service=%r (follow-up horário/conf.; parser tinha %r)",
+            prev_svc,
+            cur_svc or None,
+        )
+        out["service"] = prev_svc
+    return out
+
+
 async def run_router(
     message: str,
     context: dict,
@@ -678,6 +771,9 @@ async def run_router(
     router_response = router.run(router_input)
     router_ctx = _parse_router_response(router_response.content)
     router_ctx = _coerce_onboarding_to_booking_when_service_schedule(message, router_ctx, history)
+    router_ctx = _stabilize_booking_router_service(
+        message, router_ctx, previous_router_ctx, context
+    )
     router_ctx = _coerce_onboarding_awaiting_without_pet(router_ctx)
     router_ctx = _ensure_active_pet_when_booking(router_ctx, context, message)
     router_model = _agent_configured_model_id(router)
@@ -860,7 +956,11 @@ def _format_history(history: list) -> str:
         return ""
     lines = []
     for msg in history:
-        role = "Cliente" if msg["role"] == "user" else "Assistente"
+        r = msg.get("role")
+        if r == "system":
+            lines.append(f"Resumo estruturado (trecho anterior):\n{msg.get('content', '')}")
+            continue
+        role = "Cliente" if r == "user" else "Assistente"
         lines.append(f"{role}: {msg['content']}")
     return "\n".join(lines)
 

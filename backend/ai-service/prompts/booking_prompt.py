@@ -1,8 +1,10 @@
 from agents.router_tool_plan import router_says_conversation_only
 from prompts.booking_prompt_rules_body import (
     BOOKING_HEADER_TEMPLATE,
-    BOOKING_RULES_BODY_TEMPLATE,
+    build_booking_rules_body_template,
 )
+from prompts.shared.history_context_hint import CATALOG_HISTORY_HINT
+from prompts.service_cadastro import build_blocked_services_block
 from prompts.shared.scheduling_pet_shared import (
     PASSO_2_PET_SHARED_BLOCK,
     PET_RULE_PARAGRAPH,
@@ -18,11 +20,12 @@ def _build_booking_rules_block(
     pet_rule: str,
     date_hint: str | None,
     selected_time: str | None,
+    stage_upper: str,
+    awaiting_confirmation: bool,
 ) -> str:
+    template = build_booking_rules_body_template(stage_upper, awaiting_confirmation)
     return (
-        BOOKING_RULES_BODY_TEMPLATE.replace(
-            "__TOOLS_PREAMBLE__", build_booking_tools_preamble(phone_hint)
-        )
+        template.replace("__TOOLS_PREAMBLE__", build_booking_tools_preamble(phone_hint))
         .replace("__HOURS_LINES__", hours_lines)
         .replace("__ESTADO_STR__", estado_str)
         .replace("__PET_RULE__", pet_rule)
@@ -134,6 +137,11 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
         pet_rule,
         date_hint,
         selected_time,
+        stage_upper,
+        bool(awaiting),
+    )
+    blocked_block = build_blocked_services_block(
+        context.get("services") or [], petshop_phone
     )
     header = _build_booking_header_block(
         assistant_name,
@@ -144,8 +152,19 @@ def build_booking_prompt(context: dict, router_ctx: dict) -> str:
         client_name,
         client_stage,
     )
+    svc_lock = """
+━━━ CONTEXTO vs HISTÓRICO (lembrete final) ━━━
+• **Serviço em discussão** + **Contexto extraído** (Roteador) prevalecem sobre respostas suas antigas com outro serviço/horário.
+• Cliente **corrigiu** ou pediu **outro** serviço → fluxo desse nome (get_services, ids corretos, get_available_times, create); não repita o serviço antigo só pelo histórico — **exceto** serviço **block_ai_schedule**: **SERVIÇOS BLOQUEADOS** (sem slots/create no id bloqueado; **pode** agendar pré-requisito; já fez pré-requisito e quer o bloqueado → humano + **escalate_to_human** após aceite).
+• Só trocar data/hora de compromisso **já marcado** → **reschedule_appointment** (CANÔNICAS C). Com «sim» e dados já combinados: **proibido** «não salvou» / «ainda vou marcar» sem **create_appointment** ou **reschedule_appointment** com **success=true** nesta rodada — ou execute **get_available_times** + escrita agora.
+"""
+
     return (
         rules
+        + blocked_block
+        + "\n\n"
+        + CATALOG_HISTORY_HINT
         + "\n\n━━━ CONTEXTO DESTA CONVERSA ━━━\n"
         + header
+        + svc_lock
     )

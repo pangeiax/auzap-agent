@@ -9,8 +9,11 @@ from openai import AsyncOpenAI
 load_dotenv()
 
 from context.loader import load_context
+from memory.history_summary import ensure_rolling_summary, summary_prefix_for_prompt
+from memory.message_sanitize import sanitize_assistant_for_history
 from memory.redis_memory import (
     clear_history,
+    delete_summary_state,
     get_history,
     get_router_ctx,
     save_message,
@@ -174,14 +177,24 @@ async def run_agent(req: AgentRequest):
             if req.message:
                 message_for_agent += f"\n\nLegenda enviada pelo usuário: {req.message}"
 
-        # 3. Carrega histórico do Redis
-        history = await get_history(req.company_id, req.client_phone)
         previous_router_ctx = await get_router_ctx(req.company_id, req.client_phone)
 
-        # 4. Salva mensagem do usuário no histórico (versão enriquecida se houver imagem)
+        # 3. Grava user; atualiza resumo rolante; monta histórico (últimas N cruas + resumo estruturado)
         await save_message(req.company_id, req.client_phone, "user", message_for_agent)
+        await ensure_rolling_summary(req.company_id, req.client_phone)
 
-        # 5. Executa o router agent
+        tail = await get_history(req.company_id, req.client_phone)
+        if tail and tail[-1].get("role") == "user":
+            tail = tail[:-1]
+
+        summary_txt = await summary_prefix_for_prompt(req.company_id, req.client_phone)
+        history = (
+            [{"role": "system", "content": summary_txt}] + tail
+            if summary_txt
+            else tail
+        )
+
+        # 4. Executa o router agent
         try:
             result = await run_router(
                 message=message_for_agent,
@@ -221,7 +234,12 @@ async def run_agent(req: AgentRequest):
             )
             reply = _connection_fallback_reply(context)
         else:
-            await save_message(req.company_id, req.client_phone, "assistant", reply)
+            await save_message(
+                req.company_id,
+                req.client_phone,
+                "assistant",
+                sanitize_assistant_for_history(reply),
+            )
             await save_router_ctx(
                 req.company_id,
                 req.client_phone,
@@ -265,6 +283,7 @@ async def pop_from_history(req: PopMessagesRequest):
         key = _key(req.company_id, req.client_phone)
         for _ in range(req.count):
             await r.rpop(key)
+        await delete_summary_state(req.company_id, req.client_phone)
         logger.info(
             "Removidas %d mensagem(ns) do Redis | company_id=%s | phone=%s",
             req.count,

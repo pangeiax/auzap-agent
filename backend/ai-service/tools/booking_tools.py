@@ -188,6 +188,55 @@ logger = logging.getLogger("ai-service.tools.booking")
 
 DOUBLE_PAIR_PREFIX = "__DOUBLE_PAIR__:"
 
+# Serviço com block_ai_schedule=true no cadastro — create/get_available_times recusam pela IA.
+ERROR_SERVICE_BLOCKED_FOR_AI = "service_blocked_for_ai"
+
+
+def _fetch_service_ai_block_if_any(company_id: int, service_int: int) -> dict | None:
+    """
+    Se o serviço existe, está ativo e tem block_ai_schedule, retorna
+    {service_name, dependent_service_name}; caso contrário None.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT ps.name AS service_name, dep.name AS dependent_service_name
+            FROM petshop_services ps
+            LEFT JOIN petshop_services dep ON dep.id = ps.dependent_service_id
+            WHERE ps.id = %s AND ps.company_id = %s AND ps.is_active = TRUE
+              AND ps.block_ai_schedule = TRUE
+            """,
+            (service_int, company_id),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "service_name": row["service_name"],
+        "dependent_service_name": row.get("dependent_service_name"),
+    }
+
+
+def _message_blocked_service_for_ai(
+    service_name: str, dependent_service_name: str | None
+) -> str:
+    base = (
+        f"O serviço «{service_name}» está bloqueado para agendamento automático pelo assistente. "
+        "Não use get_available_times/create_appointment de novo para **este** service_id."
+    )
+    if dependent_service_name:
+        return (
+            base
+            + f" Pré-requisito no cadastro: «{dependent_service_name}» — você **pode** agendar esse pré-requisito "
+            "com o **id** dele (get_services). Se o cliente **já fez** o pré-requisito e quer **este** serviço: "
+            "ofereça encaminhamento humano; aceite → escalate_to_human."
+        )
+    return (
+        base
+        + " Ofereça encaminhamento humano para marcar; aceite → escalate_to_human."
+    )
+
 
 def _date_iso(d) -> str | None:
     if d is None:
@@ -291,37 +340,39 @@ def _strip_internal_appointment_notes(notes) -> str | None:
     return out or None
 
 
-def _client_conflict_same_slot_start(
+def _pet_conflict_same_slot_start(
     cur,
     company_id,
-    client_id,
+    pet_id,
     slot_date,
     slot_time,
     exclude_appointment_ids: set | None = None,
 ) -> dict | None:
     """
-    Outro agendamento ativo do mesmo cliente começando no **mesmo** slot (data + hora da grade).
+    Outro agendamento ativo do **mesmo pet** começando no **mesmo** slot (data + hora da grade).
 
-    Importante: `petshop_appointments.scheduled_date` no banco é só DATE (sem hora). Comparar com
-    datetime cheio fazia a validação falhar e permitia dois serviços às 16h no mesmo dia.
+    Clientes com vários pets podem usar o mesmo horário se o slot tiver capacidade — o bloqueio
+    é por pet, não por cliente. Vagas: `max_capacity` / `used_capacity` no fluxo antes desta checagem.
     """
-    if slot_date is None or slot_time is None or not client_id:
+    if slot_date is None or slot_time is None or not pet_id:
         return None
     ex = exclude_appointment_ids or set()
     cur.execute(
         """
-        SELECT a.id::text AS id, s.name AS service_name
+        SELECT a.id::text AS id, s.name AS service_name,
+               COALESCE(TRIM(p.name), '') AS pet_name
         FROM petshop_appointments a
         JOIN petshop_services s ON s.id = a.service_id AND s.company_id = a.company_id
         JOIN petshop_slots sl ON sl.id = a.slot_id
-        WHERE a.company_id = %s AND a.client_id = %s
+        JOIN petshop_pets p ON p.id = a.pet_id AND p.company_id = a.company_id
+        WHERE a.company_id = %s AND a.pet_id = %s
           AND a.status NOT IN ('completed', 'cancelled')
           AND a.slot_id IS NOT NULL
           AND sl.slot_date = %s
           AND sl.slot_time = %s
         ORDER BY a.id
         """,
-        (company_id, client_id, slot_date, slot_time),
+        (company_id, pet_id, slot_date, slot_time),
     )
     for row in cur.fetchall() or []:
         rid = str(row["id"])
@@ -329,6 +380,7 @@ def _client_conflict_same_slot_start(
             return {
                 "id": rid,
                 "service_name": (row.get("service_name") or "Serviço").strip(),
+                "pet_name": (row.get("pet_name") or "").strip() or "Este pet",
             }
     return None
 
@@ -594,6 +646,38 @@ def build_booking_tools(company_id: int, client_id) -> list:
                         "o sistema resolve a especialidade automaticamente."
                     ),
                     "hint": "Chame get_services, use o campo specialty_id do serviço escolhido, ou só service_id + target_date + pet_id.",
+                }
+
+        sid_for_block: int | None = None
+        if service_id is not None:
+            try:
+                sid_for_block = int(service_id)
+            except (TypeError, ValueError):
+                sid_for_block = None
+        if sid_for_block is None and raw_specialty.strip().isdigit():
+            try:
+                sid_for_block = int(raw_specialty.strip())
+            except ValueError:
+                sid_for_block = None
+        if sid_for_block is not None:
+            block_meta = _fetch_service_ai_block_if_any(company_id, sid_for_block)
+            if block_meta:
+                logger.info(
+                    "get_available_times: service_id=%s bloqueado para IA (block_ai_schedule)",
+                    sid_for_block,
+                )
+                return {
+                    "available": False,
+                    "error_code": ERROR_SERVICE_BLOCKED_FOR_AI,
+                    "blocked_for_ai_schedule": True,
+                    "closed_days": [],
+                    "full_days": [],
+                    "available_times": [],
+                    "message": _message_blocked_service_for_ai(
+                        block_meta["service_name"],
+                        block_meta.get("dependent_service_name"),
+                    ),
+                    "dependent_service_name": block_meta.get("dependent_service_name"),
                 }
 
         slots = _query_available_slots(spec_id, target_date)
@@ -895,12 +979,14 @@ def build_booking_tools(company_id: int, client_id) -> list:
         with get_connection() as conn:
             cur = conn.cursor()
 
-            # Valida service_id — busca preço fixo, preço por porte e multiplier G/GG
+            # Valida service_id — preço, multiplier G/GG, bloqueio de agendamento pela IA
             cur.execute(
                 """
-                SELECT id, name, price, price_by_size, duration_multiplier_large, duration_min
-                FROM petshop_services
-                WHERE id = %s AND company_id = %s AND is_active = TRUE
+                SELECT ps.id, ps.name, ps.price, ps.price_by_size, ps.duration_multiplier_large, ps.duration_min,
+                       ps.block_ai_schedule, dep.name AS dependent_service_name
+                FROM petshop_services ps
+                LEFT JOIN petshop_services dep ON dep.id = ps.dependent_service_id
+                WHERE ps.id = %s AND ps.company_id = %s AND ps.is_active = TRUE
             """,
                 (service_id, company_id),
             )
@@ -909,6 +995,21 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 return {
                     "success": False,
                     "message": f"Serviço id={service_id} não encontrado. Chame get_services para obter os IDs corretos.",
+                }
+            if service_row.get("block_ai_schedule"):
+                logger.info(
+                    "create_appointment recusado | block_ai_schedule | service_id=%s name=%s",
+                    service_id,
+                    service_row.get("name"),
+                )
+                return {
+                    "success": False,
+                    "error_code": ERROR_SERVICE_BLOCKED_FOR_AI,
+                    "message": _message_blocked_service_for_ai(
+                        service_row["name"],
+                        service_row.get("dependent_service_name"),
+                    ),
+                    "dependent_service_name": service_row.get("dependent_service_name"),
                 }
 
             # Valida pet_id — busca também campos obrigatórios para agendamento
@@ -1103,30 +1204,31 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     "success": False,
                     "error_code": "use_reschedule_instead",
                     "message": (
-                        "Já existe agendamento ativo para este pet e este mesmo serviço nesta data. "
-                        "Se a intenção é trocar o horário ou mover o atendimento deste dia, use "
-                        "reschedule_appointment com appointment_id desse compromisso e new_slot_id do novo horário. "
-                        "Se o cliente quiser manter este e marcar outro em outra data, create_appointment continua válido."
+                        "Esse pet já tem esse serviço marcado nesse dia. "
+                        "Pra só mudar horário, use remarcação com o id desse compromisso; "
+                        "pra marcar de novo em outro dia, aí sim um agendamento novo."
                     ),
                     "appointment_id_for_reschedule": primary,
                     "active_rows_found": len(active_same_day),
                 }
 
-            clash = _client_conflict_same_slot_start(
+            clash = _pet_conflict_same_slot_start(
                 cur,
                 company_id,
-                client_id,
+                pet_id,
                 slot_row.get("slot_date"),
                 slot_row.get("slot_time"),
                 None,
             )
             if clash:
+                pn = clash.get("pet_name") or "Esse pet"
+                sn = clash["service_name"]
                 return {
                     "success": False,
-                    "error_code": "client_same_start_conflict",
+                    "error_code": "pet_same_start_conflict",
                     "message": (
-                        f"O cliente já tem «{clash['service_name']}» neste mesmo horário de início. "
-                        "Escolha outro horário ou cancele/remarque o agendamento existente antes."
+                        f"{pn} já está com «{sn}» nesse horário. "
+                        "Sugira outro encaixe ou remarque o que já está na agenda."
                     ),
                 }
 
@@ -1136,22 +1238,23 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     slot_row["slot_date"],
                     second_row["slot_time"],
                 )
-                clash2 = _client_conflict_same_slot_start(
+                clash2 = _pet_conflict_same_slot_start(
                     cur,
                     company_id,
-                    client_id,
+                    pet_id,
                     slot_row["slot_date"],
                     second_row.get("slot_time"),
                     None,
                 )
                 if clash2:
+                    pn2 = clash2.get("pet_name") or "Esse pet"
+                    sn2 = clash2["service_name"]
                     return {
                         "success": False,
-                        "error_code": "client_same_start_conflict",
+                        "error_code": "pet_same_start_conflict",
                         "message": (
-                            f"O cliente já tem «{clash2['service_name']}» no horário de início "
-                            f"do segundo bloco deste serviço. "
-                            "Escolha outro horário inicial ou ajuste o agendamento existente."
+                            f"{pn2} já tem «{sn2}» no horário do segundo bloco deste serviço. "
+                            "Escolha outro início ou ajuste o agendamento que conflita."
                         ),
                     }
 
@@ -1248,7 +1351,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
             success_payload: dict = {
                 "success": True,
                 "appointment_id": str(appointment_id),
-                "message": "Agendamento confirmado com sucesso!",
+                "message": f"Feito — {pet_nm} ficou com {svc_nm} na agenda.",
                 # Sinal explícito para o modelo: não usar vocabulário de remarcação
                 "rescheduled": False,
                 # Horários canônicos — a mensagem ao cliente DEVE usar estes campos
@@ -1564,21 +1667,23 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 else:
                     scheduled_date = None
 
-                clash_r = _client_conflict_same_slot_start(
+                clash_r = _pet_conflict_same_slot_start(
                     cur,
                     company_id,
-                    client_id,
+                    pet_id,
                     slot_row.get("slot_date"),
                     slot_row.get("slot_time"),
                     ids_to_cancel_set,
                 )
                 if clash_r:
+                    pr = clash_r.get("pet_name") or "Esse pet"
+                    sr = clash_r["service_name"]
                     return {
                         "success": False,
-                        "error_code": "client_same_start_conflict",
+                        "error_code": "pet_same_start_conflict",
                         "message": (
-                            f"O cliente já tem «{clash_r['service_name']}» neste mesmo horário. "
-                            "Escolha outro horário ou cancele/remarque o outro serviço antes."
+                            f"{pr} já está com «{sr}» nesse horário. "
+                            "Ofereça outro horário ou combine remarcar o que já existe."
                         ),
                     }
 
@@ -1588,21 +1693,23 @@ def build_booking_tools(company_id: int, client_id) -> list:
                         slot_row["slot_date"],
                         second_row["slot_time"],
                     )
-                    clash_r2p = _client_conflict_same_slot_start(
+                    clash_r2p = _pet_conflict_same_slot_start(
                         cur,
                         company_id,
-                        client_id,
+                        pet_id,
                         slot_row["slot_date"],
                         second_row.get("slot_time"),
                         ids_to_cancel_set,
                     )
                     if clash_r2p:
+                        pr2 = clash_r2p.get("pet_name") or "Esse pet"
+                        sr2 = clash_r2p["service_name"]
                         return {
                             "success": False,
-                            "error_code": "client_same_start_conflict",
+                            "error_code": "pet_same_start_conflict",
                             "message": (
-                                f"O cliente já tem «{clash_r2p['service_name']}» no horário do segundo "
-                                f"bloco deste serviço. Escolha outro horário inicial ou ajuste o outro agendamento."
+                                f"{pr2} já tem «{sr2}» no segundo bloco desse horário. "
+                                "Escolha outro início ou ajuste o agendamento que conflita."
                             ),
                         }
 
@@ -1716,7 +1823,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
                     "rescheduled": True,
                     "previous_appointment_ids": ids_to_cancel,
                     "appointment_id": str(new_appointment_id),
-                    "message": "Agendamento remarcado com sucesso!",
+                    "message": f"Pronto — atualizei o horário do {pet_nmr} ({svc_nmr}).",
                     "start_time": start_br,
                     "uses_double_slot": bool(need_double and second_row),
                     "service_duration_minutes": eff_dur,
@@ -1837,7 +1944,10 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "success": False,
                 "message": "Agendamento não encontrado ou já finalizado.",
             }
-        return {"success": True, "message": "Agendamento cancelado com sucesso."}
+        return {
+            "success": True,
+            "message": "Cancelado. Se quiser remarcar, é só avisar.",
+        }
 
     return [
         get_specialties,

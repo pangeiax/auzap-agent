@@ -243,12 +243,13 @@ def build_blocked_services_block(services: list, petshop_phone: str = "") -> str
 
     phone_hint = f" ({petshop_phone})" if petshop_phone else ""
     return (
-        "\n\nSERVIÇOS BLOQUEADOS (NÃO AGENDAR VIA BOT):\n"
+        "\n\nSERVIÇOS BLOQUEADOS (O «FILHO» NÃO FECHA PELA IA):\n"
         + "\n".join(lines)
-        + "\n\nQuando o cliente solicitar um desses serviços:\n"
-        "1. Informe que este serviço requer o serviço pré-requisito antes de ser agendado.\n"
-        "2. Ofereça agendar o serviço pré-requisito.\n"
-        "3. Se o cliente disser que JÁ REALIZOU o serviço pré-requisito anteriormente:\n"
-        f"   - Informe o telefone do petshop{phone_hint} para que ele confirme o histórico.\n"
-        "   - Ou ofereça encaminhar para um especialista (use escalate_to_human se ele aceitar)."
+        + "\n\nFluxo quando o cliente pedir o serviço **bloqueado** (ex.: aula, nome alinhado ao cadastro):\n"
+        "1. Explique: esse serviço **não** pode ser agendado por você (IA); **PROIBIDO** `get_available_times` / `create_appointment` com o **service_id** dele — a tool recusa; não insista.\n"
+        "2. Se existir **pré-requisito** no cadastro (nome em dependent_service_name / lista acima): **ofereça e conduza o agendamento normal** desse pré-requisito — `get_services` para achar o **id** correto do pré-requisito, depois `get_available_times` + `create_appointment` como em qualquer serviço liberado. Esse caminho **é** permitido e desejável.\n"
+        "3. Só quando o cliente disser que **já fez** o pré-requisito (avaliação etc.) e **insistir** em marcar **o serviço bloqueado** de fato: **não** tente de novo slots/create para o bloqueado; ofereça **encaminhamento para um humano** da loja conferir e marcar.\n"
+        "4. Com **aceite explícito** ao encaminhamento (sim, quero falar com alguém, pode encaminhar, etc.): chame **escalate_to_human** **nesta mesma rodada**. `summary`: serviço bloqueado pedido, que já fez pré-requisito (e data se citou), pet; `last_message`: texto literal da mensagem atual do cliente.\n"
+        "5. **PROIBIDO** «vou verificar / retorno em breve / já passei pra equipe» **sem** `escalate_to_human` com success após o aceite do encaminhamento.\n"
+        f"6. Sem pré-requisito cadastrado: explique o bloqueio e ofereça encaminhamento humano (ou telefone{phone_hint}) — com aceite → **escalate_to_human**."
     )
