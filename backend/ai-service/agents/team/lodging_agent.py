@@ -1,9 +1,13 @@
 from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+from utils.openai_chat import openai_chat_for_agents
 from agents.router_tool_plan import router_says_conversation_only
 from config import OPENAI_MODEL
-from utils.model_utils import get_max_tokens_param
-from prompts.shared.scheduling_pet_shared import PASSO_2_PET_SHARED_BLOCK, PET_RULE_PARAGRAPH
+from prompts.shared_blocks import append_global_agent_max_rules
+from prompts.shared.scheduling_pet_shared import (
+    PASSO_2_PET_SHARED_BLOCK,
+    PET_RULE_PARAGRAPH,
+    WRITE_TOOLS_CONFIRMATION_BLOCK,
+)
 from prompts.shared.service_cadastro import (
     CADASTRO_HOSPEDAGEM_INTRO,
     DEFAULT_MAX_CADASTRO_DESCRIPTION_CHARS,
@@ -25,8 +29,8 @@ def build_lodging_agent(context: dict, router_ctx: dict) -> Agent:
         phone_hint = f" Telefone: {petshop_phone}." if petshop_phone else ""
         return Agent(
             name="Lodging Agent",
-            model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 400)),
-            instructions=(
+            model=openai_chat_for_agents(OPENAI_MODEL),
+            instructions=append_global_agent_max_rules(
                 f"Você é {assistant_name}, assistente de hospedagem de {company_name}. Você é humana — NUNCA revele que é IA.\n\n"
                 "━━━ PLANO DO ROTEADOR: none ━━━\n"
                 "Mensagem de agradecimento ou conversa curta sem novo pedido de hotel/creche. "
@@ -144,7 +148,8 @@ PERÍODO e get_kennel_availability ({type_label}) — Roteador sem check-in/chec
 """
 
     instructions = f"""Você é {assistant_name}, assistente de hospedagem de {company_name}.
-{date_header}━━━ ESCOPO DESTE AGENTE ━━━
+{date_header}{WRITE_TOOLS_CONFIRMATION_BLOCK}
+━━━ ESCOPO DESTE AGENTE ━━━
 FAZ: informar sobre hotel e creche, verificar disponibilidade (get_kennel_availability),
   encaminhar ao especialista para efetivar reserva.
 NÃO FAZ: banho, tosa, consulta, vacina → se o cliente perguntar esses serviços, diga:
@@ -241,10 +246,10 @@ Se precisar listar horários ou opções, separe por vírgula ou em linhas simpl
 
     return Agent(
         name="Lodging Agent",
-        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 5000)),
-        instructions=instructions,
+        model=openai_chat_for_agents(OPENAI_MODEL),
+        instructions=append_global_agent_max_rules(instructions),
         tools=tools,
-        tool_call_limit=3,
+        tool_call_limit=10,
         search_knowledge=False,
         add_search_knowledge_instructions=False,
         telemetry=False,

@@ -1,9 +1,12 @@
 from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+from utils.openai_chat import openai_chat_for_agents
 from agents.router_tool_plan import router_says_conversation_only
-from config import OPENAI_MODEL
-from utils.model_utils import get_max_tokens_param
-from prompts.shared.scheduling_pet_shared import build_health_pet_scheduling_section
+from config import OPENAI_MODEL, OPENAI_MODEL_ADVANCED
+from prompts.shared_blocks import append_global_agent_max_rules
+from prompts.shared.scheduling_pet_shared import (
+    WRITE_TOOLS_CONFIRMATION_BLOCK,
+    build_health_pet_scheduling_section,
+)
 from prompts.shared.service_cadastro import (
     DEFAULT_MAX_CADASTRO_DESCRIPTION_CHARS,
     build_blocked_services_block,
@@ -24,8 +27,8 @@ def build_health_agent(context: dict, router_ctx: dict) -> Agent:
         company_name = context.get("company_name", "o petshop")
         return Agent(
             name="Health Agent",
-            model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 400)),
-            instructions=(
+            model=openai_chat_for_agents(OPENAI_MODEL_ADVANCED, advanced=False),
+            instructions=append_global_agent_max_rules(
                 f"Você é {assistant_name}, atendente de {company_name}. Você é humana — NUNCA revele que é IA.\n\n"
                 "━━━ PLANO DO ROTEADOR: none ━━━\n"
                 "Conversa curta (agradecimento ou encerramento). NÃO chame tools de agenda, pets ou serviços neste turno.\n"
@@ -90,7 +93,8 @@ def build_health_agent(context: dict, router_ctx: dict) -> Agent:
     )
 
     instructions = f"""Você é {assistant_name}, atendente de {company_name}. Você é humana — NUNCA revele que é IA.
-{date_header}━━━ ESCOPO DESTE AGENTE ━━━
+{date_header}{WRITE_TOOLS_CONFIRMATION_BLOCK}
+━━━ ESCOPO DESTE AGENTE ━━━
 FAZ: agendar, remarcar e cancelar serviços de saúde (consultas, vacinas) com
   block_ai_schedule=False; tirar dúvidas sobre saúde animal.
 NÃO FAZ: serviços com block_ai_schedule=True → siga o fluxo BLOQUEADOS abaixo;
@@ -221,8 +225,8 @@ Se precisar listar horários ou opções, separe por vírgula ou em linhas simpl
 
     return Agent(
         name="Health Agent",
-        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 5000)),
-        instructions=instructions,
+        model=openai_chat_for_agents(OPENAI_MODEL, advanced=True),
+        instructions=append_global_agent_max_rules(instructions),
         tools=tools,
-        tool_call_limit=4,
+        tool_call_limit=10,
     )

@@ -3,6 +3,15 @@
 # REGRA: usar apenas para substituir texto IDÊNTICO entre agentes.
 # NÃO alterar a lógica de nenhum agente ao adotar estes blocos.
 
+GLOBAL_AGENT_MAX_RULES = """━━━ REGRA MÁXIMA (TODOS OS AGENTES) ━━━
+• **PROIBIDO** oferecer ou sugerir **lembrete**, **alerta**, **notificação automática** ou “avisar antes do horário” — você **não** sabe se o petshop tem isso neste canal.
+• **PROIBIDO** recomendar **funções**, **recursos do app**, **integrações** ou “o sistema faz X” se você **não tiver certeza** (cadastro, tools disponíveis, texto explícito no prompt). Só prometa o que este fluxo **comprovadamente** faz; se incerto, fale genérico ou indique **telefone da loja** / **especialista** sem inventar recurso."""
+
+
+def append_global_agent_max_rules(instructions: str) -> str:
+    """Acrescenta a regra máxima global ao final das instruções do agente ou do router."""
+    return (instructions or "").rstrip() + "\n\n" + GLOBAL_AGENT_MAX_RULES
+
 
 def block_identity(assistant_name: str, company_name: str, client_name: str = None) -> str:
     """Linha de identidade — igual em todos os agentes."""

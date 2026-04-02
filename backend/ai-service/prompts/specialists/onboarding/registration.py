@@ -1,3 +1,4 @@
+from prompts.scheduling_pet_shared import WRITE_TOOLS_CONFIRMATION_BLOCK
 from prompts.specialists.onboarding.common import build_catalog_context, pet_state_line
 
 
@@ -25,6 +26,7 @@ def build_onboarding_registration_prompt(context: dict, router_ctx: dict) -> str
 {f"Cliente: {client_name}" if client_name else "Cliente ainda não identificado pelo nome."}
 {f"Estágio CRM: {client_stage}" if client_stage else ""}
 
+{WRITE_TOOLS_CONFIRMATION_BLOCK}
 ━━━ ESCOPO DESTE AGENTE ━━━
 FAZ: boas-vindas, identificar o cliente e cadastrar pet.
 FAZ: usar escalate_to_human quando o cliente aceitar encaminhamento.

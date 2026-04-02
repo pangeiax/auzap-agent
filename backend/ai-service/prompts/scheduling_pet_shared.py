@@ -4,6 +4,14 @@ Regras compartilhadas entre agentes que agendam por pet (booking, health, cadast
 Objetivo: uma única fonte para get_client_pets, nome novo, cadastro (espécie/raça/anti-cópia) e proatividade.
 """
 
+# Gravação no sistema — booking, health, onboarding (cadastro), lodging (reserva).
+WRITE_TOOLS_CONFIRMATION_BLOCK = """━━━ CRÍTICO — NADA DE GRAVAÇÃO SEM CONFIRMAÇÃO DO CLIENTE ━━━
+**PROIBIDO** chamar tool que **crie, altere ou cancele** registro no sistema **antes** de: (1) **resumo claro** do que será feito (pet, serviço, data/hora, cancelamento alvo, etc.) e (2) **pergunta explícita** de confirmação ao cliente; (3) **só depois** da resposta **afirmativa** nesse fluxo (sim, confirma, pode fechar, ok **para essa** ação — **não** vale «sim» que respondia **outra** pergunta).
+Tools afetadas (exemplos): **create_appointment**, **reschedule_appointment**, **cancel_appointment**, **create_pet**, **create_lodging**, **cancel_lodging**. Use **confirmed=True** (ou equivalente) **somente** após esse «sim».
+**set_pet_size** durante coleta **não** substitui o **sim** antes de **create_pet**.
+**escalate_to_human** segue as regras próprias de aceite (não é agendamento gravado por você).
+"""
+
 # Parágrafo único usado em REGRA DO PET (booking + health + referência lodging).
 PET_RULE_PARAGRAPH = (
     "Pets e UUIDs vêm **só** de **get_client_pets** (chame sempre que precisar listar, resolver nome→id ou ver porte). "

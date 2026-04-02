@@ -1,11 +1,11 @@
 from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+from utils.openai_chat import openai_chat_for_agents
 from agents.router_tool_plan import router_says_conversation_only
 from config import OPENAI_MODEL
+from prompts.shared_blocks import append_global_agent_max_rules
 from prompts.specialists.faq import build_faq_prompt
 from tools.faq_tools import search_knowledge_base
 from tools.booking_tools import build_booking_tools
-from utils.model_utils import get_max_tokens_param
 
 
 def build_faq_agent(context: dict, router_ctx: dict) -> Agent:
@@ -20,8 +20,8 @@ def build_faq_agent(context: dict, router_ctx: dict) -> Agent:
 
     return Agent(
         name="FAQ Agent",
-        model=OpenAIChat(id=OPENAI_MODEL, **get_max_tokens_param(OPENAI_MODEL, 1500)),
-        instructions=build_faq_prompt(context, router_ctx),
+        model=openai_chat_for_agents(OPENAI_MODEL),
+        instructions=append_global_agent_max_rules(build_faq_prompt(context, router_ctx)),
         tools=tools,
         tool_call_limit=2,
     )

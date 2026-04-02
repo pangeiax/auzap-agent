@@ -3,10 +3,10 @@ import logging
 import re
 from datetime import date as date_cls, datetime, timedelta, timezone
 from agno.agent import Agent
-from agno.models.openai import OpenAIChat
+from utils.openai_chat import openai_chat_for_agents
 from config import OPENAI_MODEL_ROUTER
-from utils.model_utils import get_max_tokens_param
 from prompts.router import build_router_prompt
+from prompts.shared_blocks import append_global_agent_max_rules
 from agents.team.onboarding_agent import build_onboarding_agent
 from agents.team.booking_agent import build_booking_agent
 from agents.team.faq_agent import build_faq_agent
@@ -753,8 +753,8 @@ async def run_router(
     # ── 1. Router ────────────────────────────────
     router = Agent(
         name="Router",
-        model=OpenAIChat(id=OPENAI_MODEL_ROUTER, **get_max_tokens_param(OPENAI_MODEL_ROUTER, 1200)),
-        instructions=build_router_prompt(context),
+        model=openai_chat_for_agents(OPENAI_MODEL_ROUTER),
+        instructions=append_global_agent_max_rules(build_router_prompt(context)),
     )
 
     router_history = history[-ROUTER_HISTORY_MESSAGES:] if history else []
