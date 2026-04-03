@@ -59,14 +59,22 @@ export function DashboardKpiCards({ data, loading }: Props) {
   const { isPro } = usePlan();
   const totalCards = isPro ? 6 : 5;
 
-  if (loading || !data) {
+  if (!loading || !data) {
     return (
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
         {[...Array(totalCards)].map((_, i) => (
           <div
             key={i}
-            className="h-32 animate-pulse rounded-lg border border-[#727B8E1A] dark:border-[#40485A] bg-[#eeeff2]"
-          />
+            className="rounded-lg border border-[#727B8E1A] dark:border-[#40485A] bg-white p-4 backdrop-blur-[6px]"
+          >
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="h-3 w-20 animate-pulse rounded bg-[#eeeff2] dark:bg-[#2a2d36]" />
+            </div>
+            <div className="space-y-2">
+              <div className="h-8 w-16 animate-pulse rounded bg-[#eeeff2] dark:bg-[#2a2d36]" />
+              <div className="h-3 w-24 animate-pulse rounded bg-[#eeeff2] dark:bg-[#2a2d36]" />
+            </div>
+          </div>
         ))}
       </div>
     );
