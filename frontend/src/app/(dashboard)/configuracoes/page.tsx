@@ -213,7 +213,6 @@ function HourlyCapacityEditor({
 
   return (
     <div className="space-y-3">
-      {/* Quick config panel */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] px-4 py-3">
         <div>
           <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[#727B8E]">Capacidade padrão</p>
@@ -387,7 +386,6 @@ function SettingsProfileSidebar({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      {/* Conta + estabelecimento (sem foto mockada) */}
       <div className="rounded-2xl border border-[#727B8E]/12 bg-gradient-to-b from-[#F4F6F9]/90 to-white p-4 shadow-sm dark:border-[#40485A] dark:from-[#25262a]/90 dark:to-[#1A1B1D]">
         {loading ? (
           <div className="flex gap-3">
@@ -477,10 +475,8 @@ function SettingsProfileSidebar({
         </Button>
       )}
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Logout — bottom, gray */}
       <button
         type="button"
         onClick={onLogout}
@@ -711,10 +707,8 @@ function ServicosContent({
 
   return (
     <>
-      {/* ─── Master-Detail layout ─── */}
       <div className="lg:flex lg:flex-row min-h-0 gap-5">
 
-        {/* ─── Left: Specialty sidebar ─── */}
         <div className="flex w-full lg:max-w-52 shrink-0 flex-col gap-1">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#727B8E] dark:text-[#8a94a6]">
@@ -813,7 +807,6 @@ function ServicosContent({
           </button>
         </div>
 
-        {/* ─── Right: Services panel ─── */}
         <div className="min-w-0 flex-1">
           {!effectiveSelected ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#727B8E]/15 py-20 text-center">
@@ -824,7 +817,6 @@ function ServicosContent({
             </div>
           ) : (
             <>
-              {/* Services header */}
               <div className="mb-3 flex items-center justify-between">
                 {(() => {
                   const sp = displaySpecialties.find((s) => s.id === effectiveSelected);
@@ -934,7 +926,6 @@ function ServicosContent({
         </div>
       </div>
 
-      {/* Modal Nova Especialidade */}
       <Modal
         isOpen={newSpecialtyModal}
         onClose={() => {
@@ -988,7 +979,6 @@ function ServicosContent({
         </div>
       </Modal>
 
-      {/* Modal confirmação desativar especialidade */}
       <Modal
         isOpen={!!deactivateSpecialtyModal}
         onClose={() => setDeactivateSpecialtyModal(null)}
@@ -1082,7 +1072,6 @@ function ServicosContent({
         </div>
       </Modal>
 
-      {/* Modal editar especialidade */}
       <Modal
         isOpen={editSpecialtyOpen}
         onClose={() => setEditSpecialtyOpen(false)}
@@ -1481,7 +1470,6 @@ function WhatsAppContent({
           automaticamente para seus clientes.
         </p>
 
-        {/* Status da Conexão */}
         <div className="mb-6 rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1540,7 +1528,6 @@ function WhatsAppContent({
           </div>
         </div>
 
-        {/* QR Code ou Botão de Conectar */}
         {connectionStatus === "disconnected" && (
           <div className="flex flex-col items-center justify-center rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] p-8">
             <Smartphone className="mb-4 h-16 w-16 text-[#727B8E] dark:text-[#8a94a6]" />
@@ -1629,7 +1616,6 @@ function WhatsAppContent({
         )}
       </section>
 
-      {/* Informações Adicionais */}
       {connectionStatus === "connected" && (
         <section>
           <h3 className="mb-4 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
@@ -2324,7 +2310,6 @@ function HospedagemContent() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
         <div className="flex flex-col gap-6 pb-2">
-      {/* ─── Hotel ─── */}
       <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>
@@ -2370,7 +2355,6 @@ function HospedagemContent() {
           </div>
         )}
 
-        {/* ─── Tipos de quarto — Hotel ─── */}
         {hotelEnabled && (
           <RoomTypeSection
             lodgingType="hotel"
@@ -2384,7 +2368,6 @@ function HospedagemContent() {
         )}
       </div>
 
-      {/* ─── Creche ─── */}
       <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>
@@ -2430,7 +2413,6 @@ function HospedagemContent() {
           </div>
         )}
 
-        {/* ─── Tipos de quarto — Creche ─── */}
         {daycareEnabled && (
           <RoomTypeSection
             lodgingType="daycare"
@@ -2444,7 +2426,6 @@ function HospedagemContent() {
         )}
       </div>
 
-      {/* ─── Modal tipos de quarto ─── */}
       <Modal
         isOpen={roomTypeModalOpen}
         onClose={() => setRoomTypeModalOpen(false)}
@@ -2528,7 +2509,6 @@ function HospedagemContent() {
         </div>
       </Modal>
 
-      {/* ─── Visão geral de capacidade (read-only) ─── */}
       {(hotelEnabled || daycareEnabled) && (
         <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
           <div>
@@ -2541,7 +2521,6 @@ function HospedagemContent() {
             </p>
           </div>
 
-          {/* Alertas quando não há tipos de quarto */}
           {(hotelEnabled && hotelRoomTypes.filter((r) => r.is_active).length === 0) && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
               <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
@@ -2640,7 +2619,6 @@ function HospedagemContent() {
         </div>
       </div>
 
-      {/* Rodapé fixo no painel da aba: área de cima rola; o botão permanece visível */}
       <div className="sticky bottom-0 z-10 shrink-0 border-t border-[#727B8E]/10 bg-white/95 px-1 py-3 backdrop-blur-sm dark:border-[#40485A] dark:bg-[#1A1B1D]/95 sm:px-0">
         <div className="flex justify-end">
           <Button

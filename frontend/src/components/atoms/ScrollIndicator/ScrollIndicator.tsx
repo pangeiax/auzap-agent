@@ -19,7 +19,6 @@ export function ScrollIndicator({ text = 'Ver Estatísticas', className }: Scrol
         {text}
       </span>
 
-      {/* Arrow pointing down with bounce animation */}
       <motion.div
         animate={{ y: [0, 8, 0] }}
         transition={{

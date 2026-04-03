@@ -5,9 +5,7 @@ import App from "./App";
 import "./app/globals.css";
 
 createRoot(document.getElementById("root")!).render(
-  // <StrictMode>
     <BrowserRouter>
       <App />
     </BrowserRouter>
-  // {/* </StrictMode>, */}
 );

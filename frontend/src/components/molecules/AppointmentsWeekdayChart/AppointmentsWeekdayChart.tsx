@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   BarChart,
   Bar,
@@ -10,45 +10,91 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
-import { cn } from '@/lib/cn'
-import { useTheme } from '@/contexts/ThemeContext'
+import { Card } from '@/components/ui/card'
 import type { AppointmentByWeekday } from '@/services/dashboardService'
 
-const gridStroke = { light: '#E5E7EB', dark: '#40485A' }
-const tickFill = { light: '#727B8E', dark: '#8a94a6' }
-
-const SERVICE_COLORS = [
-  '#1E62EC', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2',
-]
-
 const DAY_ORDER = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+
+// Cores para cada categoria
+const CATEGORY_COLORS = {
+  'Banho simples': 'hsl(234, 85%, 60%)',      // Azul primário
+  'Banho completo': 'hsl(234, 70%, 75%)',     // Azul claro
+  'Consulta': 'hsl(152, 60%, 45%)',           // Verde
+  'Tosa': 'hsl(38, 92%, 50%)',                // Laranja
+  'Banho + Tosa': 'hsl(271, 76%, 53%)',       // Roxo
+}
 
 interface Props {
   data: AppointmentByWeekday[]
   className?: string
+  useMockData?: boolean
 }
+
+// Mock data para visualização - com todas as categorias
+const MOCK_DATA: AppointmentByWeekday[] = [
+  // Segunda
+  { day_of_week: 1, day_name: 'Seg', service_name: 'Banho simples', total: 2 },
+  { day_of_week: 1, day_name: 'Seg', service_name: 'Banho completo', total: 1 },
+  { day_of_week: 1, day_name: 'Seg', service_name: 'Consulta', total: 1 },
+  { day_of_week: 1, day_name: 'Seg', service_name: 'Tosa', total: 1 },
+  { day_of_week: 1, day_name: 'Seg', service_name: 'Banho + Tosa', total: 2 },
+  // Terça
+  { day_of_week: 2, day_name: 'Ter', service_name: 'Banho simples', total: 1 },
+  { day_of_week: 2, day_name: 'Ter', service_name: 'Banho completo', total: 2 },
+  { day_of_week: 2, day_name: 'Ter', service_name: 'Consulta', total: 1 },
+  { day_of_week: 2, day_name: 'Ter', service_name: 'Tosa', total: 2 },
+  { day_of_week: 2, day_name: 'Ter', service_name: 'Banho + Tosa', total: 1 },
+  // Quarta
+  { day_of_week: 3, day_name: 'Qua', service_name: 'Banho simples', total: 2 },
+  { day_of_week: 3, day_name: 'Qua', service_name: 'Banho completo', total: 1 },
+  { day_of_week: 3, day_name: 'Qua', service_name: 'Consulta', total: 2 },
+  { day_of_week: 3, day_name: 'Qua', service_name: 'Tosa', total: 1 },
+  { day_of_week: 3, day_name: 'Qua', service_name: 'Banho + Tosa', total: 3 },
+  // Quinta
+  { day_of_week: 4, day_name: 'Qui', service_name: 'Banho simples', total: 3 },
+  { day_of_week: 4, day_name: 'Qui', service_name: 'Banho completo', total: 1 },
+  { day_of_week: 4, day_name: 'Qui', service_name: 'Consulta', total: 2 },
+  { day_of_week: 4, day_name: 'Qui', service_name: 'Tosa', total: 2 },
+  { day_of_week: 4, day_name: 'Qui', service_name: 'Banho + Tosa', total: 2 },
+  // Sexta
+  { day_of_week: 5, day_name: 'Sex', service_name: 'Banho simples', total: 4 },
+  { day_of_week: 5, day_name: 'Sex', service_name: 'Banho completo', total: 2 },
+  { day_of_week: 5, day_name: 'Sex', service_name: 'Consulta', total: 2 },
+  { day_of_week: 5, day_name: 'Sex', service_name: 'Tosa', total: 3 },
+  { day_of_week: 5, day_name: 'Sex', service_name: 'Banho + Tosa', total: 4 },
+  // Sábado
+  { day_of_week: 6, day_name: 'Sáb', service_name: 'Banho simples', total: 5 },
+  { day_of_week: 6, day_name: 'Sáb', service_name: 'Banho completo', total: 3 },
+  { day_of_week: 6, day_name: 'Sáb', service_name: 'Consulta', total: 1 },
+  { day_of_week: 6, day_name: 'Sáb', service_name: 'Tosa', total: 4 },
+  { day_of_week: 6, day_name: 'Sáb', service_name: 'Banho + Tosa', total: 5 },
+]
 
 function EmptyState() {
   return (
     <div className="flex h-[180px] flex-col items-center justify-center gap-2">
-      <div className="h-10 w-10 rounded-full bg-[#f3f4f6] dark:bg-[#2a2d36] flex items-center justify-center">
+      <div className="h-10 w-10 rounded-full flex items-center justify-center">
         <span className="text-xl">📅</span>
       </div>
       <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">Sem agendamentos este mês</p>
-      <p className="text-xs text-[#9ca3af]">Os dados aparecerão quando houver agendamentos registrados</p>
+      <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">Os dados aparecerão quando houver agendamentos registrados</p>
     </div>
   )
 }
 
-export function AppointmentsWeekdayChart({ data, className }: Props) {
-  const { theme } = useTheme()
-  const isDark = theme === 'dark'
-  const [activeService, setActiveService] = useState<string | null>(null)
+export function AppointmentsWeekdayChart({ data, className, useMockData = false }: Props) {
+  const sourceData = useMockData ? MOCK_DATA : data
+  const [activeFilter, setActiveFilter] = useState<string>('Todos')
 
-  const services = [...new Set(data.map(d => d.service_name))]
+  // Extrai serviços únicos e adiciona "Todos"
+  const services = useMemo(() => {
+    const uniqueServices = [...new Set(sourceData.map(d => d.service_name))]
+    return ['Todos', ...uniqueServices]
+  }, [sourceData])
 
+  // Organiza dados por dia
   const byDay: Record<string, Record<string, number>> = {}
-  for (const row of data) {
+  for (const row of sourceData) {
     if (!byDay[row.day_name]) byDay[row.day_name] = {}
     byDay[row.day_name]![row.service_name] = row.total
   }
@@ -57,126 +103,130 @@ export function AppointmentsWeekdayChart({ data, className }: Props) {
     .filter(d => byDay[d])
     .map(day => ({ day, ...byDay[day] }))
 
-  const filteredServices = activeService ? [activeService] : services
+  // Filtra dados baseado no serviço selecionado
+  const filteredData = activeFilter === 'Todos'
+    ? sourceData
+    : sourceData.filter(d => d.service_name === activeFilter)
 
-  const total = data
-    .filter(d => !activeService || d.service_name === activeService)
-    .reduce((s, r) => s + r.total, 0)
+  // Calcula métricas
+  const totalSemana = filteredData.reduce((s, r) => s + r.total, 0)
 
   const busiestDay = chartData.reduce<{ day: string; total: number }>(
     (best, row) => {
       const rowAny = row as unknown as Record<string, unknown>
-      const rowTotal = filteredServices.reduce((s, svc) => s + Number(rowAny[svc] ?? 0), 0)
+      const servicesInFilter = activeFilter === 'Todos'
+        ? Object.keys(CATEGORY_COLORS)
+        : [activeFilter]
+      const rowTotal = servicesInFilter.reduce((s, svc) => s + Number(rowAny[svc] ?? 0), 0)
       return rowTotal > best.total ? { day: row.day, total: rowTotal } : best
     },
     { day: '', total: 0 },
   )
 
+  // Capacidade total (mock - ajustar com dados reais se houver)
+  const capacidadeTotal = totalSemana > 0 ? Math.ceil(totalSemana / 0.72) : 0
+  const ocupacao = capacidadeTotal > 0 ? Math.round((totalSemana / capacidadeTotal) * 100) : 0
+  const ociosos = capacidadeTotal - totalSemana
+
   return (
-    <div
-      className={cn(
-        'rounded-lg border border-[#727B8E1A] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4',
-        className,
-      )}
-    >
-      <div className="mb-3 flex items-start justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-            Agendamentos por dia
-          </h3>
-          <p className="text-xs text-[#9ca3af]">este mês · por serviço</p>
-        </div>
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold tracking-wider uppercase text-[#434A57] dark:text-[#f5f9fc]">
+          Agendamentos por Dia — Por Serviço {useMockData && '(Mock)'}
+        </p>
+        <span className="text-xs text-[#727B8E] dark:text-[#8a94a6]">realizado vs capacidade</span>
       </div>
 
-      {data.length === 0 ? (
+      {sourceData.length === 0 ? (
         <EmptyState />
       ) : (
         <>
-          {/* Filtros de serviço */}
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            <button
-              onClick={() => setActiveService(null)}
-              className={cn(
-                'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                !activeService
-                  ? 'bg-[#0F172A] text-white dark:bg-white dark:text-[#0F172A]'
-                  : 'bg-[#f3f4f6] text-[#374151] dark:bg-[#2a2d36] dark:text-[#d1d5db]',
-              )}
-            >
-              Todos
-            </button>
-            {services.map(svc => (
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {services.map((f) => (
               <button
-                key={svc}
-                onClick={() => setActiveService(svc === activeService ? null : svc)}
-                className={cn(
-                  'rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                  activeService === svc
-                    ? 'bg-[#0F172A] text-white dark:bg-white dark:text-[#0F172A]'
-                    : 'bg-[#f3f4f6] text-[#374151] dark:bg-[#2a2d36] dark:text-[#d1d5db]',
-                )}
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`text-xs px-4 py-1.5 rounded-full font-medium transition-all ${
+                  activeFilter === f
+                    ? "text-white bg-[#4254f0]"
+                    : "text-[#737b8c] bg-[#f3f4f7] hover:bg-[#e8e9ed]"
+                }`}
               >
-                {svc}
+                {f}
               </button>
             ))}
           </div>
 
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={chartData} barSize={20}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke={isDark ? gridStroke.dark : gridStroke.light}
-                vertical={false}
-              />
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(220, 15%, 91%)" />
               <XAxis
                 dataKey="day"
-                tick={{ fontSize: 11, fill: isDark ? tickFill.dark : tickFill.light }}
                 axisLine={false}
                 tickLine={false}
+                tick={{ fontSize: 12, fill: "hsl(220, 10%, 50%)" }}
               />
               <YAxis
-                tick={{ fontSize: 11, fill: isDark ? tickFill.dark : tickFill.light }}
                 axisLine={false}
                 tickLine={false}
+                tick={{ fontSize: 12, fill: "hsl(220, 10%, 50%)" }}
                 allowDecimals={false}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: isDark ? '#1A1B1D' : '#fff',
-                  border: isDark ? '1px solid #40485A' : '1px solid #E5E7EB',
-                  borderRadius: '8px',
-                  fontSize: 12,
+                content={({ active, payload }) => {
+                  if (!active || !payload || !payload[0]) return null
+                  const data = payload[0].payload
+                  return (
+                    <div className="bg-white dark:bg-[#1A1B1D] border border-[#727B8E1A] dark:border-[#40485A] rounded-md px-3 py-2 shadow-sm">
+                      <p className="text-xs text-[#434A57] dark:text-[#f5f9fc] mb-1">{data.day}</p>
+                      {Object.entries(CATEGORY_COLORS).map(([category, color]) => {
+                        const value = data[category]
+                        if (!value) return null
+                        return (
+                          <div key={category} className="flex items-center gap-2 text-xs">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                            <span className="text-[#434A57] dark:text-[#f5f9fc]">{category}: {value}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
                 }}
-                labelStyle={{ color: isDark ? '#8a94a6' : '#727B8E' }}
               />
-              {filteredServices.map((svc, i) => (
-                <Bar
-                  key={svc}
-                  dataKey={svc}
-                  stackId="a"
-                  fill={SERVICE_COLORS[i % SERVICE_COLORS.length]}
-                  radius={i === filteredServices.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
-                />
-              ))}
+              {activeFilter === 'Todos' ? (
+                <>
+                  <Bar dataKey="Banho simples" fill={CATEGORY_COLORS['Banho simples']} radius={[4, 4, 0, 0]} barSize={18} />
+                  <Bar dataKey="Banho completo" fill={CATEGORY_COLORS['Banho completo']} radius={[4, 4, 0, 0]} barSize={18} />
+                  <Bar dataKey="Consulta" fill={CATEGORY_COLORS['Consulta']} radius={[4, 4, 0, 0]} barSize={18} />
+                  <Bar dataKey="Tosa" fill={CATEGORY_COLORS['Tosa']} radius={[4, 4, 0, 0]} barSize={18} />
+                  <Bar dataKey="Banho + Tosa" fill={CATEGORY_COLORS['Banho + Tosa']} radius={[4, 4, 0, 0]} barSize={18} />
+                </>
+              ) : (
+                <Bar dataKey={activeFilter} fill={CATEGORY_COLORS[activeFilter as keyof typeof CATEGORY_COLORS] || 'hsl(234, 85%, 60%)'} radius={[4, 4, 0, 0]} barSize={22} />
+              )}
             </BarChart>
           </ResponsiveContainer>
 
-          <div className="mt-3 flex gap-6">
+          <div className="grid grid-cols-4 gap-2 mt-4 text-center">
             <div>
-              <span className="text-xl font-bold text-[#434A57] dark:text-[#f5f9fc]">{total}</span>
-              <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">este mês</p>
+              <p className="text-xl font-bold text-card-foreground">{totalSemana}</p>
+              <p className="text-[10px] uppercase text-[#727B8E] dark:text-[#8a94a6] tracking-wide">Semana</p>
             </div>
-            {busiestDay.day && (
-              <div>
-                <span className="text-xl font-bold text-[#434A57] dark:text-[#f5f9fc]">
-                  {busiestDay.day}
-                </span>
-                <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">dia mais cheio</p>
-              </div>
-            )}
+            <div>
+              <p className="text-xl font-bold text-card-foreground">{ocupacao}%</p>
+              <p className="text-[10px] uppercase text-[#727B8E] dark:text-[#8a94a6] tracking-wide">Ocupação</p>
+            </div>
+            <div>
+              <p className="text-xl font-bold text-card-foreground">{busiestDay.day || '—'}</p>
+              <p className="text-[10px] uppercase text-[#727B8E] dark:text-[#8a94a6] tracking-wide">Mais Cheio</p>
+            </div>
+            <div>
+              <p className="text-xl font-bold text-card-foreground">{ociosos}</p>
+              <p className="text-[10px] uppercase text-[#727B8E] dark:text-[#8a94a6] tracking-wide">Ociosos</p>
+            </div>
           </div>
         </>
       )}
-    </div>
+    </Card>
   )
 }

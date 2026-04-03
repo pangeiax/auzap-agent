@@ -22,16 +22,7 @@ export function DashboardLayout({
   const closeSidebar = () => setSidebarOpen(false)
 
   return (
-    <div className="relative flex h-dvh max-h-dvh w-full flex-col overflow-hidden bg-[#1B5FE9] dark:bg-gradient-to-b! dark:from-[#1B5FE9]! dark:to-[#1A1B1D]!">
-      <div
-        className="pointer-events-none absolute left-1/2 top-[112px] -translate-x-1/2 dark:hidden"
-        style={{
-          width: '2139px',
-          height: '1433px',
-          background: 'hsla(0, 0%, 100%, 0.73)',
-          filter: 'blur(131.25px)',
-        }}
-      />
+    <div className="relative flex h-dvh max-h-dvh w-full flex-col overflow-hidden dark:bg-gradient-to-b! dark:from-[#1B5FE9]! dark:to-[#1A1B1D]!">
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
         {topLabel && (

@@ -117,10 +117,10 @@ export function BrainChat({ userName, assistantName = 'AuZap' }: Props) {
               <div className="mb-5">
                 <SpeechVisualization size={120} idlePulse className="gap-0" />
               </div>
-              <h1 className="mb-1 text-2xl font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              <h1 className="mb-1 text-2xl font-medium text-[#f5f9fc]">
                 Bom te ver novamente, {firstName}!
               </h1>
-              <p className="mb-10 text-sm text-[#727B8E] dark:text-[#8a94a6] text-center">
+              <p className="mb-10 text-sm text-[#8a94a6] text-center">
                 {assistantName} — Pergunte qualquer coisa sobre o comercial do seu negócio
               </p>
             </motion.div>

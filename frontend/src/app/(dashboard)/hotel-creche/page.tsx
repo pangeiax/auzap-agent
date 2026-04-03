@@ -562,7 +562,6 @@ function PageSkeleton() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white shadow-sm dark:border-[#40485A] dark:bg-[#1A1B1D] sm:p-6 p-4">
           <div className="flex flex-col gap-5">
 
-            {/* Header */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Sk className="h-9 w-36 rounded-xl" />
@@ -575,7 +574,6 @@ function PageSkeleton() {
               </div>
             </div>
 
-            {/* KPIs */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {(['border-[#1E62EC]/10', 'border-green-200/60 dark:border-green-800/20', 'border-transparent', 'border-[#727B8E]/10'] as const).map((border, i) => (
                 <div key={i} className={cn('rounded-xl border p-3.5 bg-[#F4F6F9]/60 dark:bg-[#212225]/60', border)}>
@@ -585,7 +583,6 @@ function PageSkeleton() {
               ))}
             </div>
 
-            {/* Lists */}
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               {[0, 1].map((col) => (
                 <div key={col} className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
@@ -982,10 +979,8 @@ export default function HotelCrechePage() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 bg-white shadow-sm dark:border-[#40485A] dark:bg-[#1A1B1D] sm:p-6 p-4">
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
 
-            {/* ─── Header ─── */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                {/* Tabs Hotel / Creche */}
                 <div className="flex gap-1 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] p-1">
                   {config?.hotel_enabled && (
                     <button type="button" onClick={() => setActiveTab('hotel')}
@@ -1001,7 +996,6 @@ export default function HotelCrechePage() {
                   )}
                 </div>
 
-                {/* Horários pills */}
                 <div className="hidden sm:flex items-center gap-2">
                   <span className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:bg-[#212225] px-2.5 py-1 text-xs text-[#727B8E]">
                     Entrada: {isHotel ? config?.hotel_checkin_time : config?.daycare_checkin_time}
@@ -1013,7 +1007,6 @@ export default function HotelCrechePage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Filtro por tipo de quarto */}
                 {loadingTabData ? (
                   <Sk className="h-[34px] w-36 rounded-lg" />
                 ) : allRoomTypes.length > 0 ? (
@@ -1039,7 +1032,6 @@ export default function HotelCrechePage() {
               </div>
             </div>
 
-            {/* ─── Stats bar ─── */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {[
                 { label: 'Aguardando check-in', value: loadingRes ? null : reservados.length, color: 'text-[#1E62EC]', bg: 'bg-[#1E62EC]/5 dark:bg-[#1E62EC]/10', border: 'border-[#1E62EC]/10' },
@@ -1058,7 +1050,6 @@ export default function HotelCrechePage() {
               ))}
             </div>
 
-            {/* ─── Two-column reservation lists ─── */}
             {loadingRes ? (
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 {[0, 1].map((col) => (
@@ -1079,7 +1070,6 @@ export default function HotelCrechePage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                {/* Reservados */}
                 <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}
                   className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
                   <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3.5">
@@ -1106,7 +1096,6 @@ export default function HotelCrechePage() {
                   </div>
                 </motion.div>
 
-                {/* Hospedados */}
                 <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.15 }}
                   className="flex flex-col overflow-hidden rounded-2xl border border-[#727B8E]/10 dark:border-[#40485A]">
                   <div className="flex items-center gap-3 border-b border-[#727B8E]/10 dark:border-[#40485A] bg-white dark:bg-[#1A1B1D] px-4 py-3.5">
@@ -1138,7 +1127,6 @@ export default function HotelCrechePage() {
         </div>
       </div>
 
-      {/* Check-in Modal */}
       <Modal isOpen={!!checkinTarget} onClose={() => setCheckinTarget(null)} title="Fazer Check-in" className="max-w-[420px]">
         {checkinTarget && (
           <div className="flex flex-col gap-4">
@@ -1198,10 +1186,8 @@ export default function HotelCrechePage() {
         )}
       </Modal>
 
-      {/* Nova Reserva Manual Modal */}
       <Modal isOpen={newResOpen} onClose={() => setNewResOpen(false)} title={`Nova Reserva — ${activeTab === 'hotel' ? 'Hotel' : 'Creche'}`} className="max-w-[480px]">
         <div className="flex flex-col gap-4">
-          {/* Cliente */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Cliente</p>
             {modalClientsLoading ? (
@@ -1220,7 +1206,6 @@ export default function HotelCrechePage() {
             )}
           </div>
 
-          {/* Pet */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Pet</p>
             {!selectedClientId ? (
@@ -1243,7 +1228,6 @@ export default function HotelCrechePage() {
             )}
           </div>
 
-          {/* Datas */}
           <div className="grid grid-cols-2 gap-3">
             <MiniDatePicker
               label={activeTab === 'daycare' ? 'Primeiro dia na creche' : 'Check-in'}
@@ -1278,7 +1262,6 @@ export default function HotelCrechePage() {
             </p>
           )}
 
-          {/* Tipo de Quarto */}
           {newCheckinDate && newCheckoutDate && (
             <div>
               <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Tipo de quarto</p>
@@ -1335,7 +1318,6 @@ export default function HotelCrechePage() {
             </div>
           )}
 
-          {/* Diária */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Valor da diária (opcional)</p>
             <div className="relative">
@@ -1350,7 +1332,6 @@ export default function HotelCrechePage() {
             </div>
           </div>
 
-          {/* Contato de emergência */}
           <div>
             <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Contato de emergência (opcional)</p>
             <Input
@@ -1373,7 +1354,6 @@ export default function HotelCrechePage() {
         </div>
       </Modal>
 
-      {/* Check-out Modal */}
       <Modal isOpen={!!checkoutTarget} onClose={() => setCheckoutTarget(null)} title="Fazer Check-out" className="max-w-[400px]">
         {checkoutTarget && (
           <div className="flex flex-col gap-4">
