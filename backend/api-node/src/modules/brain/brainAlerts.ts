@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma'
-import { BrainContext, BrainAlert } from './brain.types'
+import type { BrainAlert } from './brain.types'
 
 function todayBR(): string {
   return new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
@@ -11,7 +11,7 @@ function futureDateBR(days: number): string {
   return d.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
 }
 
-async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
+export async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
   const alerts: BrainAlert[] = []
   const today = todayBR()
   const in14days = futureDateBR(14)
@@ -203,133 +203,6 @@ async function buildAlerts(companyId: number): Promise<BrainAlert[]> {
   return alerts
 }
 
-export async function buildContext(companyId: number): Promise<BrainContext> {
-  const today = todayBR()
-
-  const [company, profile, revenueRaw, appointmentsRaw, clientsRaw, conversionRaw, alertsResult] = await Promise.all([
-    prisma.$queryRaw<Array<{ name: string; plan: string | null }>>`
-      SELECT name, plan FROM saas_companies WHERE id = ${companyId} LIMIT 1
-    `,
-    prisma.$queryRaw<Array<{ assistant_name: string | null }>>`
-      SELECT assistant_name FROM petshop_profile WHERE company_id = ${companyId} LIMIT 1
-    `,
-    prisma.$queryRaw<Array<{
-      revenue_today: number | null
-      revenue_yesterday: number | null
-      revenue_this_week: number | null
-    }>>`
-      SELECT revenue_today, revenue_yesterday, revenue_this_week
-      FROM dashboard_revenue_realtime
-      WHERE company_id = ${companyId}
-      LIMIT 1
-    `,
-    prisma.$queryRaw<Array<{ confirmed: boolean; status: string }>>`
-      SELECT confirmed, status
-      FROM dashboard_appointment_metrics
-      WHERE company_id = ${companyId}
-        AND scheduled_date::text = ${today}
-        AND status <> 'cancelled'
-    `,
-    prisma.$queryRaw<Array<{ recurrence_status: string }>>`
-      SELECT recurrence_status
-      FROM dashboard_client_recurrence
-      WHERE company_id = ${companyId}
-    `,
-    prisma.$queryRaw<Array<{ conversion_rate: number | null }>>`
-      SELECT conversion_rate
-      FROM dashboard_whatsapp_conversion
-      WHERE company_id = ${companyId}
-      ORDER BY month DESC
-      LIMIT 1
-    `,
-    buildAlerts(companyId),
-  ])
-
-  const revenue = revenueRaw[0]
-  const appointments = appointmentsRaw
-  const allClients = clientsRaw
-
-  const todayFormatted = new Date().toLocaleDateString('pt-BR', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
-    timeZone: 'America/Sao_Paulo',
-  })
-
-  const revenueToday = Number(revenue?.revenue_today ?? 0)
-  const revenueYesterday = Number(revenue?.revenue_yesterday ?? 0)
-
-  return {
-    petshop_name:                   company[0]?.name ?? 'Petshop',
-    assistant_name:                 profile[0]?.assistant_name ?? 'Assistente',
-    plan:                           company[0]?.plan ?? 'free',
-    today:                          todayFormatted,
-    appointments_today_total:       appointments.length,
-    appointments_today_confirmed:   appointments.filter(a => a.confirmed).length,
-    appointments_today_pending:     appointments.filter(a => !a.confirmed).length,
-    revenue_today:                  revenueToday,
-    revenue_this_week:              Number(revenue?.revenue_this_week ?? 0),
-    revenue_today_vs_yesterday_pct: revenueYesterday > 0
-      ? parseFloat((((revenueToday - revenueYesterday) / revenueYesterday) * 100).toFixed(1))
-      : null,
-    active_clients:                 allClients.filter(c => c.recurrence_status === 'active' || c.recurrence_status === 'at_risk').length,
-    lost_clients_count:             allClients.filter(c => c.recurrence_status === 'lost').length,
-    whatsapp_conversion_rate:       Number(conversionRaw[0]?.conversion_rate ?? 0),
-    alerts:                         alertsResult,
-  }
-}
-
-export function contextToSystemPrompt(ctx: BrainContext): string {
-  const alertsBlock = ctx.alerts.length === 0
-    ? '✅ Nenhum alerta no momento.'
-    : ctx.alerts.map(a => {
-        const icon = a.type === 'critical' ? '🔴' : a.type === 'warning' ? '⚠️' : 'ℹ️'
-        return `${icon} ${a.message}`
-      }).join('\n')
-
-  return `Você é ${ctx.assistant_name}, o assistente inteligente do ${ctx.petshop_name}.
-Você ajuda o dono do petshop a entender seu negócio respondendo perguntas em linguagem natural.
-Seja direto, objetivo e use emojis com moderação. Responda sempre em português brasileiro.
-Formate valores como moeda brasileira (R$ 1.234,00). Quando não souber algo, diga honestamente.
-Quando houver alertas críticos ou importantes, mencione-os naturalmente na resposta quando for relevante — não force, mas não ignore.
-
-📅 Hoje é ${ctx.today}
-
-📊 RESUMO DO DIA:
-- Agendamentos hoje: ${ctx.appointments_today_total} total (${ctx.appointments_today_confirmed} confirmados, ${ctx.appointments_today_pending} pendentes)
-- Faturamento hoje: R$ ${ctx.revenue_today.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${ctx.revenue_today_vs_yesterday_pct !== null ? ` (${ctx.revenue_today_vs_yesterday_pct >= 0 ? '↑' : '↓'}${Math.abs(ctx.revenue_today_vs_yesterday_pct)}% vs ontem)` : ''}
-- Faturamento esta semana: R$ ${ctx.revenue_this_week.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-
-👥 CLIENTES:
-- Clientes ativos (últimos 60 dias): ${ctx.active_clients}
-- Clientes sumidos (mais de 60 dias): ${ctx.lost_clients_count}
-- Conversão WhatsApp: ${ctx.whatsapp_conversion_rate}%
-
-🔔 ALERTAS ATIVOS:
-${alertsBlock}
-
-Você tem acesso a ferramentas para buscar informações detalhadas quando o usuário pedir.
-
-FLUXO DE AGENDAMENTO MANUAL:
-Quando o usuário quiser agendar para um cliente:
-1. Perguntar se o cliente já existe no sistema
-2. Se SIM → search_clients pelo nome → mostrar opções → confirmar qual é
-3. Se NÃO → coletar nome, telefone (qualquer formato) e email (opcional) → confirmar dados antes de criar → create_client
-4. Com o client_id → get_client_pets_for_scheduling → perguntar para qual pet
-5. list_active_services para obter service_id, depois pergunta data → get_available_times com target_date, service_id e pet_id
-6. Mostrar resumo e aguardar confirmação → create_manual_appointment (scheduled_date deve ser YYYY-MM-DD e coincidir com o dia do slot)
-
-NORMALIZAÇÃO DE TELEFONE:
-Antes de create_client, confirme o número com o usuário. A tool create_client usa só dígitos (ex.: 5511999999999).
-
-CAMPANHA DE REATIVAÇÃO:
-1. Identificar alvos (get_high_value_lost_clients ou lista na conversa)
-2. Redigir texto natural
-3. create_campaign_draft com client_ids e message_template — o painel mostrará envio pelo WhatsApp conectado (Baileys)
-
-CASO COMPLETO (ex.: "agenda banho para o Rex do João amanhã"):
-search_clients → get_client_pets_for_scheduling → list_active_services + get_available_times → create_manual_appointment. Não repetir o que o usuário já informou.`
-}
-
-/** Frases alinhadas às tools em brain.tools.ts e ao resumo operacional do petshop (quando não há alertas suficientes). */
 export const BRAIN_SUGGESTION_FALLBACKS = [
   'Quem está na minha agenda hoje e o que já está confirmado?',
   'Quais agendamentos pendentes nos próximos 7 dias?',

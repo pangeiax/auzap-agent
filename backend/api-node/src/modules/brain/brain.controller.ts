@@ -1,6 +1,6 @@
-import { Request, Response } from 'express'
+﻿import { Request, Response } from 'express'
 import { BrainService } from './brain.service'
-import { buildBrainSuggestionPrompts } from './brain.context'
+import { buildBrainSuggestionPrompts } from './brainAlerts'
 
 const service = new BrainService()
 

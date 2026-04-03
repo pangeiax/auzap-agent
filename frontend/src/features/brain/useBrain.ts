@@ -73,6 +73,7 @@ export function useBrain() {
           role: 'assistant',
           content: displayText || result.reply,
           ...(structured ? { structured } : {}),
+          ...(result.meta?.sql ? { sqlExecuted: result.meta.sql } : {}),
         },
       ])
     } catch {

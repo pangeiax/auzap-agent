@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
+import { BRAIN_CAMPAIGN_SEND_FALLBACK } from './brainLimits'
 
 interface Client {
   id: string
@@ -10,21 +11,74 @@ interface Client {
 interface CampaignDraftProps {
   clients: Client[]
   message: string
+  /** Limite do plano (vem do JSON campaign_draft). */
+  maxRecipientsPerSend?: number
   onClose: () => void
 }
 
-export function CampaignDraft({ clients, message, onClose }: CampaignDraftProps) {
+export function CampaignDraft({ clients, message, maxRecipientsPerSend, onClose }: CampaignDraftProps) {
+  const sendCap =
+    maxRecipientsPerSend != null && maxRecipientsPerSend > 0
+      ? maxRecipientsPerSend
+      : BRAIN_CAMPAIGN_SEND_FALLBACK
+
+  const clientIdsKey = clients.map((c) => c.id).join('|')
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    const ids = new Set<string>()
+    const n = Math.min(sendCap, clients.length)
+    for (const c of clients.slice(0, n)) {
+      ids.add(c.id)
+    }
+    return ids
+  })
   const [draft, setDraft] = useState(message)
+
+  useEffect(() => {
+    const ids = new Set<string>()
+    const n = Math.min(sendCap, clients.length)
+    for (const c of clients.slice(0, n)) {
+      ids.add(c.id)
+    }
+    setSelectedIds(ids)
+    setDraft(message)
+    setSent(false)
+    setError(null)
+  }, [clientIdsKey, message, sendCap])
+
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const selectedCount = selectedIds.size
+  const selectedClients = useMemo(
+    () => clients.filter((c) => selectedIds.has(c.id)),
+    [clients, selectedIds],
+  )
+
+  function toggleClient(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+        return next
+      }
+      if (next.size >= sendCap) return prev
+      next.add(id)
+      return next
+    })
+  }
+
   async function handleSend() {
+    if (selectedCount === 0) {
+      setError('Selecione pelo menos um cliente.')
+      return
+    }
     setSending(true)
     setError(null)
     try {
       await api.post('/campaigns/send', {
-        clients: clients.map((c) => ({ id: c.id, phone: c.phone })),
+        clients: selectedClients.map((c) => ({ id: c.id, phone: c.phone })),
         message: draft,
       })
       setSent(true)
@@ -42,23 +96,46 @@ export function CampaignDraft({ clients, message, onClose }: CampaignDraftProps)
   if (sent) {
     return (
       <div className="mt-3 rounded-xl border border-[#727B8E1A] bg-emerald-500/10 dark:border-[#40485A] px-4 py-3 text-sm text-emerald-800 dark:text-emerald-300">
-        Campanha enviada para {clients.length} cliente(s).
+        Campanha enviada para {selectedCount} cliente(s).
       </div>
     )
   }
 
   return (
     <div className="mt-3 rounded-xl border border-[#727B8E1A] bg-gray-50 dark:border-[#40485A] dark:bg-[#141518] px-4 py-3 text-sm">
-      <p className="mb-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
-        Campanha para {clients.length} cliente(s)
+      <p className="mb-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+        Campanha — até {sendCap} destinatário(s) por envio (seu plano)
       </p>
-      <ul className="mb-3 max-h-28 space-y-0.5 overflow-y-auto text-xs text-[#727B8E] dark:text-[#8a94a6]">
-        {clients.map((c) => (
-          <li key={c.id}>
-            • {c.name} — {c.phone}
-          </li>
-        ))}
+      <p className="mb-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+        {clients.length} na lista · {selectedCount} selecionado(s)
+      </p>
+      <ul className="mb-3 max-h-36 space-y-2 overflow-y-auto text-xs text-[#434A57] dark:text-[#f5f9fc]">
+        {clients.map((c) => {
+          const checked = selectedIds.has(c.id)
+          const disableCheck = !checked && selectedIds.size >= sendCap
+          return (
+            <li key={c.id} className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                id={`campaign-client-${c.id}`}
+                checked={checked}
+                disabled={disableCheck}
+                onChange={() => toggleClient(c.id)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#727B8E66] text-[#0F172A] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#40485A]"
+              />
+              <label htmlFor={`campaign-client-${c.id}`} className={`cursor-pointer ${disableCheck ? 'opacity-50' : ''}`}>
+                <span className="font-medium">{c.name}</span>
+                <span className="block text-[#727B8E] dark:text-[#8a94a6]">{c.phone}</span>
+              </label>
+            </li>
+          )
+        })}
       </ul>
+      {selectedIds.size >= sendCap && clients.length > sendCap && (
+        <p className="mb-2 text-xs text-amber-700 dark:text-amber-400">
+          Limite de {sendCap} destinatário(s) por envio atingido. Desmarque alguém para trocar a seleção.
+        </p>
+      )}
       <p className="mb-1 text-xs text-[#727B8E] dark:text-[#8a94a6]">Mensagem (editável)</p>
       <textarea
         value={draft}
@@ -78,10 +155,10 @@ export function CampaignDraft({ clients, message, onClose }: CampaignDraftProps)
         <button
           type="button"
           onClick={handleSend}
-          disabled={sending || !draft.trim()}
+          disabled={sending || !draft.trim() || selectedCount === 0}
           className="rounded-lg bg-[#0F172A] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-[#f5f9fc] dark:text-[#0F172A]"
         >
-          {sending ? 'Enviando...' : `Enviar para ${clients.length} cliente(s)`}
+          {sending ? 'Enviando...' : `Enviar para ${selectedCount} cliente(s)`}
         </button>
       </div>
     </div>

@@ -1,4 +1,6 @@
 import { Request, Response } from 'express'
+import { prisma } from '../../lib/prisma'
+import { resolveSecondBrainPlanLimits } from '../brain/brainPlanConstants'
 import { sendCampaignMessages } from './campaigns.service'
 
 /**
@@ -25,6 +27,24 @@ export async function sendCampaign(req: Request, res: Response) {
 
     if (!normalized.length) {
       return res.status(400).json({ error: 'Nenhum destino válido (id + phone)' })
+    }
+
+    const company = await prisma.saasCompany.findUnique({
+      where: { id: companyId },
+      select: { plan: true },
+    })
+    const sendMax = resolveSecondBrainPlanLimits(company?.plan).campaignSendMaxRecipients
+
+    if (sendMax <= 0) {
+      return res.status(403).json({
+        error: 'Envio de campanha pelo painel não está disponível no seu plano atual.',
+      })
+    }
+
+    if (normalized.length > sendMax) {
+      return res.status(400).json({
+        error: `Máximo de ${sendMax} destinatário(s) por envio no seu plano. Reduza a seleção.`,
+      })
     }
 
     const result = await sendCampaignMessages(companyId, normalized, message)

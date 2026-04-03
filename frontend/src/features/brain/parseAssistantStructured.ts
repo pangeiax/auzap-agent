@@ -5,6 +5,8 @@ export type CampaignDraftPayload = {
   clients: { id: string; name: string; phone: string }[]
   message: string
   total?: number
+  /** Limite do plano para quantos destinatários podem ser marcados no envio. */
+  max_recipients_per_send?: number
 }
 
 export type AppointmentCreatedPayload = {

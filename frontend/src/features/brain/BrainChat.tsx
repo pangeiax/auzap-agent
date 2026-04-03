@@ -81,6 +81,7 @@ function AssistantBubble({ msg }: { msg: BrainMessage }) {
           <CampaignDraft
             clients={msg.structured.clients}
             message={msg.structured.message}
+            maxRecipientsPerSend={msg.structured.max_recipients_per_send}
             onClose={() => {}}
           />
         )}
@@ -91,6 +92,16 @@ function AssistantBubble({ msg }: { msg: BrainMessage }) {
               ID: {msg.structured.appointment_id} · Data: {msg.structured.scheduled_date}
             </p>
           </div>
+        )}
+        {msg.sqlExecuted && (
+          <details className="mt-3 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+            <summary className="cursor-pointer select-none font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              SQL executada (somente leitura)
+            </summary>
+            <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-[#727B8E1A] bg-gray-50 p-3 font-mono text-[11px] leading-relaxed text-[#434A57] dark:border-[#40485A] dark:bg-[#141518] dark:text-[#d1d5db]">
+              {msg.sqlExecuted}
+            </pre>
+          </details>
         )}
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { api } from '@/lib/api'
-import { BrainAlert } from './brain.types'
+import type { BrainAlert, BrainChatMeta } from './brain.types'
 
 export async function fetchBrainSuggestions(): Promise<string[]> {
   const { data } = await api.get<{ suggestions: string[] }>('/brain/suggestions')
@@ -9,7 +9,7 @@ export async function fetchBrainSuggestions(): Promise<string[]> {
 export async function sendBrainMessage(
   message: string,
   history: { role: string; content: string }[]
-): Promise<{ reply: string; alerts: BrainAlert[] }> {
+): Promise<{ reply: string; alerts: BrainAlert[]; meta?: BrainChatMeta }> {
   const { data } = await api.post('/brain/chat', { message, history })
   return data
 }
