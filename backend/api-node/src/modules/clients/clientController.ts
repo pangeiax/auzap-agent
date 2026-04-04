@@ -225,7 +225,15 @@ export async function deleteClient(req: Request, res: Response) {
       return res.status(404).json({ error: 'Client not found' })
     }
 
-    await prisma.client.delete({ where: { id: clientId } })
+    await prisma.$transaction(async (tx) => {
+      // Tabela gerida fora do Prisma schema — FK sem cascade bloqueava o delete
+      await tx.$executeRaw`
+        DELETE FROM client_sentiment_analysis
+        WHERE company_id = ${companyId}
+          AND client_id = ${clientId}::uuid
+      `
+      await tx.client.delete({ where: { id: clientId } })
+    })
 
     res.json({ success: true, client_id: clientId })
   } catch (error) {

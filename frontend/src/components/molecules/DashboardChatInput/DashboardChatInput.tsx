@@ -185,10 +185,10 @@ export function DashboardChatInput({
           disabled={disabled}
           placeholder={getPlaceholder()}
           aria-label="Campo de mensagem do chat"
-          className="min-h-[44px] max-h-[120px] w-full resize-none border-none bg-transparent text-base text-[#434A57] dark:text-[#f5f9fc] outline-none placeholder:text-[#727B8E] dark:placeholder:text-[#8a94a6] disabled:cursor-not-allowed disabled:opacity-50 py-1"
+          className="max-h-[120px] w-full resize-none border-none bg-transparent text-base text-[#434A57] dark:text-[#f5f9fc] outline-none placeholder:text-[#727B8E] dark:placeholder:text-[#8a94a6] disabled:cursor-not-allowed disabled:opacity-50 py-1"
           rows={1}
         />
-        <div className="mt-2 flex items-center justify-between">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-0">
             <button
               type="button"

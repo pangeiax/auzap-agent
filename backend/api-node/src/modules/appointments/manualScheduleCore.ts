@@ -29,8 +29,13 @@ const appointmentInclude = {
   slot: { select: { slotDate: true, slotTime: true } },
 }
 
-function slotDateKeyBR(slotDate: Date): string {
-  return slotDate.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10)
+/**
+ * Dia civil do slot (Postgres @db.Date). Os slots são consultados com Date.UTC(y,m,d);
+ * Prisma devolve meia-noite UTC nesse mesmo calendário — usar ISO UTC evita “voltar um dia”
+ * ao converter para America/Sao_Paulo (ex.: 03/04 UTC → 02/04 BRT).
+ */
+function slotDateKey(slotDate: Date): string {
+  return slotDate.toISOString().slice(0, 10)
 }
 
 /** Mesmo pet não pode ter dois atendimentos ativos com início no mesmo slot (data+hora da grade). Outros pets do mesmo dono podem se o slot tiver vaga. */
@@ -130,7 +135,7 @@ export async function createManualScheduleAppointment(
     }
   }
 
-  const slotKey = slotDateKeyBR(slot.slotDate)
+  const slotKey = slotDateKey(slot.slotDate)
   if (scheduled_date && scheduled_date !== slotKey) {
     return {
       ok: false,

@@ -47,7 +47,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
 
   return (
     <AuthBackProvider>
-      <div className="relative min-h-screen w-full overflow-x-hidden bg-[#1B5FE9] dark:bg-gradient-to-b dark:from-[#1B5FE9] dark:to-[#1A1B1D]">
+      <div className="relative min-h-screen w-full overflow-x-hidden dark:bg-gradient-to-b dark:from-[#1B5FE9] dark:to-[#1A1B1D]">
         <div className="absolute right-4 top-4 z-20 sm:right-6 sm:top-6">
           <button
             type="button"

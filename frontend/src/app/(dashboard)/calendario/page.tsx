@@ -38,6 +38,7 @@ import { MiniDatePicker } from "@/components/molecules/MiniDatePicker/MiniDatePi
 import {
   extractPairedAppointmentId,
   mergePairedByTime,
+  notesForDisplay,
   resolveSymmetricPairIds,
 } from "@/lib/appointmentPair";
 
@@ -100,6 +101,7 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
     clientPhone: clientPhoneDisplay,
     pairedAppointmentId:
       extractPairedAppointmentId(a.notes) ?? undefined,
+    notes: notesForDisplay(a.notes) || undefined,
   };
 }
 
@@ -340,6 +342,7 @@ export default function CalendarioPage() {
         ...first,
         pairedAppointmentId: second.id,
         timeEnd: second.time,
+        notes: [first.notes, second.notes].filter(Boolean).join("\n\n") || first.notes,
       })),
     [events],
   );
@@ -1306,10 +1309,10 @@ export default function CalendarioPage() {
 
           <div className="flex flex-col gap-3">
             <label className="font-be-vietnam-pro text-base font-semibold leading-[23px] text-[#434A57] dark:text-[#f5f9fc]">
-              Observações
+              Descrição / observações
             </label>
             <TextArea
-              placeholder="Observações sobre o agendamento..."
+              placeholder="Detalhes do serviço, preferências do tutor, alertas..."
               rows={3}
               value={formData.notes}
               onChange={(e) => handleFormChange("notes", e.target.value)}
@@ -1406,6 +1409,16 @@ export default function CalendarioPage() {
                     : selectedEvent.time}
                 </span>
               </div>
+              {selectedEvent.notes ? (
+                <div className="border-t border-[#727B8E]/15 pt-3 dark:border-[#40485A]">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6] mb-1.5">
+                    Descrição
+                  </p>
+                  <p className="text-sm text-[#434A57] dark:text-[#f5f9fc] whitespace-pre-wrap">
+                    {selectedEvent.notes}
+                  </p>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

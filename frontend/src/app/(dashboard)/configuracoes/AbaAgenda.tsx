@@ -468,29 +468,31 @@ function DayRow({
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#727B8E]">
               Horário
             </p>
-            <div className="flex items-center gap-3">
-              <div>
-                <label className="mb-1 block text-[11px] text-[#727B8E]">Abre</label>
-                <input
-                  type="time"
-                  value={local.open_time}
-                  disabled={saving}
-                  onChange={(e) => onTimeChange("open_time", e.target.value)}
-                  className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] px-2.5 py-1.5 text-sm text-[#434A57] focus:border-[#1E62EC] focus:outline-none disabled:opacity-40 dark:bg-[#212225] dark:text-[#f5f9fc]"
-                />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <div className="flex items-center gap-3">
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#727B8E]">Abre</label>
+                  <input
+                    type="time"
+                    value={local.open_time}
+                    disabled={saving}
+                    onChange={(e) => onTimeChange("open_time", e.target.value)}
+                    className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] px-2.5 py-1.5 text-sm text-[#434A57] focus:border-[#1E62EC] focus:outline-none disabled:opacity-40 dark:bg-[#212225] dark:text-[#f5f9fc]"
+                  />
+                </div>
+                <span className="mt-5 text-sm text-[#727B8E]">→</span>
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#727B8E]">Fecha</label>
+                  <input
+                    type="time"
+                    value={local.close_time}
+                    disabled={saving}
+                    onChange={(e) => onTimeChange("close_time", e.target.value)}
+                    className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] px-2.5 py-1.5 text-sm text-[#434A57] focus:border-[#1E62EC] focus:outline-none disabled:opacity-40 dark:bg-[#212225] dark:text-[#f5f9fc]"
+                  />
+                </div>
               </div>
-              <span className="mt-5 text-sm text-[#727B8E]">→</span>
-              <div>
-                <label className="mb-1 block text-[11px] text-[#727B8E]">Fecha</label>
-                <input
-                  type="time"
-                  value={local.close_time}
-                  disabled={saving}
-                  onChange={(e) => onTimeChange("close_time", e.target.value)}
-                  className="rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] px-2.5 py-1.5 text-sm text-[#434A57] focus:border-[#1E62EC] focus:outline-none disabled:opacity-40 dark:bg-[#212225] dark:text-[#f5f9fc]"
-                />
-              </div>
-              <span className="mt-5 text-xs text-[#727B8E]">
+              <span className="text-xs text-[#727B8E]">
                 {horariosDisponiveisLabel(slotCount)}
               </span>
             </div>
@@ -518,41 +520,41 @@ function DayRow({
                   return (
                     <div
                       key={sp.id}
-                      className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225]"
+                      className="rounded-lg border border-[#727B8E]/10 bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] p-3"
                     >
-                      <div className="flex items-center gap-3 px-3 py-2.5">
-                        <button
-                          type="button"
-                          disabled={saving || slotTimes.length === 0}
-                          onClick={() => onToggleSpecialtySlots(sp.id)}
-                          className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:opacity-50"
-                        >
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: spColor }}
-                          />
-                          <span className="text-[#727B8E]">
-                            {isSpecialtyExpanded ? (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            )}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-                            {sp.name}
-                          </span>
-            
-                          {changedSlotsCount > 0 && (
-                            <span className="rounded-full bg-[#1E62EC]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1E62EC]">
-                              {changedSlotsCount} ajuste{changedSlotsCount !== 1 ? "s" : ""}
-                            </span>
+                      <button
+                        type="button"
+                        disabled={saving || slotTimes.length === 0}
+                        onClick={() => onToggleSpecialtySlots(sp.id)}
+                        className="flex w-full min-w-0 items-center gap-2 text-left disabled:opacity-50 mb-3"
+                      >
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: spColor }}
+                        />
+                        <span className="text-[#727B8E]">
+                          {isSpecialtyExpanded ? (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5" />
                           )}
-                        </button>
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                          {sp.name}
+                        </span>
 
-                        <span className="shrink-0 text-xs text-[#727B8E]">
+                        {changedSlotsCount > 0 && (
+                          <span className="rounded-full bg-[#1E62EC]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1E62EC]">
+                            {changedSlotsCount} ajuste{changedSlotsCount !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </button>
+
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="text-xs text-[#727B8E]">
                           {horariosDisponiveisLabel(slotCount)} · {vagasPorHorarioLabel(maxCap)}
                         </span>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
                             disabled={saving || maxCap <= 0}

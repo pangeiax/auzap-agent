@@ -653,7 +653,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         Use esta tool SEMPRE que o cliente informar o porte — tanto para pets já cadastrados quanto para pets ainda não cadastrados.
 
         - Se o pet já existe no banco (nome **igual** ao cadastro, sem diferenciar maiúsculas) → atualiza o porte
-        - Se o pet ainda não foi cadastrado → retorna o porte confirmado para uso em create_pet e nos preços (gate Redis); **não** atualiza outro pet por nome diferente — com um único pet cadastrado e nome que não bate, a resposta pode trazer `disambiguation` para você perguntar ao cliente se é esse pet ou um novo
+        - Se o pet ainda não foi cadastrado → retorna o porte confirmado para uso em create_pet e nos preços (gate Redis); **não** atualiza outro pet por nome diferente
 
         O porte confirmado por esta tool define o preço dos serviços.
         NUNCA deduza o porte pela raça — sempre pergunte ao cliente primeiro.
@@ -700,7 +700,6 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         size_label = {"P": "pequeno", "M": "médio", "G": "grande", "GG": "extra grande"}.get(size_db, size)
 
         updated = None
-        single_registered_pet_name: str | None = None
         services_pricing_for_reply = ""
         with get_connection() as conn:
             cur = conn.cursor()
@@ -716,22 +715,6 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                     (size_db, company_id, client_id, pet_name),
                 )
                 updated = cur.fetchone()
-            if (
-                not updated
-                and client_id
-                and pet_name
-                and pet_name.strip()
-            ):
-                cur.execute(
-                    """
-                    SELECT name FROM petshop_pets
-                    WHERE company_id = %s AND client_id = %s AND is_active = TRUE
-                    """,
-                    (company_id, client_id),
-                )
-                name_rows = cur.fetchall()
-                if len(name_rows) == 1:
-                    single_registered_pet_name = (name_rows[0].get("name") or "").strip() or None
             services_pricing_for_reply = _services_pricing_snapshot(cur, company_id, size_db)
 
         if not updated and pet_name and pet_name.strip():
@@ -755,26 +738,11 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                 "pet_updated": True,
                 "message": f"Porte de {updated['name']} confirmado como {size_label}!",
             }
-        out_new = {
+        return {
             **base_out,
             "pet_updated": False,
             "message": f"Porte confirmado: {size_label}. Use este porte ao cadastrar o pet e para calcular preços.",
         }
-        if (
-            single_registered_pet_name
-            and pet_name
-            and pet_name.strip()
-            and single_registered_pet_name.lower() != pet_name.strip().lower()
-        ):
-            out_new["disambiguation"] = {
-                "only_registered_pet_name": single_registered_pet_name,
-                "hint": (
-                    f"O cliente tem só um pet cadastrado («{single_registered_pet_name}»), mas o nome passado "
-                    f"na tool («{pet_name.strip()}») não bate. Pergunte se é esse pet (typo/apelido) ou um pet novo "
-                    "antes de seguir; não atualize o porte do cadastro sem nome correto ou confirmação explícita."
-                ),
-            }
-        return out_new
 
     VALID_STAGES = {"initial", "onboarding", "pet_registered", "booking", "completed"}
 

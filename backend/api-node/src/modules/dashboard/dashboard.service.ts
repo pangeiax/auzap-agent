@@ -15,6 +15,14 @@ import type {
 
 const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
+/** DOW do Postgres: dom=0 … sáb=6. ISODOW: seg=1 … dom=7. */
+function dayLabelFromWeekday(dow: number): string {
+  const d = Number(dow)
+  if (d === 0 || d === 7) return DAY_NAMES[0]!
+  if (d >= 1 && d <= 6) return DAY_NAMES[d]!
+  return DAY_NAMES[0]!
+}
+
 function startOfCurrentMonth(): Date {
   const d = new Date()
   d.setDate(1)
@@ -95,8 +103,11 @@ export class DashboardService {
 
     const grouped: Record<string, number[]> = {}
     for (const row of rows) {
-      const rawMonth = String(row.month)
-      const key = rawMonth.slice(0, 7)
+      const m = row.month
+      const key =
+        m instanceof Date
+          ? m.toISOString().slice(0, 7)
+          : String(m).slice(0, 7)
       if (!grouped[key]) grouped[key] = []
       if (row.revenue != null) grouped[key]!.push(Number(row.revenue))
     }
@@ -142,7 +153,7 @@ export class DashboardService {
       if (!grouped[key]) {
         grouped[key] = {
           day_of_week: row.day_of_week,
-          day_name: DAY_NAMES[row.day_of_week] ?? String(row.day_of_week),
+          day_name: dayLabelFromWeekday(row.day_of_week),
           service_name: row.service_name,
           total: 0,
         }

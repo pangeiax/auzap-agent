@@ -434,9 +434,15 @@ export async function scheduleAppointment(req: Request, res: Response) {
       return res.status(400).json({ error: 'slot_id é obrigatório' })
     }
 
-    const scheduled_date = new Date(scheduled_at).toLocaleString('sv-SE', {
-      timeZone: 'America/Sao_Paulo',
-    }).slice(0, 10)
+    // Preferir a data YYYY-MM-DD explícita no payload (igual ao date picker / slot query);
+    // evita deslocamento quando o horário em UTC cruza meia-noite em BRT.
+    const scheduledAtStr = String(scheduled_at).trim()
+    const datePrefix = scheduledAtStr.match(/^(\d{4}-\d{2}-\d{2})/)
+    const scheduled_date = datePrefix
+      ? datePrefix[1]!
+      : new Date(scheduled_at).toLocaleString('sv-SE', {
+          timeZone: 'America/Sao_Paulo',
+        }).slice(0, 10)
 
     const result = await createManualScheduleAppointment(companyId, {
       client_id,
