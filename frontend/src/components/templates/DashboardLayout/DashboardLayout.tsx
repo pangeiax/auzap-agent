@@ -22,7 +22,7 @@ export function DashboardLayout({
   const closeSidebar = () => setSidebarOpen(false)
 
   return (
-    <div className="relative flex h-dvh max-h-dvh w-full flex-col overflow-hidden dark:bg-gradient-to-b! dark:from-[#1B5FE9]! dark:to-[#1A1B1D]!">
+    <div className="relative flex h-dvh max-h-dvh w-full flex-col overflow-hidden">
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
         {topLabel && (

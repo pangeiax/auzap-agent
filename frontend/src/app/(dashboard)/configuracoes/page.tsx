@@ -3239,9 +3239,9 @@ export default function ConfiguracoesPage() {
               />
             </div>
 
-            <div className="flex-1 min-w-0 overflow-hidden" key={activeTab}>
+            <div className="flex-1 min-w-0" key={activeTab}>
               <motion.div
-                className="h-full overflow-y-auto"
+                className="h-full"
                 animate={{ opacity: 1, y: 0 }}
                 initial={{ opacity: 0, y: 10 }}
                 transition={{ duration: 0.3, ease: "easeOut" }}
