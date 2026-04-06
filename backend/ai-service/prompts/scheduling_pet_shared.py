@@ -4,6 +4,12 @@ Regras compartilhadas entre agentes que agendam por pet (booking, health, cadast
 Objetivo: uma única fonte para get_client_pets, nome novo, cadastro (espécie/raça/anti-cópia) e proatividade.
 """
 
+# Texto curto para orientar o cliente na escolha de P/M/G/GG (cadastro e respostas de tool).
+PET_SIZE_WEIGHT_REFERENCE_PT = (
+    "P (Pequeno): até 7 kg; M (Médio): de 7,1 a 15 kg; "
+    "G (Grande): de 15,1 a 25 kg; GG (Extra grande): acima de 25 kg."
+)
+
 # Gravação no sistema — booking, health, onboarding (cadastro), lodging (reserva).
 WRITE_TOOLS_CONFIRMATION_BLOCK = """━━━ CRÍTICO — NADA DE GRAVAÇÃO SEM CONFIRMAÇÃO DO CLIENTE ━━━
 **PROIBIDO** chamar tool que **crie, altere ou cancele** registro no sistema **antes** de: (1) **resumo claro** do que será feito (pet, serviço, data/hora, cancelamento alvo, etc.) e (2) **pergunta explícita** de confirmação ao cliente; (3) **só depois** da resposta **afirmativa** nesse fluxo (sim, confirma, pode fechar, ok **para essa** ação — **não** vale «sim» que respondia **outra** pergunta).
@@ -39,7 +45,8 @@ PROACTIVITY_SCHEDULING_BLOCK = """• **PROATIVIDADE — OFERECER AGENDAMENTO (O
   - Com pet válido em **get_client_pets**, serviço e porte ok e **ainda sem data**: **sempre** convide a dizer o **dia** ou ofereça **ver os horários** — não espere o cliente perguntar "e agora?"."""
 
 # Conteúdo do PASSO 2 — PET (booking); health/lodging incluem o mesmo bloco após REGRA DO PET.
-PASSO_2_PET_SHARED_BLOCK = """• Siga a **REGRA DO PET** (parágrafo «REGRA DO PET» deste prompt ou seção dedicada).
+PASSO_2_PET_SHARED_BLOCK = (
+    """• Siga a **REGRA DO PET** (parágrafo «REGRA DO PET» deste prompt ou seção dedicada).
 
 🚨 **ANTI-LOOP — NÃO REPITA O QUE O CLIENTE JÁ RESPONDEU (CRÍTICO):**
 Antes de formular **qualquer** pergunta nova, releia **todas** as mensagens do **cliente** neste fluxo de cadastro do **mesmo** pet e atualize mentalmente: porte, nome, espécie, raça (só o que ele disse + inferências **já permitidas** neste prompt, ex.: raça de cachorro/gato conhecida → espécie).
@@ -68,7 +75,9 @@ Só vale como "já informado" o que o **cliente disse**, em mensagens **desta** 
   5. Só após o cadastro concluído, retome o agendamento
   NUNCA prossiga com agendamento para um pet que não está na lista de **get_client_pets**.
 • Se o pet em foco JÁ tem porte em **get_client_pets** (size definido) → use direto. NÃO chame set_pet_size. NÃO pergunte porte.
-• Se o pet estiver SEM PORTE no cadastro (size vazio ou «?»): aí sim pergunte o porte (pequeno, médio ou grande), chame set_pet_size para confirmar, e SÓ continue após confirmação.
+• Se o pet estiver SEM PORTE no cadastro (size vazio ou «?»): aí sim pergunte o porte (P/M/G/GG ou pequeno/médio/grande/extra grande), chame set_pet_size para confirmar, e SÓ continue após confirmação. **Auxílio por peso** (pode passar ao cliente em texto simples): """
+    + PET_SIZE_WEIGHT_REFERENCE_PT
+    + """
 • Se o pet estiver sem espécie: informe o cliente que precisa completar o cadastro
 • NÃO prossiga para data/horário com pet sem porte definido
 • Com pet completo e porte conhecido, mostre o preço correto para aquele porte (quando o fluxo incluir cotação)
@@ -76,6 +85,7 @@ Só vale como "já informado" o que o **cliente disse**, em mensagens **desta** 
 🐕🐈 **CADASTRO (BOOKING / SAÚDE):** Só **cachorro** ou **gato**. Outro animal → explique limite, ofereça encaminhamento humano; **escalate_to_human** **só** com aceite explícito (igual onboarding).
 📋 **ANTES DE create_pet:** resumo único com nome, espécie, raça e porte; **só** após "sim" do cliente → **set_pet_size** (nome+porte alinhados) → **create_pet** com os **mesmos** dados — evita porte errado.
 🎯 **Cliente responde uma palavra** depois de você pedir **só a raça** (ex.: "Bulldog") → **é a raça**; **não** peça raça de novo nem recomece espécie se já estava clara."""
+)
 
 
 def build_booking_tools_preamble(phone_hint: str) -> str:

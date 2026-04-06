@@ -11,6 +11,7 @@ from memory.tool_result_cache import (
     cache_invalidate_client_pets,
     cache_set_client_pets,
 )
+from prompts.scheduling_pet_shared import PET_SIZE_WEIGHT_REFERENCE_PT
 from tools.booking_tools import _effective_service_duration_minutes, _extract_double_pair_id
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
@@ -485,6 +486,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         - chame set_pet_size antes, com o mesmo nome e porte
         - não invente dados nem use raça como nome
         - use só cachorro ou gato em species
+        - ao orientar o cliente sobre porte, use a referência por peso: P até 7 kg; M 7,1–15 kg; G 15,1–25 kg; GG acima de 25 kg
 
         Args:
             name: Apelido real do pet
@@ -576,7 +578,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             return {
                 "success": False,
                 "missing_fields": ["porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))"],
-                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (P, até 10kg), médio (M, 10-25kg), grande (G, acima de 25kg) ou extra grande (GG)?",
+                "message": (
+                    "Porte inválido. Pergunte qual porte se encaixa melhor. "
+                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
+                ),
             }
 
         name_key = (name or "").strip()
@@ -590,7 +595,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                         "message": (
                             "Porte ainda não foi confirmado via set_pet_size para este nome. "
                             "Pergunte ao cliente o porte, chame set_pet_size com o mesmo nome do pet, "
-                            "depois create_pet com o mesmo porte — não assuma P/M/G."
+                            "depois create_pet com o mesmo porte — não assuma P/M/G/GG."
                         ),
                     }
                 if gated != size_db:
@@ -657,6 +662,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
 
         O porte confirmado por esta tool define o preço dos serviços.
         NUNCA deduza o porte pela raça — sempre pergunte ao cliente primeiro.
+        Ao explicar portes, pode orientar com: P até 7 kg; M 7,1–15 kg; G 15,1–25 kg; GG acima de 25 kg.
 
         Args:
             pet_name: Nome/apelido do pet (NÃO use raça como nome — veja instruções em create_pet)
@@ -671,7 +677,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not size or not size.strip():
             return {
                 "success": False,
-                "message": "Porte não informado. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+                "message": (
+                    "Porte não informado. Pergunte o porte ao cliente. "
+                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
+                ),
             }
 
         size_map = {
@@ -694,7 +703,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not size_db:
             return {
                 "success": False,
-                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (P, até 10kg), médio (M, 10-25kg), grande (G, acima de 25kg) ou extra grande (GG)?",
+                "message": (
+                    "Porte inválido. Pergunte qual porte se encaixa melhor. "
+                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
+                ),
             }
 
         size_label = {"P": "pequeno", "M": "médio", "G": "grande", "GG": "extra grande"}.get(size_db, size)
