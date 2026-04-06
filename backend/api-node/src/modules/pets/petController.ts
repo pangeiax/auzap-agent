@@ -288,8 +288,14 @@ export async function deletePet(req: Request, res: Response) {
       return res.status(404).json({ error: 'Pet not found' })
     }
 
-    await prisma.petshopPet.delete({
-      where: { id: petId },
+    await prisma.$transaction(async (tx) => {
+      await tx.petshopLodgingReservation.deleteMany({
+        where: { petId, companyId },
+      })
+      await tx.petshopLodging.deleteMany({
+        where: { petId, companyId },
+      })
+      await tx.petshopPet.delete({ where: { id: petId } })
     })
 
     res.json({ success: true, message: 'Pet deleted' })

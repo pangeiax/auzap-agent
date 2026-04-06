@@ -3,6 +3,7 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/cn'
+import { UsersRound } from 'lucide-react'
 import type { ClientRecurrence } from '@/services/dashboardService'
 
 const ZONES = [
@@ -19,8 +20,8 @@ interface Props {
 function EmptyState() {
   return (
     <div className="flex h-[140px] flex-col items-center justify-center gap-2">
-      <div className="h-10 w-10 rounded-full bg-[#f3f4f6] dark:bg-[#2a2d36] flex items-center justify-center">
-        <span className="text-xl">🔄</span>
+      <div className="h-10 w-10 rounded-full bg-[#f3f4f6] dark:bg-[#2a2d36] flex items-center justify-center text-[#727B8E] dark:text-[#8a94a6]">
+        <UsersRound className="h-5 w-5" strokeWidth={1.5} aria-hidden />
       </div>
       <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">Sem dados de clientes</p>
     </div>

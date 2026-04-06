@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { Card } from '@/components/ui/card'
+import { LineChart } from 'lucide-react'
 import type { RevenueByMonth } from '@/services/dashboardService'
 
 const MONTH_LABELS: Record<string, string> = {
@@ -18,8 +19,14 @@ const MONTH_LABELS: Record<string, string> = {
   '09': 'Set', '10': 'Out', '11': 'Nov', '12': 'Dez',
 }
 
-// Mock data para visualizar o comportamento da UI
-const MOCK_DATA: RevenueByMonth[] = [
+interface Props {
+  data: RevenueByMonth[]
+  className?: string
+  /** Só para demos — prefira passar `data` da API (`GET /dashboard/revenue`). */
+  useMockData?: boolean
+}
+
+const DEMO_DATA: RevenueByMonth[] = [
   { month: '2024-10', total_revenue: 3000, avg_ticket: 150 },
   { month: '2024-11', total_revenue: 3200, avg_ticket: 160 },
   { month: '2024-12', total_revenue: 5800, avg_ticket: 193 },
@@ -28,18 +35,10 @@ const MOCK_DATA: RevenueByMonth[] = [
   { month: '2025-03', total_revenue: 5100, avg_ticket: 170 },
 ]
 
-interface Props {
-  data: RevenueByMonth[]
-  className?: string
-  useMockData?: boolean // Flag para ativar dados mock
-}
-
 function EmptyState() {
   return (
     <div className="flex h-[200px] flex-col items-center justify-center gap-2">
-      <div className="h-10 w-10 rounded-full flex items-center justify-center">
-        <span className="text-xl">📊</span>
-      </div>
+      <LineChart className="h-10 w-10 text-[#727B8E] dark:text-[#8a94a6]" strokeWidth={1.25} aria-hidden />
       <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">Sem faturamento registrado</p>
       <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">Os dados aparecerão quando houver agendamentos concluídos</p>
     </div>
@@ -47,8 +46,7 @@ function EmptyState() {
 }
 
 export function MetricsRevenueChart({ data, className, useMockData = false }: Props) {
-  // Usa dados mock se a flag estiver ativa, senão usa os dados reais
-  const sourceData = useMockData ? MOCK_DATA : data
+  const sourceData = useMockData ? DEMO_DATA : data
 
   const chartData = sourceData.map(d => ({
     ...d,
@@ -59,7 +57,7 @@ export function MetricsRevenueChart({ data, className, useMockData = false }: Pr
     <Card className="p-5">
       <div className="flex items-center justify-between mb-4">
         <p className="text-xs font-semibold tracking-wider uppercase text-[#434A57] dark:text-[#f5f9fc]">
-          Faturamento — Últimos 6 Meses {useMockData && '(Mock Data)'}
+          Faturamento — Últimos 6 Meses {useMockData && '(demo)'}
         </p>
         <span className="text-xs text-[#727B8E] dark:text-[#8a94a6]">passe o mouse para ver ticket médio</span>
       </div>
@@ -95,14 +93,17 @@ export function MetricsRevenueChart({ data, className, useMockData = false }: Pr
             <Tooltip
               content={({ active, payload }) => {
                 if (!active || !payload || !payload[0]) return null
-                const data = payload[0].payload
+                const p = payload[0].payload as RevenueByMonth & { label: string }
                 return (
                   <div className="bg-white dark:bg-[#1A1B1D] border border-[#727B8E1A] dark:border-[#40485A] rounded-md px-3 py-2 shadow-sm">
                     <p className="text-xs text-[#434A57] dark:text-[#f5f9fc] mb-0.5">
-                      {data.label}
+                      {p.label}
                     </p>
                     <p className="text-sm text-primary">
-                      Faturamento: R${data.total_revenue.toLocaleString("pt-BR")}
+                      Faturamento: R${p.total_revenue.toLocaleString("pt-BR")}
+                    </p>
+                    <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
+                      Ticket médio: R${Number(p.avg_ticket ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                   </div>
                 )

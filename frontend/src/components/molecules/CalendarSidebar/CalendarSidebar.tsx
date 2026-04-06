@@ -1,4 +1,4 @@
-import { Crown, Check, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { Crown, Check, CheckCircle2, Eye, Loader2, XCircle } from "lucide-react";
 import type { CalendarEvent } from "../CalendarGrid";
 import { cn } from "@/lib/cn";
 
@@ -149,6 +149,20 @@ export function CalendarSidebar({
                       <p className="text-[10px] text-[#727B8E]/80 dark:text-[#8a94a6]/80">
                         Dois horários consecutivos
                       </p>
+                    )}
+
+                    {onEventClick && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEventClick(event);
+                        }}
+                        className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md border border-[#727B8E]/20 bg-white px-2 py-1 text-[10px] font-medium text-[#434A57] transition-colors hover:bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc] dark:hover:bg-[#2a2d36]"
+                      >
+                        <Eye className="h-3 w-3 shrink-0" aria-hidden />
+                        Ver detalhes
+                      </button>
                     )}
 
                     {onStatusChange && (

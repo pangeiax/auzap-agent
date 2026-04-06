@@ -14,6 +14,7 @@ import {
   Calendar,
   ArrowLeft,
   Loader2,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { normalizePetSize, petSizeAbbrev, PET_SIZE_OPTIONS, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
@@ -26,6 +27,7 @@ import {
   extractPairedAppointmentId,
   idsForMergedDisplayRow,
   mergePairedByTime,
+  notesForDisplay,
 } from "@/lib/appointmentPair";
 import type {
   Appointment as ApiAppointment,
@@ -182,6 +184,7 @@ function ClientsSidebar({
   onSearchClick,
   loading,
   error,
+  deletingCustomerId,
 }: {
   customers: Customer[];
   selectedId: string | null;
@@ -192,6 +195,7 @@ function ClientsSidebar({
   onSearchClick: () => void;
   loading?: boolean;
   error?: string | null;
+  deletingCustomerId?: string | null;
 }) {
   const filteredCustomers = customers.filter(
     (customer) =>
@@ -226,17 +230,22 @@ function ClientsSidebar({
                 <button
                   key={customer.id}
                   type="button"
+                  disabled={deletingCustomerId === customer.id}
                   onClick={() => onSelect(customer.id)}
                   className={`w-full p-3 border-b border-[#727B8E]/10 ${selectedId === customer.id ? "bg-[#F4F6F9]" : "bg-white"
-                    }`}
+                    } disabled:pointer-events-none disabled:opacity-70`}
                 >
                   <div className="relative w-[49px] h-[49px] mx-auto">
                     <div className="w-full h-full rounded-full bg-[#FAFAFA] border border-[#727B8E]/10 flex items-center justify-center">
-                      <span className="text-base font-medium text-[#434A57]">
-                        {getInitials(customer.name)}
-                      </span>
+                      {deletingCustomerId === customer.id ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-[#1E62EC]" />
+                      ) : (
+                        <span className="text-base font-medium text-[#434A57]">
+                          {getInitials(customer.name)}
+                        </span>
+                      )}
                     </div>
-                    {customer.status === "ativo" && (
+                    {customer.status === "ativo" && deletingCustomerId !== customer.id && (
                       <div className="absolute bottom-0 right-0 w-2 h-2 bg-[#3DCA21] rounded-full border-2 border-white/10" />
                     )}
                   </div>
@@ -346,18 +355,23 @@ function ClientsSidebar({
             <motion.button
               key={customer.id}
               type="button"
+              disabled={deletingCustomerId === customer.id}
               onClick={() => onSelect(customer.id)}
               whileHover={{ backgroundColor: "rgba(244, 246, 249, 0.5)" }}
-              className={`w-full p-4 text-left border-b border-[#727B8E]/5 dark:border-[#40485A]/50 transition-colors ${selectedId === customer.id
+              className={`w-full p-4 text-left border-b border-[#727B8E]/5 dark:border-[#40485A]/50 transition-colors disabled:pointer-events-none disabled:opacity-70 ${selectedId === customer.id
                 ? "bg-[#F4F6F9] dark:bg-[#212225]"
                 : ""
                 }`}
             >
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#1E62EC]/20">
-                  <span className="text-sm font-medium text-[#1E62EC]">
-                    {getInitials(customer.name)}
-                  </span>
+                  {deletingCustomerId === customer.id ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-[#1E62EC]" />
+                  ) : (
+                    <span className="text-sm font-medium text-[#1E62EC]">
+                      {getInitials(customer.name)}
+                    </span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
@@ -428,6 +442,9 @@ function CustomerDetails({
   onDeletePet,
   onDeleteAppointment,
   deletingAppointmentId,
+  deletingCustomerId,
+  deletingPetId,
+  onOpenAppointmentDetail,
   onSavePet,
   onOpenConversation,
   activeTab,
@@ -443,6 +460,9 @@ function CustomerDetails({
   onDeletePet: (petId: string) => void;
   onDeleteAppointment: (appointmentId: string) => void;
   deletingAppointmentId?: string | null;
+  deletingCustomerId?: string | null;
+  deletingPetId?: string | null;
+  onOpenAppointmentDetail?: (a: Appointment) => void;
   onSavePet: (
     pet: Omit<Pet, "id" | "customerId">,
     petId?: string,
@@ -530,14 +550,28 @@ function CustomerDetails({
     }
   };
 
+  const isDeletingCustomer = deletingCustomerId === customer.id;
+
   return (
     <motion.div
       key={customer.id}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex flex-1 flex-col min-h-0"
+      className="relative flex flex-1 flex-col min-h-0"
     >
+      {isDeletingCustomer && (
+        <div
+          className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 rounded-[inherit] bg-white/75 dark:bg-[#1A1B1D]/85 backdrop-blur-[2px]"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <Loader2 className="h-9 w-9 animate-spin text-[#1E62EC]" />
+          <p className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+            Excluindo cliente…
+          </p>
+        </div>
+      )}
       <div className="p-2 lg:p-4 border-b border-[#727B8E]/10 dark:border-[#40485A]">
         <div className="flex items-center gap-1 lg:gap-3">
           <button
@@ -599,13 +633,17 @@ function CustomerDetails({
                   </button>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-[#F4F6F9] dark:hover:bg-[#212225]"
+                    disabled={deletingCustomerId === customer.id}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-[#F4F6F9] dark:hover:bg-[#212225] disabled:pointer-events-none disabled:opacity-60"
                     onClick={() => {
                       void onDeleteCustomer(customer.id);
-                      setMenuOpen(false);
                     }}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    {deletingCustomerId === customer.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
                     Excluir cliente
                   </button>
                 </div>
@@ -712,9 +750,14 @@ function CustomerDetails({
                           <button
                             type="button"
                             onClick={() => void onDeletePet(pet.id)}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            disabled={deletingPetId === pet.id}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:pointer-events-none disabled:opacity-60"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            {deletingPetId === pet.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -774,6 +817,16 @@ function CustomerDetails({
                           >
                             {apt.status}
                           </span>
+                          {onOpenAppointmentDetail && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenAppointmentDetail(apt)}
+                              className="flex h-8 w-8 items-center justify-center rounded-full text-[#1E62EC] hover:bg-[#1E62EC]/10 dark:hover:bg-[#1E62EC]/20"
+                              title="Ver detalhes"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => void onDeleteAppointment(apt.id)}
@@ -888,6 +941,7 @@ function CustomerDetails({
           <div>
             <Select
               label="Espécie *"
+              placeholder="Selecione uma opção"
               value={petForm.species}
               onChange={(e) => {
                 setPetForm((prev) => ({ ...prev, species: e.target.value }));
@@ -1121,7 +1175,7 @@ function mapAppointmentFromApi(
     time: timeStr,
     service: appointment.specialty || "",
     status: normalizeAppointmentStatus(appointment.status),
-    notes: appointment.notes || "",
+    notes: notesForDisplay(appointment.notes) || "",
     pairedAppointmentId:
       extractPairedAppointmentId(appointment.notes) ?? undefined,
   };
@@ -1205,6 +1259,13 @@ export default function ClientesPage() {
   const [deletingAppointmentId, setDeletingAppointmentId] = useState<
     string | null
   >(null);
+  const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(
+    null,
+  );
+  const [deletingPetId, setDeletingPetId] = useState<string | null>(null);
+  const [appointmentDetail, setAppointmentDetail] = useState<Appointment | null>(
+    null,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
@@ -1393,6 +1454,7 @@ export default function ClientesPage() {
             ...first,
             pairedAppointmentId: second.id,
             timeEnd: second.time,
+            notes: [first.notes, second.notes].filter(Boolean).join("\n\n") || first.notes,
           }),
         );
         setCustomers((prev) =>
@@ -1451,8 +1513,10 @@ export default function ClientesPage() {
   }, [selectedId, activeTab, loadPets, loadAppointments, loadConversations]);
 
   const handleDeleteCustomer = async (customerId: string) => {
+    if (deletingCustomerId) return;
     const customer = customers.find((item) => item.id === customerId);
 
+    setDeletingCustomerId(customerId);
     try {
       await clientService.deleteClient(customerId);
       setCustomers((prev) => prev.filter((c) => c.id !== customerId));
@@ -1473,14 +1537,17 @@ export default function ClientesPage() {
         error.response?.data?.error ||
         "Não foi possível excluir o cliente.",
       );
+    } finally {
+      setDeletingCustomerId(null);
     }
   };
 
   const handleDeletePet = async (petId: string) => {
-    if (!selectedCustomer) return;
+    if (!selectedCustomer || deletingPetId) return;
 
     const pet = selectedCustomer.pets.find((item) => item.id === petId);
 
+    setDeletingPetId(petId);
     try {
       await petService.deletePet(petId);
       setCustomers((prev) =>
@@ -1508,6 +1575,8 @@ export default function ClientesPage() {
         error.response?.data?.error ||
         "Não foi possível excluir o pet.",
       );
+    } finally {
+      setDeletingPetId(null);
     }
   };
 
@@ -1776,6 +1845,7 @@ export default function ClientesPage() {
           }}
           loading={customersLoading}
           error={customersError}
+          deletingCustomerId={deletingCustomerId}
         />
       }
     >
@@ -1791,6 +1861,9 @@ export default function ClientesPage() {
           onDeletePet={handleDeletePet}
           onDeleteAppointment={handleDeleteAppointment}
           deletingAppointmentId={deletingAppointmentId}
+          deletingCustomerId={deletingCustomerId}
+          deletingPetId={deletingPetId}
+          onOpenAppointmentDetail={setAppointmentDetail}
           onSavePet={handleSavePet}
           onOpenConversation={handleOpenConversation}
           activeTab={activeTab}
@@ -1800,6 +1873,58 @@ export default function ClientesPage() {
           loadingConversations={loadingConversations}
         />
       </AnimatePresence>
+
+      <Modal
+        isOpen={appointmentDetail !== null}
+        onClose={() => setAppointmentDetail(null)}
+        title="Detalhes do agendamento"
+        className="max-w-[440px]"
+      >
+        {appointmentDetail && (
+          <div className="space-y-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`text-xs font-medium px-2 py-1 rounded-full border ${getStatusBadgeStyle(appointmentDetail.status)}`}
+              >
+                {appointmentDetail.status}
+              </span>
+            </div>
+            <div className="rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-4 space-y-2.5 text-[#434A57] dark:text-[#f5f9fc]">
+              <div className="flex justify-between gap-3">
+                <span className="text-[#727B8E] dark:text-[#8a94a6]">Serviço</span>
+                <span className="text-right font-medium">{appointmentDetail.service}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[#727B8E] dark:text-[#8a94a6]">Pet</span>
+                <span className="text-right font-medium">{appointmentDetail.petName}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[#727B8E] dark:text-[#8a94a6]">Data e horário</span>
+                <span className="text-right font-medium">
+                  {appointmentDetail.date} às{" "}
+                  {appointmentDetail.timeEnd
+                    ? `${appointmentDetail.time} – ${appointmentDetail.timeEnd}`
+                    : appointmentDetail.time}
+                </span>
+              </div>
+              <div className="border-t border-[#727B8E]/15 pt-3 dark:border-[#40485A]">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6] mb-1.5">
+                  Descrição
+                </p>
+                {appointmentDetail.notes ? (
+                  <p className="whitespace-pre-wrap text-[#434A57] dark:text-[#f5f9fc]">
+                    {appointmentDetail.notes}
+                  </p>
+                ) : (
+                  <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                    Nenhuma descrição registrada.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={searchModalOpen}

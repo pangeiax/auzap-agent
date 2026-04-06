@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { isUuidString, parseOptionalUuid } from '../../lib/uuidValidation'
 import { computeAvailableSlotsResponse } from './availableSlotsQuery'
+import { cancelPetshopAppointment, extractDoublePairPartnerAppointmentId } from './appointmentCancelCore'
+import { rescheduleManualAppointment } from './appointmentRescheduleCore'
 import { createManualScheduleAppointment } from './manualScheduleCore'
 
 function petSizeNeedsLargeDurationMultiplier(
@@ -64,19 +66,6 @@ function mergeNotesWithDoublePair(
   const u = (userNotes ?? '').trim()
   const line = `${DOUBLE_PAIR_PREFIX}${partnerAppointmentId}`
   return u ? `${u}\n${line}` : line
-}
-
-function extractDoublePairAppointmentId(
-  notes: string | null | undefined,
-): string | null {
-  if (!notes) return null
-  const idx = notes.indexOf(DOUBLE_PAIR_PREFIX)
-  if (idx < 0) return null
-  const rest = notes.slice(idx + DOUBLE_PAIR_PREFIX.length).trim()
-  const m = rest.match(
-    /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/,
-  )
-  return m?.[1] ?? null
 }
 
 /** Há pelo menos um par de slots consecutivos livres neste dia para a especialidade. */
@@ -385,6 +374,33 @@ export async function getAvailableSlots(req: Request, res: Response) {
   }
 }
 
+// POST /appointments/reschedule-to-slot
+// Remarca na grade (slotId + scheduledDate), mesma lógica do Second Brain.
+export async function rescheduleToSlot(req: Request, res: Response) {
+  try {
+    const companyId = req.user!.companyId
+    const body = req.body as Record<string, unknown>
+    const appointment_id = String(body.appointment_id ?? '').trim()
+    const result = await rescheduleManualAppointment(companyId, {
+      appointment_id,
+      new_slot_id: body.new_slot_id != null ? String(body.new_slot_id) : undefined,
+      new_scheduled_date: body.new_scheduled_date != null ? String(body.new_scheduled_date) : undefined,
+      new_time: body.new_time != null ? String(body.new_time) : undefined,
+    })
+    if (!result.ok) {
+      return res.status(400).json({ error: result.message })
+    }
+    const appointment = await prisma.petshopAppointment.findUniqueOrThrow({
+      where: { id: result.appointment_id },
+      include: appointmentInclude,
+    })
+    res.json(shapeAppointment(appointment))
+  } catch (error) {
+    console.error('Error reschedule-to-slot:', error)
+    res.status(500).json({ error: 'Failed to reschedule appointment' })
+  }
+}
+
 // GET /appointments/:id
 export async function getAppointment(req: Request, res: Response) {
   try {
@@ -434,9 +450,15 @@ export async function scheduleAppointment(req: Request, res: Response) {
       return res.status(400).json({ error: 'slot_id é obrigatório' })
     }
 
-    const scheduled_date = new Date(scheduled_at).toLocaleString('sv-SE', {
-      timeZone: 'America/Sao_Paulo',
-    }).slice(0, 10)
+    // Preferir a data YYYY-MM-DD explícita no payload (igual ao date picker / slot query);
+    // evita deslocamento quando o horário em UTC cruza meia-noite em BRT.
+    const scheduledAtStr = String(scheduled_at).trim()
+    const datePrefix = scheduledAtStr.match(/^(\d{4}-\d{2}-\d{2})/)
+    const scheduled_date = datePrefix
+      ? datePrefix[1]!
+      : new Date(scheduled_at).toLocaleString('sv-SE', {
+          timeZone: 'America/Sao_Paulo',
+        }).slice(0, 10)
 
     const result = await createManualScheduleAppointment(companyId, {
       client_id,
@@ -510,43 +532,12 @@ export async function cancelAppointment(req: Request, res: Response) {
     const id = req.params.id!
     const { cancel_reason } = req.body
 
-    const existing = await prisma.petshopAppointment.findUnique({ where: { id } })
-    if (!existing || existing.companyId !== companyId) {
-      return res.status(404).json({ error: 'Appointment not found' })
+    const result = await cancelPetshopAppointment(companyId, id, cancel_reason ?? null)
+    if (!result.ok) {
+      return res.status(404).json({ error: result.message })
     }
 
-    const now = new Date()
-    const partnerId = extractDoublePairAppointmentId(existing.notes)
-
-    await prisma.$transaction(async (tx) => {
-      await tx.petshopAppointment.update({
-        where: { id },
-        data: { status: 'cancelled', cancelledAt: now, cancelReason: cancel_reason ?? null, updatedAt: now },
-      })
-
-      if (partnerId) {
-        const partner = await tx.petshopAppointment.findUnique({
-          where: { id: partnerId },
-        })
-        if (
-          partner &&
-          partner.companyId === companyId &&
-          !['cancelled', 'no_show'].includes(partner.status)
-        ) {
-          await tx.petshopAppointment.update({
-            where: { id: partnerId },
-            data: {
-              status: 'cancelled',
-              cancelledAt: now,
-              cancelReason: cancel_reason ?? 'Cancelado em conjunto (dois horários)',
-              updatedAt: now,
-            },
-          })
-        }
-      }
-    })
-
-    res.json({ success: true, appointment_id: id, cancelled_at: now.toISOString() })
+    res.json({ success: true, appointment_id: result.appointment_id, cancelled_at: result.cancelled_at })
   } catch (error) {
     console.error('Error cancelling appointment:', error)
     res.status(500).json({ error: 'Failed to cancel appointment' })
@@ -565,7 +556,7 @@ export async function deleteAppointment(req: Request, res: Response) {
       return res.status(404).json({ error: 'Appointment not found' })
     }
 
-    const partnerId = extractDoublePairAppointmentId(existing.notes)
+    const partnerId = extractDoublePairPartnerAppointmentId(existing.notes)
 
     await prisma.$transaction(async (tx) => {
       await tx.petshopAppointment.delete({ where: { id } })

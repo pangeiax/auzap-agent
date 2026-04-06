@@ -197,6 +197,11 @@ export async function updateClient(req: Request, res: Response) {
       delete updateData.manual_phone
     }
 
+    // Identificador do canal WhatsApp não é alterado pelo PUT do painel (só manual_phone / demais campos).
+    if (updateData.phone !== undefined) {
+      delete updateData.phone
+    }
+
     const existing = await prisma.client.findUnique({ where: { id: clientId } })
     if (!existing || existing.companyId !== companyId) {
       return res.status(404).json({ error: 'Client not found' })
@@ -225,7 +230,15 @@ export async function deleteClient(req: Request, res: Response) {
       return res.status(404).json({ error: 'Client not found' })
     }
 
-    await prisma.client.delete({ where: { id: clientId } })
+    await prisma.$transaction(async (tx) => {
+      // Tabela gerida fora do Prisma schema — FK sem cascade bloqueava o delete
+      await tx.$executeRaw`
+        DELETE FROM client_sentiment_analysis
+        WHERE company_id = ${companyId}
+          AND client_id = ${clientId}::uuid
+      `
+      await tx.client.delete({ where: { id: clientId } })
+    })
 
     res.json({ success: true, client_id: clientId })
   } catch (error) {

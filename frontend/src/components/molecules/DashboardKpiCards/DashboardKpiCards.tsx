@@ -13,16 +13,27 @@ interface Props {
   loading?: boolean;
 }
 
-function EmptyValue({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-2xl font-bold text-[#727B8E] dark:text-[#8a94a6]">
-        —
-      </span>
-      <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">{label}</p>
-    </div>
-  );
-}
+/** Fallback quando a API falha ou ainda não retornou — evita loading infinito. */
+const EMPTY_KPIS: DashboardKpis = {
+  today: { total: 0, confirmed: 0, pending: 0 },
+  aiTime: { hours: 0, total_conversations: 0 },
+  afterHours: { pct_after_hours: 0, pct_weekend: 0, total: 0 },
+  conversion: {
+    total_conversations: 0,
+    total_appointments: 0,
+    conversion_rate: 0,
+    revenue_generated: 0,
+  },
+  topService: null,
+  revenueRealtime: {
+    today: 0,
+    today_vs_yesterday_pct: null,
+    appointments_today: 0,
+    this_week: 0,
+    this_week_vs_last_pct: null,
+    appointments_this_week: 0,
+  },
+};
 
 function KpiCard({
   title,
@@ -59,7 +70,7 @@ export function DashboardKpiCards({ data, loading }: Props) {
   const { isPro } = usePlan();
   const totalCards = isPro ? 6 : 5;
 
-  if (!loading || !data) {
+  if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
         {[...Array(totalCards)].map((_, i) => (
@@ -80,7 +91,8 @@ export function DashboardKpiCards({ data, loading }: Props) {
     );
   }
 
-  const { today, aiTime, afterHours, topService, conversion, sentiment, revenueRealtime } = data;
+  const { today, aiTime, afterHours, topService, conversion, sentiment, revenueRealtime } =
+    data ?? EMPTY_KPIS;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:grid-cols-[repeat(auto-fit,minmax(180px,1fr))]">
@@ -97,14 +109,12 @@ export function DashboardKpiCards({ data, loading }: Props) {
         totalConversations={aiTime.total_conversations}
       />
 
-      {revenueRealtime && (
-        <Faturamento
-          today={revenueRealtime.today}
-          todayVsYesterdayPct={revenueRealtime.today_vs_yesterday_pct}
-          thisWeek={revenueRealtime.this_week}
-          thisWeekVsLastPct={revenueRealtime.this_week_vs_last_pct}
-        />
-      )}
+      <Faturamento
+        today={revenueRealtime?.today ?? 0}
+        todayVsYesterdayPct={revenueRealtime?.today_vs_yesterday_pct ?? null}
+        thisWeek={revenueRealtime?.this_week ?? 0}
+        thisWeekVsLastPct={revenueRealtime?.this_week_vs_last_pct ?? null}
+      />
 
       <ConversaoWhatsapp
         conversionRate={conversion.conversion_rate}
@@ -126,7 +136,7 @@ export function DashboardKpiCards({ data, loading }: Props) {
               {topService.service_name}
             </p>
             <p className="mt-1 text-xs font-medium text-success">
-              ↑ {topService.growth_pct}% vs mês anterior
+              +{topService.growth_pct}% vs mês anterior
             </p>
             <span className="mt-2 inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
               crescendo
@@ -166,7 +176,7 @@ export function DashboardKpiCards({ data, loading }: Props) {
 
               {sentiment.high_churn_risk > 0 && (
                 <p className="mt-1 text-[10px] font-semibold text-destructive">
-                  ⚠ {sentiment.high_churn_risk} risco alto de churn
+                  {sentiment.high_churn_risk} cliente(s) com risco alto de churn
                 </p>
               )}
 

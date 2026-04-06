@@ -1,0 +1,34 @@
+/**
+ * Allowlist de relações (tabelas/views) para Text-to-SQL.
+ * Sincronizar com Prisma @@map e migrations de views.
+ */
+export const ALLOWED_RELATIONS = new Set<string>([
+  'petshop_profile',
+  'clients',
+  'whatsapp_sessions',
+  'agent_conversations',
+  'agent_messages',
+  'petshop_specialties',
+  'specialty_capacity_rules',
+  'petshop_business_hours',
+  'petshop_services',
+  'petshop_slots',
+  'petshop_pets',
+  'petshop_schedules',
+  'petshop_appointments',
+  'petshop_lodgings',
+  'petshop_lodging_config',
+  'petshop_lodging_capacity',
+  'petshop_room_types',
+  'petshop_lodging_reservations',
+  'dashboard_appointment_metrics',
+  'dashboard_client_recurrence',
+  'dashboard_revenue_realtime',
+  'dashboard_whatsapp_conversion',
+  'dashboard_sentiment_kpi',
+  'dashboard_ai_time_worked',
+  'dashboard_after_hours',
+  'vw_lodging_availability',
+  'vw_room_type_availability',
+  'client_sentiment_analysis',
+])

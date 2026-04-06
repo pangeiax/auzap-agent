@@ -3,7 +3,16 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/cn'
+import { Trophy, TrendingDown, TrendingUp } from 'lucide-react'
 import type { TopService } from '@/services/dashboardService'
+
+function previousMonthName(): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - 1)
+  const raw = d.toLocaleDateString('pt-BR', { month: 'long' })
+  return raw.charAt(0).toUpperCase() + raw.slice(1)
+}
 
 const COLORS = [
   'hsl(234, 85%, 55%)',
@@ -16,13 +25,15 @@ const COLORS = [
 interface Props {
   data: TopService[]
   className?: string
+  /** Crescimento mês atual vs mês anterior (`GET /dashboard/kpis` → `topService`). */
+  serviceTrend?: { service_name: string; growth_pct: number } | null
 }
 
 function EmptyState() {
   return (
     <div className="flex h-[220px] flex-col items-center justify-center gap-2">
-      <div className="h-10 w-10 rounded-full bg-[#f3f4f6] dark:bg-[#2a2d36] flex items-center justify-center">
-        <span className="text-xl">🏆</span>
+      <div className="h-10 w-10 rounded-full bg-[#f3f4f6] dark:bg-[#2a2d36] flex items-center justify-center text-[#727B8E] dark:text-[#8a94a6]">
+        <Trophy className="h-5 w-5" strokeWidth={1.5} aria-hidden />
       </div>
       <p className="text-sm text-[#434A57] dark:text-[#f5f9fc]">Sem serviços concluídos</p>
       <p className="text-xs text-[#9ca3af]">Os dados aparecerão quando houver agendamentos concluídos</p>
@@ -30,9 +41,8 @@ function EmptyState() {
   )
 }
 
-export function TopServicesDonutChart({ data, className }: Props) {
-  // Encontrar o serviço com maior crescimento (mock - em produção vir do backend)
-  const topGrowthService = data.length > 0 ? data[data.length - 1] : null
+export function TopServicesDonutChart({ data, className, serviceTrend }: Props) {
+  const refMonth = previousMonthName()
 
   return (
     <Card className={cn('p-5', className)}>
@@ -104,13 +114,24 @@ export function TopServicesDonutChart({ data, className }: Props) {
             </div>
           </div>
 
-          {topGrowthService && (
+          {serviceTrend ? (
             <div className="mt-4 bg-primary/5 border border-primary/10 rounded-lg px-3 py-2">
-              <p className="text-xs text-primary font-medium">
-                {topGrowthService.service_name} em alta — ↑ 40% vs fevereiro
+              <p className="text-xs text-primary font-medium flex items-center gap-2 flex-wrap">
+                {serviceTrend.growth_pct >= 0 ? (
+                  <TrendingUp className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
+                ) : (
+                  <TrendingDown className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
+                )}
+                <span>
+                  <span className="font-semibold">{serviceTrend.service_name}</span>
+                  {serviceTrend.growth_pct > 0 ? ' em alta' : ''}
+                  {' — '}
+                  {serviceTrend.growth_pct >= 0 ? '+' : ''}
+                  {serviceTrend.growth_pct}% vs {refMonth}
+                </span>
               </p>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </Card>

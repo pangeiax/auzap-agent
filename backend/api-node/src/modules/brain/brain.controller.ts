@@ -1,8 +1,17 @@
 import { Request, Response } from 'express'
 import { BrainService } from './brain.service'
-import { buildBrainSuggestionPrompts } from './brain.context'
+import { buildBrainSuggestionPrompts } from './brainAlerts'
 
 const service = new BrainService()
+
+export async function dailyUsage(req: Request, res: Response) {
+  try {
+    const data = await service.dailyUsage(req.user!.companyId)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
 
 export async function suggestions(req: Request, res: Response) {
   try {

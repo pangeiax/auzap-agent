@@ -14,10 +14,10 @@ import { verifyToken } from '../../middleware/authMiddleware'
 
 const router = Router()
 
-// ── Rotas com :companyId explícito (admin / direto) ──
-router.get('/status/:companyId', getStatus)
-router.post('/connect/:companyId', connectWhatsApp)
-router.post('/disconnect/:companyId', disconnectWhatsApp)
+// ── Rotas com :companyId (mesmo companyId do JWT) ──
+router.get('/status/:companyId', verifyToken, getStatus)
+router.post('/connect/:companyId', verifyToken, connectWhatsApp)
+router.post('/disconnect/:companyId', verifyToken, disconnectWhatsApp)
 
 // ── Rotas autenticadas (companyId via JWT) ──
 router.get('/status', verifyToken, getMyStatus)

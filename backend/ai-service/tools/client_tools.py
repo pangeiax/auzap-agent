@@ -11,6 +11,7 @@ from memory.tool_result_cache import (
     cache_invalidate_client_pets,
     cache_set_client_pets,
 )
+from prompts.scheduling_pet_shared import PET_SIZE_WEIGHT_REFERENCE_PT
 from tools.booking_tools import _effective_service_duration_minutes, _extract_double_pair_id
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
@@ -485,6 +486,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         - chame set_pet_size antes, com o mesmo nome e porte
         - não invente dados nem use raça como nome
         - use só cachorro ou gato em species
+        - ao orientar o cliente sobre porte, use a referência por peso: P até 7 kg; M 7,1–15 kg; G 15,1–25 kg; GG acima de 25 kg
 
         Args:
             name: Apelido real do pet
@@ -576,7 +578,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             return {
                 "success": False,
                 "missing_fields": ["porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))"],
-                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (P, até 10kg), médio (M, 10-25kg), grande (G, acima de 25kg) ou extra grande (GG)?",
+                "message": (
+                    "Porte inválido. Pergunte qual porte se encaixa melhor. "
+                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
+                ),
             }
 
         name_key = (name or "").strip()
@@ -590,7 +595,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                         "message": (
                             "Porte ainda não foi confirmado via set_pet_size para este nome. "
                             "Pergunte ao cliente o porte, chame set_pet_size com o mesmo nome do pet, "
-                            "depois create_pet com o mesmo porte — não assuma P/M/G."
+                            "depois create_pet com o mesmo porte — não assuma P/M/G/GG."
                         ),
                     }
                 if gated != size_db:
@@ -653,10 +658,11 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         Use esta tool SEMPRE que o cliente informar o porte — tanto para pets já cadastrados quanto para pets ainda não cadastrados.
 
         - Se o pet já existe no banco (nome **igual** ao cadastro, sem diferenciar maiúsculas) → atualiza o porte
-        - Se o pet ainda não foi cadastrado → retorna o porte confirmado para uso em create_pet e nos preços (gate Redis); **não** atualiza outro pet por nome diferente — com um único pet cadastrado e nome que não bate, a resposta pode trazer `disambiguation` para você perguntar ao cliente se é esse pet ou um novo
+        - Se o pet ainda não foi cadastrado → retorna o porte confirmado para uso em create_pet e nos preços (gate Redis); **não** atualiza outro pet por nome diferente
 
         O porte confirmado por esta tool define o preço dos serviços.
         NUNCA deduza o porte pela raça — sempre pergunte ao cliente primeiro.
+        Ao explicar portes, pode orientar com: P até 7 kg; M 7,1–15 kg; G 15,1–25 kg; GG acima de 25 kg.
 
         Args:
             pet_name: Nome/apelido do pet (NÃO use raça como nome — veja instruções em create_pet)
@@ -671,7 +677,10 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not size or not size.strip():
             return {
                 "success": False,
-                "message": "Porte não informado. Pergunte ao cliente: o pet é pequeno (até 10kg), médio (10-25kg) ou grande (acima de 25kg)?",
+                "message": (
+                    "Porte não informado. Pergunte o porte ao cliente. "
+                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
+                ),
             }
 
         size_map = {
@@ -694,13 +703,15 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not size_db:
             return {
                 "success": False,
-                "message": "Porte inválido. Pergunte ao cliente: o pet é pequeno (P, até 10kg), médio (M, 10-25kg), grande (G, acima de 25kg) ou extra grande (GG)?",
+                "message": (
+                    "Porte inválido. Pergunte qual porte se encaixa melhor. "
+                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
+                ),
             }
 
         size_label = {"P": "pequeno", "M": "médio", "G": "grande", "GG": "extra grande"}.get(size_db, size)
 
         updated = None
-        single_registered_pet_name: str | None = None
         services_pricing_for_reply = ""
         with get_connection() as conn:
             cur = conn.cursor()
@@ -716,22 +727,6 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                     (size_db, company_id, client_id, pet_name),
                 )
                 updated = cur.fetchone()
-            if (
-                not updated
-                and client_id
-                and pet_name
-                and pet_name.strip()
-            ):
-                cur.execute(
-                    """
-                    SELECT name FROM petshop_pets
-                    WHERE company_id = %s AND client_id = %s AND is_active = TRUE
-                    """,
-                    (company_id, client_id),
-                )
-                name_rows = cur.fetchall()
-                if len(name_rows) == 1:
-                    single_registered_pet_name = (name_rows[0].get("name") or "").strip() or None
             services_pricing_for_reply = _services_pricing_snapshot(cur, company_id, size_db)
 
         if not updated and pet_name and pet_name.strip():
@@ -755,26 +750,11 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                 "pet_updated": True,
                 "message": f"Porte de {updated['name']} confirmado como {size_label}!",
             }
-        out_new = {
+        return {
             **base_out,
             "pet_updated": False,
             "message": f"Porte confirmado: {size_label}. Use este porte ao cadastrar o pet e para calcular preços.",
         }
-        if (
-            single_registered_pet_name
-            and pet_name
-            and pet_name.strip()
-            and single_registered_pet_name.lower() != pet_name.strip().lower()
-        ):
-            out_new["disambiguation"] = {
-                "only_registered_pet_name": single_registered_pet_name,
-                "hint": (
-                    f"O cliente tem só um pet cadastrado («{single_registered_pet_name}»), mas o nome passado "
-                    f"na tool («{pet_name.strip()}») não bate. Pergunte se é esse pet (typo/apelido) ou um pet novo "
-                    "antes de seguir; não atualize o porte do cadastro sem nome correto ou confirmação explícita."
-                ),
-            }
-        return out_new
 
     VALID_STAGES = {"initial", "onboarding", "pet_registered", "booking", "completed"}
 

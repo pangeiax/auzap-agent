@@ -11,6 +11,7 @@ import {
   deleteAppointment,
   confirmAppointment,
   rescheduleAppointment,
+  rescheduleToSlot,
 } from './appointmentController'
 
 const router = Router()
@@ -21,6 +22,7 @@ router.get('/', listAppointments)
 router.get('/available-dates', getAvailableDates)
 router.get('/available-slots', getAvailableSlots)
 router.post('/schedule', scheduleAppointment)
+router.post('/reschedule-to-slot', rescheduleToSlot)
 router.get('/:id', getAppointment)
 router.put('/:id', updateAppointment)
 router.delete('/:id', cancelAppointment)

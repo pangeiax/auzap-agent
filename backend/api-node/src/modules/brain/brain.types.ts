@@ -1,37 +1,33 @@
+export type BrainChatMode = 'converse' | 'sql' | 'action'
+
 export interface BrainMessage {
-  role: 'user' | 'assistant';
-  content: string;
+  role: 'user' | 'assistant'
+  content: string
 }
 
-export interface BrainRequest {
-  message: string;
-  history: BrainMessage[];
+export interface BrainDailyUsageMeta {
+  /** Mensagens já contadas hoje após esta requisição (quando aplicável). */
+  used: number
+  limit: number
+}
+
+export interface BrainMeta {
+  /** Roteamento da última mensagem (debug / UX). */
+  mode?: BrainChatMode
+  /** SQL executada após validação (somente leitura). Omitida se SECOND_BRAIN_EXPOSE_SQL=0 */
+  sql?: string
+  /** Uso do limite diário de mensagens ao assistente (plano Pro). */
+  brainDaily?: BrainDailyUsageMeta
 }
 
 export interface BrainResponse {
-  reply: string;
-  alerts: BrainAlert[];
+  reply: string
+  alerts: BrainAlert[]
+  meta?: BrainMeta
 }
 
 export interface BrainAlert {
-  type: 'warning' | 'info' | 'critical';
-  message: string;
-  action?: string;
-}
-
-export interface BrainContext {
-  petshop_name: string;
-  assistant_name: string;
-  plan: string;
-  today: string;
-  appointments_today_total: number;
-  appointments_today_confirmed: number;
-  appointments_today_pending: number;
-  revenue_today: number;
-  revenue_this_week: number;
-  revenue_today_vs_yesterday_pct: number | null;
-  active_clients: number;
-  lost_clients_count: number;
-  whatsapp_conversion_rate: number;
-  alerts: BrainAlert[];
+  type: 'warning' | 'info' | 'critical'
+  message: string
+  action?: string
 }

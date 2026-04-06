@@ -21,9 +21,11 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL_AGENT")
 
-# Internal service URLs
+# Internal service URLs (ai-service → api-node, ex. POST /internal/generate-slots)
 API_NODE_URL = os.getenv("API_NODE_URL", "http://localhost:3000")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+# Mesmo valor que INTERNAL_API_KEY na api-node; header X-Internal-Key nas rotas /internal/*
+INTERNAL_API_KEY = (os.getenv("INTERNAL_API_KEY") or "").strip()
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable not set")

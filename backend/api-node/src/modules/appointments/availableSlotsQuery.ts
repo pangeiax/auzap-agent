@@ -75,11 +75,21 @@ export async function computeAvailableSlotsResponse(
   let needConsecutivePair = false
 
   if (serviceIdRaw !== undefined && serviceIdRaw !== null && serviceIdRaw !== '') {
+    const sid = Number(serviceIdRaw)
+    if (!Number.isFinite(sid)) {
+      return { error: 'service_id inválido.' }
+    }
     const service = await prisma.petshopService.findFirst({
-      where: { id: Number(serviceIdRaw), companyId },
+      where: { id: sid, companyId },
       select: { specialtyId: true, durationMultiplierLarge: true },
     })
-    specialtyId = service?.specialtyId ?? undefined
+    if (!service) {
+      return {
+        error:
+          'Serviço não encontrado para esta empresa. Use o catálogo de serviços (list_active_services / id correto).',
+      }
+    }
+    specialtyId = service.specialtyId ?? undefined
 
     const petId = parseOptionalUuid(petIdRaw)
     if (petId && service) {

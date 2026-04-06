@@ -4,6 +4,8 @@ import re
 import urllib.request
 import json
 from datetime import date, datetime, timedelta
+
+from config import API_NODE_URL, INTERNAL_API_KEY
 from db import get_connection
 from memory.tool_result_cache import cache_get_services, cache_set_services
 from timezone_br import now_sao_paulo_naive, today_sao_paulo
@@ -177,9 +179,6 @@ def fetch_services_snapshot(company_id: int) -> dict:
         "lodging_offerings_count": len(lodging_offerings),
     }
 
-
-# URL interna do backend Node (Docker network)
-BACKEND_INTERNAL_URL = os.getenv("BACKEND_INTERNAL_URL", "http://backend:3000")
 
 # Deve coincidir com MAX_DAYS_AHEAD no backend Node (geração de slots / agenda).
 MAX_AGENDA_DAYS_AHEAD = 90
@@ -385,6 +384,43 @@ def _pet_conflict_same_slot_start(
     return None
 
 
+def _pet_occupied_slot_starts_hhmm(
+    cur,
+    company_id,
+    pet_id,
+    slot_date,
+    exclude_appointment_ids: list[str] | None = None,
+) -> set[str]:
+    """
+    Inícios de faixa (HH:MM) em que o pet já tem compromisso ativo neste dia na grade.
+    Inclui cada bloco de serviços G/GG (dois appointments, dois slot_time).
+    Alinhado a _pet_conflict_same_slot_start (mesmo pet não pode dois serviços no mesmo início).
+    exclude_appointment_ids: ao remarcar, ignorar o(s) id(s) do compromisso que será substituído
+    (e o paired_appointment_id se uses_double_slot), para não esconder os horários atuais como «ocupados».
+    """
+    ex = [str(x).strip() for x in (exclude_appointment_ids or []) if _is_uuid(str(x).strip())]
+    sql = """
+        SELECT sl.slot_time
+        FROM petshop_appointments a
+        JOIN petshop_slots sl ON sl.id = a.slot_id
+        WHERE a.company_id = %s AND a.pet_id = %s
+          AND a.status NOT IN ('completed', 'cancelled')
+          AND a.slot_id IS NOT NULL
+          AND sl.slot_date = %s
+    """
+    params: list = [company_id, pet_id, slot_date]
+    if ex:
+        sql += " AND a.id::text NOT IN (" + ", ".join(["%s"] * len(ex)) + ")"
+        params.extend(ex)
+    cur.execute(sql, params)
+    out: set[str] = set()
+    for row in cur.fetchall() or []:
+        t = row.get("slot_time")
+        if t is not None:
+            out.add(str(t)[:5])
+    return out
+
+
 def _requires_consecutive_slots(service_row: dict, pet_row: dict) -> bool:
     mult = service_row.get("duration_multiplier_large")
     if mult is None:
@@ -479,13 +515,14 @@ def build_booking_tools(company_id: int, client_id) -> list:
     def _try_generate_slots() -> bool:
         """Tenta gerar slots via endpoint interno. Retorna True se bem-sucedido."""
         try:
-            url = f"{BACKEND_INTERNAL_URL}/internal/generate-slots"
+            url = f"{API_NODE_URL.rstrip('/')}/internal/generate-slots"
             payload = json.dumps(
                 {"company_id": company_id, "days": MAX_AGENDA_DAYS_AHEAD}
             ).encode()
-            req = urllib.request.Request(
-                url, data=payload, headers={"Content-Type": "application/json"}
-            )
+            headers = {"Content-Type": "application/json"}
+            if INTERNAL_API_KEY:
+                headers["X-Internal-Key"] = INTERNAL_API_KEY
+            req = urllib.request.Request(url, data=payload, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as resp:
                 result = json.loads(resp.read())
                 logger.info("Fallback generate-slots: %s", result)
@@ -545,11 +582,15 @@ def build_booking_tools(company_id: int, client_id) -> list:
         target_date: str,
         service_id=None,
         pet_id: str | None = None,
+        ignore_appointment_ids: str | None = None,
     ) -> dict:
         """
         Retorna horários disponíveis para uma especialidade numa data.
         Use sempre quando houver data. Não invente horários.
         `pet_id` é obrigatório; `service_id` ajuda a corrigir specialty_id e duração.
+        `ignore_appointment_ids` (opcional): UUIDs separados por vírgula dos compromissos que não devem
+        contar como «pet ocupado» nesta consulta — use ao **remarcar** na mesma data (id de
+        get_upcoming_appointments e, se uses_double_slot, também paired_appointment_id).
         """
         try:
             parsed_date = date.fromisoformat(target_date)
@@ -573,6 +614,13 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "missing_pet_id": True,
             }
         pet_id = pid_norm
+
+        ignore_aid: list[str] = []
+        if ignore_appointment_ids and str(ignore_appointment_ids).strip():
+            for part in re.split(r"[\s,;]+", str(ignore_appointment_ids).strip()):
+                p = part.strip()
+                if _is_uuid(p):
+                    ignore_aid.append(p)
 
         # Data "hoje" em America/Sao_Paulo
         today = today_sao_paulo()
@@ -706,7 +754,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
         for s in slots:
             slot_dt = datetime.combine(parsed_date, s["slot_time"])
             st = str(s["slot_time"])[:5]
-            if slot_dt <= now + timedelta(hours=2):
+            if slot_dt <= now:
                 excluded_lead.append(st)
                 continue
             available_slots.append(
@@ -718,29 +766,79 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 }
             )
 
-        def _availability_policy(extra: str | None = None) -> dict:
+        after_lead_count = len(available_slots)
+
+        busy_starts: set[str] = set()
+        excluded_same_pet: list[str] = []
+        with get_connection() as conn:
+            cur = conn.cursor()
+            busy_starts = _pet_occupied_slot_starts_hhmm(
+                cur,
+                company_id,
+                pet_id,
+                parsed_date,
+                exclude_appointment_ids=ignore_aid or None,
+            )
+        if busy_starts:
+            filtered_slots = []
+            for x in available_slots:
+                if x["start_time"] in busy_starts:
+                    excluded_same_pet.append(x["start_time"])
+                else:
+                    filtered_slots.append(x)
+            available_slots = filtered_slots
+
+        def _availability_policy(
+            extra: str | None = None,
+            excluded_same_pet_starts: list[str] | None = None,
+        ) -> dict:
+            esp = sorted(set(excluded_same_pet_starts or []))
+            note = (
+                "A view já filtra por especialidade ativa, slot não bloqueado e vaga. "
+                "Aqui só entram em available_times horários com início **depois** de agora (Brasília). "
+                "Se o cliente perguntar por um horário listado em excluded_..., explique: "
+                "já passou — não invente outro motivo."
+            )
+            if esp:
+                note += (
+                    " excluded_due_to_same_pet_already_booked_at_start: o mesmo pet já tem serviço "
+                    "começando nesse horário neste dia (ex.: 2º bloco de banho G/GG) — para outro serviço no mesmo dia, "
+                    "só oferte inícios **depois** do último bloco ocupado."
+                )
             pol = {
                 "timezone": "America/Sao_Paulo",
-                "minimum_hours_ahead_of_start": 2,
+                "minimum_hours_ahead_of_start": 0,
                 "reference_now_local": now.strftime("%Y-%m-%d %H:%M"),
                 "data_source": "vw_slot_availability",
                 "specialty_id": spec_id,
                 "slots_with_capacity_before_filter": len(slots),
                 "excluded_due_to_minimum_notice_or_past": sorted(set(excluded_lead)),
-                "note": (
-                    "A view já filtra por especialidade ativa, slot não bloqueado e vaga. "
-                    "Aqui só entram em available_times horários com início > agora + 2h (Brasília). "
-                    "Se o cliente perguntar por um horário listado em excluded_..., explique: "
-                    "já passou ou não cumpre a antecedência mínima — não invente outro motivo."
-                ),
+                "note": note,
             }
+            if esp:
+                pol["excluded_due_to_same_pet_already_booked_at_start"] = esp
             if extra:
                 pol["situation"] = extra
             return pol
 
-        count_after_lead_time = len(available_slots)
-
         if not available_slots:
+            if after_lead_count > 0 and excluded_same_pet:
+                return {
+                    "available": False,
+                    "closed_days": [],
+                    "full_days": [],
+                    "available_times": [],
+                    "message": (
+                        "Para este pet neste dia, todo início de faixa com vaga coincide "
+                        "com um horário em que ele já tem serviço (cada bloco G/GG conta). "
+                        "Para **outro** serviço no mesmo dia, oferte só horários **depois** do último bloco ocupado "
+                        "— veja availability_policy.excluded_due_to_same_pet_already_booked_at_start ou tente outro dia. "
+                        "Se estiver **remarcando**, chame de novo com ignore_appointment_ids = id (+ paired_appointment_id se houver)."
+                    ),
+                    "availability_policy": _availability_policy(
+                        excluded_same_pet_starts=excluded_same_pet,
+                    ),
+                }
             return {
                 "available": False,
                 "closed_days": [],
@@ -748,11 +846,13 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "available_times": [],
                 "message": (
                     "Não há horários elegíveis no momento: há vagas na grade, mas todos os slots "
-                    "já passaram ou começam dentro de 2 horas a partir de agora (horário de Brasília). "
+                    "já passaram (horário de Brasília). "
                     "Use availability_policy.excluded_due_to_minimum_notice_or_past para responder "
                     "se o cliente insistir num horário (ex.: 9h)."
                 ),
-                "availability_policy": _availability_policy(),
+                "availability_policy": _availability_policy(
+                    excluded_same_pet_starts=excluded_same_pet,
+                ),
             }
 
         need_consecutive = False
@@ -826,7 +926,7 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 ) <= 0:
                     continue
                 slot_dt = datetime.combine(parsed_date, a["slot_time"])
-                if slot_dt <= now + timedelta(hours=2):
+                if slot_dt <= now:
                     continue
                 sid_a = str(a["id"])
                 starter_ids.add(sid_a)
@@ -837,6 +937,8 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 if x["slot_id"] not in starter_ids:
                     continue
                 pe = double_pair_end.get(x["slot_id"])
+                if pe and pe in busy_starts:
+                    continue
                 if pe:
                     x = {
                         **x,
@@ -853,11 +955,12 @@ def build_booking_tools(company_id: int, client_id) -> list:
                 "available_times": [],
                 "message": (
                     "Para este pet/serviço é necessário **dois slots seguidos** com vaga; "
-                    "não há par disponível hoje respeitando a antecedência mínima de 2h. "
+                    "não há par disponível hoje (horários futuros com dois blocos livres). "
                     "Chame get_available_times noutra data ou ofereça os horários de outro dia."
                 ),
                 "availability_policy": _availability_policy(
-                    "Filtro G/GG + duration_multiplier: sem par consecutivo elegível após regras."
+                    "Filtro G/GG + duration_multiplier: sem par consecutivo elegível após regras.",
+                    excluded_same_pet_starts=excluded_same_pet,
                 ),
             }
 
@@ -868,7 +971,9 @@ def build_booking_tools(company_id: int, client_id) -> list:
             "closed_days": [],
             "full_days": [],
             "available_times": available_slots,
-            "availability_policy": _availability_policy(),
+            "availability_policy": _availability_policy(
+                excluded_same_pet_starts=excluded_same_pet,
+            ),
             "total_offered_slots": len(available_slots),
         }
 
@@ -1966,6 +2071,7 @@ def fetch_available_times_snapshot(
     target_date: str,
     service_id=None,
     pet_id: str | None = None,
+    ignore_appointment_ids: str | None = None,
 ) -> dict:
     """Mesma lógica da tool `get_available_times` — para pré-carga no router (sem depender do LLM)."""
     tools = build_booking_tools(company_id, client_id)
@@ -1980,4 +2086,5 @@ def fetch_available_times_snapshot(
         target_date=target_date,
         service_id=service_id,
         pet_id=pet_id,
+        ignore_appointment_ids=ignore_appointment_ids,
     )

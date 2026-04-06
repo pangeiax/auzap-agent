@@ -1,4 +1,4 @@
-from prompts.scheduling_pet_shared import WRITE_TOOLS_CONFIRMATION_BLOCK
+from prompts.scheduling_pet_shared import PET_SIZE_WEIGHT_REFERENCE_PT, WRITE_TOOLS_CONFIRMATION_BLOCK
 from prompts.specialists.onboarding.common import build_catalog_context, pet_state_line
 
 
@@ -66,10 +66,11 @@ CADASTRO: só cachorro e gato por este canal.
 • Raça: só o que o cliente disse para este pet. "Sem raça definida"/SRD só se o cliente disser.
 • Anti-cópia: nunca usar raça/espécie de outro pet do cliente para preencher um nome novo.
 • Porte: sempre o cliente informa; nunca deduzir pela raça.
+• Auxílio por peso (pode citar ao pedir porte, em texto simples): {PET_SIZE_WEIGHT_REFERENCE_PT}
 • Espécie: só inferir cachorro/gato quando a raça for claramente reconhecível; nunca inferir pelo nome do pet.
 
 FLUXO PRINCIPAL:
-1. Se nada foi coletado ainda: peça nome/apelido, cachorro ou gato (ou raça que ajude), raça e porte numa única pergunta.
+1. Se nada foi coletado ainda: peça nome/apelido, cachorro ou gato (ou raça que ajude), raça e porte numa única pergunta (pode incluir a referência de peso acima se ajudar).
 2. Se respondeu parcial: pergunte só o que falta, de preferência numa única mensagem.
 3. Quando tiver nome + porte, use set_pet_size se fizer sentido; se ainda faltar raça/espécie, não chame create_pet.
 4. Quando tiver os 4 campos completos: envie só o resumo e peça confirmação explícita.
@@ -88,12 +89,12 @@ CHECKLIST DOS 4 CAMPOS:
 • nome
 • espécie (cachorro ou gato)
 • raça
-• porte (pequeno, médio, grande ou equivalente aceito)
+• porte (P/M/G/GG ou pequeno, médio, grande, extra grande — faixas de peso: ver «Auxílio por peso» acima)
 
 PETS JÁ NO SISTEMA:
 • Se get_client_pets trouxer o mesmo nome com size preenchido, o cadastro já está completo; não pergunte porte de novo.
 • Se houver duplicata ou falta de campo, informe só o que falta segundo a tool.
-• **Um pet só** na lista e o cliente citar **outro** nome (ou possível typo) com porte: **desambigue** — é o pet já cadastrado (cite o nome da tool) ou um **novo**? Só trate como cadastro novo ou chame **set_pet_size** com o nome certo do banco após resposta clara. Se **set_pet_size** vier com **disambiguation**, siga o **hint** na mesma rodada.
+• **Um pet só** na lista e o cliente citar **outro** nome **sem** ter dito que quer **outro**/**mais um** pet: **desambigue** — é o pet já cadastrado (cite o nome da tool) ou um **novo**? Se **já** disse «cadastrar outro pet»/equivalente antes do nome → cadastro novo, **sem** essa pergunta. Só trate como cadastro novo ou chame **set_pet_size** com o nome certo do banco após resposta clara quando couber desambiguação.
 
 PÓS-CADASTRO / COMPLETED:
 • Se o histórico já mostrar cadastro concluído e o cliente só agradecer, não repita confirmação nem create_pet.

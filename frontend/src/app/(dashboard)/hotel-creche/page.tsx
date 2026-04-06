@@ -5,8 +5,10 @@ import { DashboardLayout } from '@/components/templates/DashboardLayout'
 import { Modal } from '@/components/molecules/Modal'
 import { Button } from '@/components/atoms/Button'
 import { Input } from '@/components/atoms/Input'
+import { TextArea } from '@/components/atoms/TextArea'
+import { useToast } from '@/hooks'
 import { ClientCombobox } from '@/components/molecules/ClientCombobox'
-import { PawPrint, Clock, LogIn, LogOut, Home, Loader2, AlertTriangle, Plus, ChevronDown } from 'lucide-react'
+import { PawPrint, Clock, LogIn, LogOut, Home, Loader2, AlertTriangle, Plus, ChevronDown, Eye, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { lodgingConfigService, lodgingReservationService, roomTypeService } from '@/services/lodgingService'
 import type { LodgingReservation, LodgingType, LodgingConfig, RoomTypeAvailability, RoomType } from '@/services/lodgingService'
@@ -18,6 +20,22 @@ function formatDateBR(iso: string | Date | null | undefined): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso
   if (isNaN(d.getTime())) return String(iso)
   return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`
+}
+
+function careNotesToText(n: Record<string, unknown> | null | undefined): string {
+  if (!n || typeof n !== 'object') return ''
+  const o = n as Record<string, unknown>
+  const keys = ['descricao', 'texto', 'observacoes', 'observations', 'description', 'notes'] as const
+  for (const k of keys) {
+    const v = o[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  try {
+    const s = JSON.stringify(n, null, 2)
+    return s === '{}' ? '' : s
+  } catch {
+    return ''
+  }
 }
 
 function getInitials(name: string): string {
@@ -344,10 +362,16 @@ function PetCombobox({
 function ReservadoCard({
   res,
   onCheckin,
+  onOpenDetails,
+  onCancelReservation,
+  cancelLoadingId,
   config,
 }: {
   res: LodgingReservation
   onCheckin: (r: LodgingReservation) => void
+  onOpenDetails: (r: LodgingReservation) => void
+  onCancelReservation?: (r: LodgingReservation) => void
+  cancelLoadingId: string | null
   config: LodgingConfig | null
 }) {
   const petName = res.pet_name ?? 'Pet'
@@ -423,6 +447,31 @@ function ReservadoCard({
             </span>
           )}
         </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenDetails(res)}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#727B8E]/20 bg-white px-2.5 py-1 text-[10px] font-semibold text-[#434A57] transition-colors hover:bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc] dark:hover:bg-[#2a2d36]"
+          >
+            <Eye className="h-3 w-3 shrink-0" aria-hidden />
+            Ver detalhes
+          </button>
+          {onCancelReservation && (res.status === 'confirmed' || res.status === 'needs_reschedule') && (
+            <button
+              type="button"
+              disabled={cancelLoadingId === res.id}
+              onClick={() => onCancelReservation(res)}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-[10px] font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:pointer-events-none disabled:opacity-60 dark:border-red-800/40 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50"
+            >
+              {cancelLoadingId === res.id ? (
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+              ) : (
+                <Trash2 className="h-3 w-3 shrink-0" aria-hidden />
+              )}
+              Cancelar reserva
+            </button>
+          )}
+        </div>
       </div>
       <button
         type="button"
@@ -444,11 +493,13 @@ function ReservadoCard({
 function HospedadoCard({
   res,
   onCheckout,
+  onOpenDetails,
   loadingId,
   config,
 }: {
   res: LodgingReservation
   onCheckout: (r: LodgingReservation) => void
+  onOpenDetails: (r: LodgingReservation) => void
   loadingId: string | null
   config: LodgingConfig | null
 }) {
@@ -513,6 +564,16 @@ function HospedadoCard({
                : <span className="ml-1">({remaining}d restantes)</span>}
             </span>
           )}
+        </div>
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => onOpenDetails(res)}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#727B8E]/20 bg-white px-2.5 py-1 text-[10px] font-semibold text-[#434A57] transition-colors hover:bg-[#F4F6F9] dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc] dark:hover:bg-[#2a2d36]"
+          >
+            <Eye className="h-3 w-3 shrink-0" aria-hidden />
+            Ver detalhes
+          </button>
         </div>
       </div>
       <button
@@ -610,6 +671,7 @@ function PageSkeleton() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function HotelCrechePage() {
+  const toast = useToast()
   const [config, setConfig] = useState<LodgingConfig | null>(null)
   const [loadingConfig, setLoadingConfig] = useState(true)
   const [activeTab, setActiveTab] = useState<LodgingType>('hotel')
@@ -629,6 +691,9 @@ export default function HotelCrechePage() {
   const [checkoutLoadingId, setCheckoutLoadingId] = useState<string | null>(null)
   const [checkoutTarget, setCheckoutTarget] = useState<LodgingReservation | null>(null)
 
+  const [detailReservation, setDetailReservation] = useState<LodgingReservation | null>(null)
+  const [cancelResLoadingId, setCancelResLoadingId] = useState<string | null>(null)
+
   // Nova reserva manual
   const [newResOpen, setNewResOpen] = useState(false)
   const [modalClients, setModalClients] = useState<Client[]>([])
@@ -641,6 +706,7 @@ export default function HotelCrechePage() {
   const [newCheckoutDate, setNewCheckoutDate] = useState('')
   const [newDailyRate, setNewDailyRate] = useState('')
   const [newEmergencyContact, setNewEmergencyContact] = useState('')
+  const [newResNotes, setNewResNotes] = useState('')
   const [newResLoading, setNewResLoading] = useState(false)
   const [newResError, setNewResError] = useState('')
   const [roomTypeOptions, setRoomTypeOptions] = useState<RoomTypeAvailability[]>([])
@@ -801,6 +867,25 @@ export default function HotelCrechePage() {
     }
   }
 
+  const handleCancelReservation = async (r: LodgingReservation) => {
+    if (cancelResLoadingId) return
+    setCancelResLoadingId(r.id)
+    try {
+      await lodgingReservationService.cancel(r.id)
+      setDetailReservation((prev) => (prev?.id === r.id ? null : prev))
+      await fetchReservations()
+      toast.success('Reserva cancelada', 'A reserva foi removida da lista ativa.')
+    } catch (err: unknown) {
+      console.error('Erro ao cancelar reserva:', err)
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        'Não foi possível cancelar a reserva.'
+      toast.error('Erro ao cancelar', msg)
+    } finally {
+      setCancelResLoadingId(null)
+    }
+  }
+
   const fetchModalClients = useCallback(async () => {
     try {
       setModalClientsLoading(true)
@@ -838,6 +923,7 @@ export default function HotelCrechePage() {
     setClientPetsLoading(false)
     setNewDailyRate('')
     setNewEmergencyContact('')
+    setNewResNotes('')
     setNewResError('')
     setRoomTypeOptions([])
     setSelectedRoomTypeId('')
@@ -911,6 +997,9 @@ export default function HotelCrechePage() {
         checkout_date: checkoutForApi,
         ...(newDailyRate ? { daily_rate: Number(newDailyRate.replace(',', '.')) } : {}),
         ...(newEmergencyContact.trim() ? { emergency_contact: newEmergencyContact.trim() } : {}),
+        ...(newResNotes.trim()
+          ? { care_notes: { descricao: newResNotes.trim() } as Record<string, unknown> }
+          : {}),
       })
 
       setNewResOpen(false)
@@ -1091,7 +1180,17 @@ export default function HotelCrechePage() {
                         <p className="text-sm text-[#727B8E]">Nenhuma reserva pendente</p>
                       </div>
                     ) : (
-                      reservados.map((r) => <ReservadoCard key={r.id} res={r} onCheckin={handleOpenCheckin} config={config} />)
+                      reservados.map((r) => (
+                        <ReservadoCard
+                          key={r.id}
+                          res={r}
+                          onCheckin={handleOpenCheckin}
+                          onOpenDetails={setDetailReservation}
+                          onCancelReservation={handleCancelReservation}
+                          cancelLoadingId={cancelResLoadingId}
+                          config={config}
+                        />
+                      ))
                     )}
                   </div>
                 </motion.div>
@@ -1117,7 +1216,16 @@ export default function HotelCrechePage() {
                         <p className="text-sm text-[#727B8E]">Nenhum pet hospedado</p>
                       </div>
                     ) : (
-                      hospedados.map((r) => <HospedadoCard key={r.id} res={r} onCheckout={(r) => setCheckoutTarget(r)} loadingId={checkoutLoadingId} config={config} />)
+                      hospedados.map((r) => (
+                        <HospedadoCard
+                          key={r.id}
+                          res={r}
+                          onCheckout={(x) => setCheckoutTarget(x)}
+                          onOpenDetails={setDetailReservation}
+                          loadingId={checkoutLoadingId}
+                          config={config}
+                        />
+                      ))
                     )}
                   </div>
                 </motion.div>
@@ -1126,6 +1234,72 @@ export default function HotelCrechePage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={detailReservation !== null}
+        onClose={() => setDetailReservation(null)}
+        title="Detalhes da reserva"
+        className="max-w-[440px]"
+      >
+        {detailReservation && (
+          <div className="flex flex-col gap-3 text-sm text-[#434A57] dark:text-[#f5f9fc]">
+            <div className="rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-3 space-y-2">
+              <p className="font-semibold">{detailReservation.pet_name ?? 'Pet'}</p>
+              <p className="text-xs text-[#727B8E]">{detailReservation.client_name ?? '—'}</p>
+              {detailReservation.phone_client && (
+                <p className="text-xs text-[#727B8E]">Tel. {detailReservation.phone_client}</p>
+              )}
+              <p className="text-xs">
+                <span className="font-medium">{detailReservation.type === 'hotel' ? 'Hotel' : 'Creche'}</span>
+                {detailReservation.room_type_name ? ` · ${detailReservation.room_type_name}` : ''}
+              </p>
+              <p className="text-xs text-[#727B8E]">
+                Entrada {formatDateBR(detailReservation.checkin_date)}
+                {' → '}
+                Saída {formatDateBR(detailReservation.checkout_date)}
+              </p>
+              {detailReservation.kennel_id && (
+                <p className="text-xs">Vaga: <span className="font-medium">{detailReservation.kennel_id}</span></p>
+              )}
+              {detailReservation.emergency_contact && (
+                <p className="text-xs">Emergência: {detailReservation.emergency_contact}</p>
+              )}
+              {detailReservation.total_amount != null && (
+                <p className="text-xs">Total: R$ {Number(detailReservation.total_amount).toFixed(2)}</p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6] mb-1">
+                Descrição / cuidados
+              </p>
+              {careNotesToText(detailReservation.care_notes as Record<string, unknown>) ? (
+                <p className="whitespace-pre-wrap text-sm">{careNotesToText(detailReservation.care_notes as Record<string, unknown>)}</p>
+              ) : (
+                <p className="text-xs text-[#727B8E]">Nenhuma descrição registrada.</p>
+              )}
+            </div>
+            {(detailReservation.status === 'confirmed' || detailReservation.status === 'needs_reschedule') && (
+              <div className="flex justify-end pt-1">
+                <Button
+                  variant="outline"
+                  className="border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800/50 dark:text-red-400 dark:hover:bg-red-950/30"
+                  disabled={cancelResLoadingId === detailReservation.id}
+                  onClick={() => handleCancelReservation(detailReservation)}
+                >
+                  {cancelResLoadingId === detailReservation.id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Cancelando...
+                    </>
+                  ) : (
+                    'Cancelar reserva'
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal isOpen={!!checkinTarget} onClose={() => setCheckinTarget(null)} title="Fazer Check-in" className="max-w-[420px]">
         {checkinTarget && (
@@ -1338,6 +1512,17 @@ export default function HotelCrechePage() {
               placeholder="Ex: João — (11) 99999-9999"
               value={newEmergencyContact}
               onChange={(e) => setNewEmergencyContact(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">Descrição / observações (opcional)</p>
+            <TextArea
+              rows={3}
+              placeholder="Cuidados especiais, alimentação, medicamentos, preferências..."
+              value={newResNotes}
+              onChange={(e) => setNewResNotes(e.target.value)}
+              disabled={newResLoading}
             />
           </div>
 

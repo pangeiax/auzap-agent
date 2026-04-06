@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { MessagesSquare } from "lucide-react";
 
 interface Props {
   conversionRate: number;
@@ -12,7 +13,9 @@ const ConversaoWhatsapp = ({ conversionRate, totalAppointments, revenueGenerated
     return (
       <Card className="p-5">
         <p className="text-xs font-semibold tracking-wider uppercase text-[#434A57] dark:text-[#f5f9fc]">Conversão WhatsApp</p>
-        <p className="text-2xl font-bold mt-3 text-[#727B8E] dark:text-[#8a94a6]">—</p>
+        <div className="mt-3 flex text-[#727B8E] dark:text-[#8a94a6]" aria-hidden>
+          <MessagesSquare className="h-8 w-8" strokeWidth={1.25} />
+        </div>
         <p className="text-xs mt-1 text-[#727B8E] dark:text-[#8a94a6]">Sem conversas registradas</p>
       </Card>
     );

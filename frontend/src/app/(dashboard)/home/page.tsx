@@ -334,12 +334,16 @@ export default function DashboardPage() {
           <DashboardKpiCards data={kpisData} loading={metricsLoading} />
 
           <div className="grid grid-cols-1 items-stretch gap-4 sm:gap-6 lg:grid-cols-2">
-            <MetricsRevenueChart data={revenueData} useMockData={true} className="h-full" />
+            <MetricsRevenueChart data={revenueData} className="h-full" />
             <AppointmentsWeekdayChart data={weekdayData} className="h-full" />
           </div>
 
           <div className="grid grid-cols-1 items-stretch gap-4 sm:gap-6 lg:grid-cols-3">
-            <TopServicesDonutChart data={topServicesData} className="h-full" />
+            <TopServicesDonutChart
+              data={topServicesData}
+              serviceTrend={kpisData?.topService ?? null}
+              className="h-full"
+            />
             <RecurrenceDonutChart data={recurrenceData} className="h-full" />
             <LostClientsList clients={lostClientsData} className="h-full" />
           </div>

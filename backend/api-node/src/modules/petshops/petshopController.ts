@@ -2,11 +2,11 @@ import { Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
 import { attachBusinessHoursToPetshopJson } from '../../lib/businessHoursTable'
 
-// GET /petshops - List all petshops
+// GET /petshops — lista restrita à empresa do usuário
 export async function listPetshops(req: Request, res: Response) {
   try {
     const { skip = 0, limit = 50, is_active } = req.query
-    const where: any = {}
+    const where: { companyId: number; isActive?: boolean } = { companyId: req.user!.companyId }
     if (is_active !== undefined) where.isActive = is_active === 'true'
 
     const petshops = await prisma.petshopProfile.findMany({
@@ -34,6 +34,9 @@ export async function getPetshop(req: Request, res: Response) {
       include: { company: true },
     })
     if (!petshop) return res.status(404).json({ error: 'Petshop not found' })
+    if (petshop.companyId !== req.user!.companyId) {
+      return res.status(403).json({ error: 'Acesso negado' })
+    }
     res.json(await attachBusinessHoursToPetshopJson(petshop))
   } catch (error) {
     console.error('Error getting petshop:', error)
@@ -46,6 +49,9 @@ export async function createPetshop(req: Request, res: Response) {
   try {
     const { company_id, address, cep, phone, latitude, longitude, owner_phone, emergency_contact, assistant_name } = req.body
     if (!company_id || !phone) return res.status(400).json({ error: 'company_id and phone are required' })
+    if (Number(company_id) !== req.user!.companyId) {
+      return res.status(403).json({ error: 'company_id deve ser o da sua conta' })
+    }
 
     const existing = await prisma.petshopProfile.findUnique({ where: { companyId: company_id } })
     if (existing) return res.status(409).json({ error: 'Petshop already exists for this company' })
@@ -81,6 +87,9 @@ export async function updatePetshop(req: Request, res: Response) {
 
     const existing = await prisma.petshopProfile.findUnique({ where: { id: parseInt(petshopId as any) } })
     if (!existing) return res.status(404).json({ error: 'Petshop not found' })
+    if (existing.companyId !== req.user!.companyId) {
+      return res.status(403).json({ error: 'Acesso negado' })
+    }
 
     if (company_name !== undefined) {
       await prisma.saasCompany.update({ where: { id: existing.companyId }, data: { name: company_name } })

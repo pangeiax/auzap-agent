@@ -57,13 +57,27 @@ export const appointmentService = {
     return response.data
   },
 
-  async cancelAppointment(appointmentId: string): Promise<{
+  async cancelAppointment(
+    appointmentId: string,
+    cancelReason?: string | null,
+  ): Promise<{
     success: boolean
     appointment_id: string
     cancelled_at: string
   }> {
-    // TODO: Backend — endpoint não implementado em api-node ainda. Implementar em backend/api-node/src/modules/
-    const response = await api.delete(`/appointments/${appointmentId}`)
+    const response = await api.delete(`/appointments/${appointmentId}`, {
+      data: cancelReason ? { cancel_reason: cancelReason } : {},
+    })
+    return response.data
+  },
+
+  async rescheduleToSlot(body: {
+    appointment_id: string
+    new_slot_id?: string
+    new_scheduled_date?: string
+    new_time?: string
+  }): Promise<Appointment> {
+    const response = await api.post<Appointment>('/appointments/reschedule-to-slot', body)
     return response.data
   },
 

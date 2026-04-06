@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { DashboardChatInput } from '@/components/molecules/DashboardChatInput'
 import { Markdown } from '@/components/atoms/Markdown'
@@ -7,6 +7,9 @@ import { ScrollIndicator } from '@/components/atoms/ScrollIndicator'
 import { getImage } from '@/assets/images'
 import { useBrain } from './useBrain'
 import type { BrainMessage } from './brain.types'
+import type { BrainStructuredUi } from './parseAssistantStructured'
+import { AppointmentSchedulingDraft } from './AppointmentSchedulingDraft'
+import { BrainAgendaConfirmPanels } from './BrainAgendaConfirmPanels'
 import { CampaignDraft } from './CampaignDraft'
 
 interface Props {
@@ -58,7 +61,14 @@ function UserBubble({ content }: { content: string }) {
   )
 }
 
+function assistantStructuredList(msg: BrainMessage): BrainStructuredUi[] {
+  const s = msg.structured
+  if (!s) return []
+  return Array.isArray(s) ? s : [s]
+}
+
 function AssistantBubble({ msg }: { msg: BrainMessage }) {
+  const structs = assistantStructuredList(msg)
   return (
     <div className="flex min-w-0 items-end gap-2 sm:gap-4 flex-row">
       <img
@@ -77,20 +87,37 @@ function AssistantBubble({ msg }: { msg: BrainMessage }) {
             {msg.content}
           </Markdown>
         )}
-        {msg.structured?.type === 'campaign_draft' && (
-          <CampaignDraft
-            clients={msg.structured.clients}
-            message={msg.structured.message}
-            onClose={() => {}}
-          />
-        )}
-        {msg.structured?.type === 'appointment_created' && (
-          <div className="mt-3 rounded-xl border border-[#727B8E1A] bg-gray-50 px-4 py-3 text-xs dark:border-[#40485A] dark:bg-[#141518]">
-            <p className="font-medium text-[#434A57] dark:text-[#f5f9fc]">Agendamento criado</p>
-            <p className="mt-1 text-[#727B8E] dark:text-[#8a94a6]">
-              ID: {msg.structured.appointment_id} · Data: {msg.structured.scheduled_date}
-            </p>
-          </div>
+        {structs.map((st, idx) => (
+          <Fragment key={idx}>
+            {st.type === 'campaign_draft' && (
+              <CampaignDraft
+                clients={st.clients}
+                message={st.message}
+                maxRecipientsPerSend={st.max_recipients_per_send}
+                onClose={() => {}}
+              />
+            )}
+            {st.type === 'appointment_draft' && <AppointmentSchedulingDraft draft={st} />}
+            <BrainAgendaConfirmPanels structured={st} />
+            {st.type === 'appointment_created' && (
+              <div className="mt-3 rounded-xl border border-[#727B8E1A] bg-gray-50 px-4 py-3 text-xs dark:border-[#40485A] dark:bg-[#141518]">
+                <p className="font-medium text-[#434A57] dark:text-[#f5f9fc]">Agendamento criado</p>
+                <p className="mt-1 text-[#727B8E] dark:text-[#8a94a6]">
+                  ID: {st.appointment_id} · Data: {st.scheduled_date}
+                </p>
+              </div>
+            )}
+          </Fragment>
+        ))}
+        {msg.sqlExecuted && (
+          <details className="mt-3 text-xs text-[#727B8E] dark:text-[#8a94a6]">
+            <summary className="cursor-pointer select-none font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              SQL executada (somente leitura)
+            </summary>
+            <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-[#727B8E1A] bg-gray-50 p-3 font-mono text-[11px] leading-relaxed text-[#434A57] dark:border-[#40485A] dark:bg-[#141518] dark:text-[#d1d5db]">
+              {msg.sqlExecuted}
+            </pre>
+          </details>
         )}
       </div>
     </div>
@@ -98,7 +125,7 @@ function AssistantBubble({ msg }: { msg: BrainMessage }) {
 }
 
 export function BrainChat({ userName, assistantName = 'AuZap' }: Props) {
-  const { messages, suggestions, loading, sendMessage, clear } = useBrain()
+  const { messages, suggestions, loading, sendMessage, clear, dailyUsage } = useBrain()
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const hasMessages = messages.length > 0
   const firstName = userName.split(' ')[0]
@@ -175,6 +202,11 @@ export function BrainChat({ userName, assistantName = 'AuZap' }: Props) {
             disabled={loading}
             quickActionsPairs={brainPairs}
           />
+          {dailyUsage?.enabled && dailyUsage.limit > 0 && dailyUsage.used >= 0 && (
+            <p className="mx-auto mt-2 w-full max-w-[770px] text-center text-[11px] leading-tight text-[#727B8E] dark:text-[#6b7280]">
+              {Math.max(0, dailyUsage.limit - dailyUsage.used)} mensagens restantes hoje
+            </p>
+          )}
         </div>
 
         {hasMessages && (

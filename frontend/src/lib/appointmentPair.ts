@@ -1,6 +1,14 @@
 /** Mesmo prefixo usado no backend ao criar par de agendamentos (G/GG + multiplier). */
 export const DOUBLE_PAIR_PREFIX = "__DOUBLE_PAIR__:";
 
+/** Texto de observações sem o marcador interno de par de slots (G/GG). */
+export function notesForDisplay(notes?: string | null): string {
+  if (!notes) return ''
+  const idx = notes.indexOf(DOUBLE_PAIR_PREFIX)
+  if (idx < 0) return notes.trim()
+  return notes.slice(0, idx).trim()
+}
+
 export function extractPairedAppointmentId(
   notes?: string | null,
 ): string | null {

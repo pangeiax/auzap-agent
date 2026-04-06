@@ -2,6 +2,7 @@
 
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/cn'
+import { UserCheck } from 'lucide-react'
 import type { LostClient } from '@/services/dashboardService'
 
 function formatDate(dateStr: string | null) {
@@ -15,7 +16,7 @@ function openWhatsApp(phone: string, clientName: string, petName: string) {
   const cleaned = phone.replace(/\D/g, '')
   const number = cleaned.startsWith('55') ? cleaned : `55${cleaned}`
   const msg = encodeURIComponent(
-    `Olá ${clientName}! Sentimos falta do(a) ${petName} por aqui 🐾 Quando conseguimos agendar o próximo banho?`,
+    `Olá ${clientName}! Sentimos falta do(a) ${petName} por aqui. Quando conseguimos agendar o próximo banho?`,
   )
   window.open(`https://wa.me/${number}?text=${msg}`, '_blank')
 }
@@ -44,7 +45,7 @@ export function LostClientsList({ clients, className }: Props) {
 
       {clients.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 py-8">
-          <span className="text-2xl">🎉</span>
+          <UserCheck className="h-10 w-10 text-[#059669]" strokeWidth={1.5} aria-hidden />
           <p className="text-sm font-medium text-[#059669]">Nenhum cliente sumido!</p>
           <p className="text-xs text-[#9ca3af]">Ótimo sinal de fidelização</p>
         </div>

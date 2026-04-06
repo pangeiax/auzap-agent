@@ -18,6 +18,8 @@ export interface CalendarEvent {
   clientPhone?: string;
   /** ID do outro agendamento do par (bruto da API ou segundo slot após merge). */
   pairedAppointmentId?: string;
+  /** Observações / descrição (sem marcadores internos de par). */
+  notes?: string;
 }
 
 interface CalendarGridProps {

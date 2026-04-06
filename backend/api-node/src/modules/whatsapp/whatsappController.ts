@@ -18,6 +18,9 @@ function parseCompanyId(param: string | undefined): number | null {
 export async function getStatus(req: Request, res: Response) {
   const companyId = parseCompanyId(req.params.companyId)
   if (!companyId) return res.status(400).json({ error: 'companyId inválido' })
+  if (req.user!.companyId !== companyId) {
+    return res.status(403).json({ error: 'Acesso negado a outra empresa' })
+  }
 
   const session = await prisma.whatsappSession.findUnique({
     where: { companyId },
@@ -90,6 +93,9 @@ export async function connectWhatsApp(req: Request, res: Response) {
 export async function disconnectWhatsApp(req: Request, res: Response) {
   const companyId = parseCompanyId(req.params.companyId)
   if (!companyId) return res.status(400).json({ error: 'companyId inválido' })
+  if (req.user!.companyId !== companyId) {
+    return res.status(403).json({ error: 'Acesso negado a outra empresa' })
+  }
 
   await disconnectSession(String(companyId))
   return res.json({ message: 'Sessão desconectada com sucesso.' })
