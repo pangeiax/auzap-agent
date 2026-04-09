@@ -1,4 +1,10 @@
+import logging
+
+import psycopg2
+
 from db import get_connection
+
+logger = logging.getLogger("ai-service.context.loader")
 
 BH_DAY_KEYS = [
     "sunday",
@@ -79,15 +85,54 @@ async def load_context(company_id: int, client_phone: str) -> dict:
         )
         services = cur.fetchall()
 
-        cur.execute(
-            """
-            SELECT id, name, phone, conversation_stage, ai_paused, kanban_column
-            FROM clients
-            WHERE company_id = %s AND phone = %s
-        """,
-            (company_id, client_phone),
-        )
-        client = cur.fetchone()
+        identity_columns_ok = True
+        try:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    email,
+                    phone,
+                    manual_phone,
+                    cpf,
+                    conversation_stage,
+                    ai_paused,
+                    kanban_column
+                FROM clients
+                WHERE company_id = %s AND phone = %s
+            """,
+                (company_id, client_phone),
+            )
+            client = cur.fetchone()
+        except psycopg2.errors.UndefinedColumn:
+            # Banco ainda sem migration de CPF / manual_phone no mesmo DSN do agente
+            identity_columns_ok = False
+            conn.rollback()
+            logger.warning(
+                "clients sem colunas cpf/manual_phone — usando SELECT legado (fluxo recadastro desligado)"
+            )
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    email,
+                    phone,
+                    conversation_stage,
+                    ai_paused,
+                    kanban_column
+                FROM clients
+                WHERE company_id = %s AND phone = %s
+                """,
+                (company_id, client_phone),
+            )
+            client = cur.fetchone()
+            if client:
+                c = dict(client)
+                c["manual_phone"] = None
+                c["cpf"] = None
+                client = c
 
         pets = []
         if client:
@@ -164,6 +209,13 @@ async def load_context(company_id: int, client_phone: str) -> dict:
         )
         lodging_room_types = [dict(r) for r in cur.fetchall()]
 
+        client_dict = dict(client) if client else None
+        identity_flow_required = False
+        if client_dict and identity_columns_ok:
+            mp = (client_dict.get("manual_phone") or "").strip()
+            cpf_v = (client_dict.get("cpf") or "").strip()
+            identity_flow_required = (not mp) and (not cpf_v)
+
         return {
             "company_id": company["company_id"],
             "company_name": company["company_name"],
@@ -173,9 +225,10 @@ async def load_context(company_id: int, client_phone: str) -> dict:
             "business_hours": business_hours,
             "features": company["features"] or {},
             "services": [dict(s) for s in services],
-            "client": dict(client) if client else None,
+            "client": client_dict,
             "pets": [dict(p) for p in pets],
             "specialties": [dict(s) for s in specialties],
             "lodging_config": lodging_dict,
             "lodging_room_types": lodging_room_types,
+            "identity_flow_required": identity_flow_required,
         }

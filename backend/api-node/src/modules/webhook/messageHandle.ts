@@ -6,6 +6,18 @@ import { runAgent, popFromHistory } from '../../agent/AgentService'
 
 const DEBOUNCE_MS = 8000
 
+function getClientIdentifierFromJid(jid: string): string {
+  const knownSuffixes = ['@s.whatsapp.net', '@g.us']
+
+  for (const suffix of knownSuffixes) {
+    if (jid.endsWith(suffix)) {
+      return jid.slice(0, -suffix.length)
+    }
+  }
+
+  return jid
+}
+
 // ─────────────────────────────────────────
 // Tipos de mensagem que são silenciosamente ignorados
 // (notificações internas do WhatsApp, reações, etc.)
@@ -47,18 +59,6 @@ interface QueuedMessage {
 }
 
 const queuedMessages = new Map<string, QueuedMessage>()
-
-function getClientIdentifierFromJid(jid: string): string {
-  const knownSuffixes = ['@s.whatsapp.net', '@g.us']
-
-  for (const suffix of knownSuffixes) {
-    if (jid.endsWith(suffix)) {
-      return jid.slice(0, -suffix.length)
-    }
-  }
-
-  return jid
-}
 
 const ROUTER_STAGE_TO_CRM_STAGE: Record<string, string> = {
   WELCOME: 'initial',

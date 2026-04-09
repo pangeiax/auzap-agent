@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect, useId } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { normalizeCpfDigits } from "@/lib/cpf";
 import type { Client } from "@/types";
 
 function getClientManualPhoneDisplay(c: Client): string {
@@ -56,8 +57,17 @@ export function ClientCombobox({
     return clients.filter((c) => {
       const name = (c.name ?? "").toLowerCase();
       const phone = (c.phone ?? "").replace(/\D/g, "");
+      const manual = (c.manualPhone ?? "").toLowerCase();
+      const manualDigits = (c.manualPhone ?? "").replace(/\D/g, "");
+      const email = (c.email ?? "").toLowerCase();
+      const cpfDigits = normalizeCpfDigits(c.cpf ?? "");
       return (
-        name.includes(q) || (digits.length > 0 && phone.includes(digits))
+        name.includes(q) ||
+        email.includes(q) ||
+        manual.includes(q) ||
+        (digits.length > 0 && phone.includes(digits)) ||
+        (digits.length > 0 && manualDigits.includes(digits)) ||
+        (digits.length > 0 && cpfDigits.includes(digits))
       );
     });
   }, [clients, query]);

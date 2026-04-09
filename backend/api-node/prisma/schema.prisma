@@ -56,12 +56,14 @@ model SaasUser {
   isActive       Boolean?  @default(true) @map("is_active")
   isSuperuser    Boolean?  @default(false) @map("is_superuser")
   lastLogin      DateTime? @map("last_login") @db.Timestamptz(6)
+  cpf            String?   @map("cpf") @db.VarChar(14)
   createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   company SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId], map: "idx_users_company")
+  @@index([companyId, cpf], map: "idx_users_company_cpf")
   @@map("saas_users")
 }
 
@@ -103,6 +105,7 @@ model Client {
   // Apenas visualizacao no frontend. Nao interfere no envio/recepcao de mensagens,
   // que continuam usando `phone`.
   manualPhone           String?   @map("manual_phone") @db.VarChar(30)
+  cpf                   String?   @map("cpf") @db.VarChar(14)
   name                   String?   @db.VarChar(255)
   companyName            String?   @map("company") @db.VarChar(255)
   email                  String?   @db.VarChar(255)
@@ -132,6 +135,7 @@ model Client {
   @@unique([companyId, phone])
   @@index([companyId], map: "idx_clients_company")
   @@index([phone], map: "idx_clients_phone")
+  @@index([companyId, cpf], map: "idx_clients_company_cpf")
   @@map("clients")
 }
 

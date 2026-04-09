@@ -3,6 +3,10 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { prisma } from '../../lib/prisma'
 import type { JwtPayload } from '../../middleware/authMiddleware'
+import {
+  assertValidCpfOrThrow,
+  parseOptionalCpf,
+} from '../../lib/cpf'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret'
 const JWT_EXPIRES = '7d'
@@ -16,6 +20,7 @@ function formatUser(user: any, companyId: number, companyName?: string, companyP
     id: user.id,
     email: user.email,
     name: user.name,
+    cpf: user.cpf ?? undefined,
     petshop_id: companyId,
     is_active: user.isActive ?? true,
     is_superuser: user.isSuperuser ?? false,
@@ -74,9 +79,22 @@ export async function login(req: Request, res: Response) {
 // POST /auth/register
 export async function register(req: Request, res: Response) {
   try {
-    const { email, name, password, company_name } = req.body
+    const { email, name, password, company_name, cpf: cpfBody } = req.body
     if (!email || !name || !password) {
       return res.status(400).json({ error: 'Email, nome e senha são obrigatórios' })
+    }
+
+    let cpfDigits: string | null = null
+    if (cpfBody !== undefined && cpfBody !== null && String(cpfBody).trim() !== '') {
+      cpfDigits = parseOptionalCpf(cpfBody)
+      if (!cpfDigits) {
+        return res.status(400).json({ error: 'CPF inválido' })
+      }
+      try {
+        assertValidCpfOrThrow(cpfDigits)
+      } catch {
+        return res.status(400).json({ error: 'CPF inválido' })
+      }
     }
 
     const existing = await prisma.saasUser.findUnique({ where: { email } })
@@ -98,8 +116,26 @@ export async function register(req: Request, res: Response) {
         data: { name: company_name || name, slug, plan: 'free' },
       })
 
+      if (cpfDigits) {
+        const dup = await tx.saasUser.findFirst({
+          where: { companyId: company.id, cpf: cpfDigits },
+        })
+        if (dup) {
+          throw Object.assign(new Error('CPF já cadastrado nesta empresa'), {
+            code: 'CPF_DUPLICATE',
+          })
+        }
+      }
+
       const user = await tx.saasUser.create({
-        data: { companyId: company.id, email, name, hashedPassword, role: 'owner' },
+        data: {
+          companyId: company.id,
+          email,
+          name,
+          hashedPassword,
+          role: 'owner',
+          ...(cpfDigits ? { cpf: cpfDigits } : {}),
+        },
       })
 
       await tx.petshopProfile.create({
@@ -110,8 +146,14 @@ export async function register(req: Request, res: Response) {
     })
 
     return res.status(201).json(formatUser(result.user, result.company.id, result.company.name, result.company.plan))
-  } catch (err) {
+  } catch (err: any) {
     console.error('[Auth] Erro no registro:', err)
+    if (err?.code === 'CPF_DUPLICATE') {
+      return res.status(409).json({ error: 'CPF já cadastrado nesta empresa' })
+    }
+    if (err?.code === 'P2002') {
+      return res.status(409).json({ error: 'CPF já cadastrado nesta empresa' })
+    }
     return res.status(500).json({ error: 'Erro interno do servidor' })
   }
 }

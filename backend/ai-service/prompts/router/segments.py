@@ -71,6 +71,7 @@ ROUTER_STATIC_B_TEMPLATE = """━━━ REGRAS-CHAVE DE ROTEAMENTO ━━━
 
 `escalation_agent`
 • só com pedido explícito de humano ou B2B/spam/fora do escopo
+• recadastro: cliente **recusando** cadastro/recadastro na migração, ou citando **serviço em andamento** (pet no hotel/creche, indo buscar pet, como está o pet) enquanto o cadastro ainda está incompleto no sistema → `escalation_agent`
 
 REGRA: preço + intenção clara de marcar na mesma conversa → `booking_agent`, salvo pedido explícito de humano.
 

@@ -20,6 +20,7 @@ from memory.redis_memory import (
     save_router_ctx,
 )
 from agents.router import run_router
+from identity_migration_flow import try_handle_identity_migration
 from timezone_br import calendar_dates_reference_pt, today_sao_paulo, weekday_label_pt
 
 logging.basicConfig(
@@ -177,11 +178,42 @@ async def run_agent(req: AgentRequest):
             if req.message:
                 message_for_agent += f"\n\nLegenda enviada pelo usuário: {req.message}"
 
-        previous_router_ctx = await get_router_ctx(req.company_id, req.client_phone)
-
         # 3. Grava user; atualiza resumo rolante; monta histórico (últimas N cruas + resumo estruturado)
         await save_message(req.company_id, req.client_phone, "user", message_for_agent)
         await ensure_rolling_summary(req.company_id, req.client_phone)
+
+        if not req.image_base64:
+            mig = await try_handle_identity_migration(
+                company_id=req.company_id,
+                client_phone=req.client_phone,
+                user_message=message_for_agent,
+                context=context,
+            )
+            if mig is not None:
+                reply_m = mig["reply"]
+                if _is_openai_error_message(reply_m):
+                    reply_m = _connection_fallback_reply(context)
+                else:
+                    await save_message(
+                        req.company_id,
+                        req.client_phone,
+                        "assistant",
+                        sanitize_assistant_for_history(reply_m),
+                    )
+                    rc_m = mig.get("router_ctx")
+                    if rc_m:
+                        await save_router_ctx(
+                            req.company_id,
+                            req.client_phone,
+                            rc_m,
+                        )
+                return AgentResponse(
+                    reply=reply_m,
+                    agent_used=str(mig.get("agent_used") or "identity_migration"),
+                    stage=mig.get("stage"),
+                )
+
+        previous_router_ctx = await get_router_ctx(req.company_id, req.client_phone)
 
         tail = await get_history(req.company_id, req.client_phone)
         if tail and tail[-1].get("role") == "user":
