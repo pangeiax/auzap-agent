@@ -7,6 +7,7 @@ import {
   createClient,
   updateClient,
   deleteClient,
+  syncUnregisteredWhatsappToClient,
   getClientConversations,
   getClientPets,
   getClientContext,
@@ -30,6 +31,9 @@ router.post('/import', importClients)
 
 // POST /clients - Create new client
 router.post('/', createClient)
+
+// POST /clients/:clientId/sync-whatsapp — antes de GET :clientId (rota mais específica)
+router.post('/:clientId/sync-whatsapp', syncUnregisteredWhatsappToClient)
 
 // GET /clients/:clientId - Get client details (rotas genéricas após específicas)
 router.get('/:clientId', getClientDetails)

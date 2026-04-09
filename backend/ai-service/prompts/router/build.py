@@ -142,7 +142,7 @@ def build_router_prompt(context: dict) -> str:
         cadastro_lodging,
     )
 
-    return (
+    out = (
         ROUTER_STATIC_A
         + static_b
         + "\n\n━━━ CONTEXTO DESTE TURNO (datas, CRM, serviços desta loja) ━━━\n"
@@ -150,4 +150,12 @@ def build_router_prompt(context: dict) -> str:
         "deste petshop ao montar o JSON.\n\n"
         + context_tail
     )
+    if context.get("identity_flow_required"):
+        out += (
+            "\n\n━━━ RECADASTRO (cadastro incompleto) ━━━\n"
+            "Este cliente ainda não tem CPF nem telefone manual na base (migração/recadastro). "
+            "Um fluxo automático pode estar conduzindo isso. Recusa clara de cadastro ou mensagem sobre "
+            "pet já em serviço (hotel, buscar pet, como está o pet) → `escalation_agent`.\n"
+        )
+    return out
 

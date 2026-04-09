@@ -1,5 +1,43 @@
+import { randomBytes } from 'node:crypto'
 import { Request, Response } from 'express'
 import { prisma } from '../../lib/prisma'
+import {
+  assertValidCpfOrThrow,
+  normalizeCpfDigits,
+  parseOptionalCpf,
+} from '../../lib/cpf'
+
+function isPainelNaoCadastrado(c: {
+  manualPhone: string | null
+  cpf: string | null
+}): boolean {
+  return (
+    !String(c.manualPhone ?? '').trim() && !String(c.cpf ?? '').trim()
+  )
+}
+
+function isPainelCadastrado(c: {
+  manualPhone: string | null
+  cpf: string | null
+}): boolean {
+  return Boolean(
+    String(c.manualPhone ?? '').trim() || String(c.cpf ?? '').trim(),
+  )
+}
+
+async function uniqueMergePlaceholderPhone(
+  db: { client: typeof prisma.client },
+  companyId: number,
+): Promise<string> {
+  for (let i = 0; i < 12; i++) {
+    const candidate = `m${randomBytes(6).toString('hex')}`
+    const clash = await db.client.findFirst({
+      where: { companyId, phone: candidate },
+    })
+    if (!clash) return candidate
+  }
+  throw new Error('MERGE_TEMP_PHONE')
+}
 
 function shapeClient(client: any) {
   const { _count, ...rest } = client
@@ -32,10 +70,14 @@ export async function listClients(req: Request, res: Response) {
     }
 
     if (search) {
+      const q = String(search)
+      const cpfDigits = normalizeCpfDigits(q)
       where.OR = [
-        { name: { contains: search as string, mode: 'insensitive' } },
-        { phone: { contains: search as string, mode: 'insensitive' } },
-        { email: { contains: search as string, mode: 'insensitive' } },
+        { name: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { manualPhone: { contains: q, mode: 'insensitive' } },
+        { cpf: { contains: cpfDigits || q, mode: 'insensitive' } },
       ]
     }
 
@@ -75,6 +117,13 @@ export async function searchClients(req: Request, res: Response) {
           { phone: { contains: q as string, mode: 'insensitive' } },
           { email: { contains: q as string, mode: 'insensitive' } },
           { companyName: { contains: q as string, mode: 'insensitive' } },
+          { manualPhone: { contains: q as string, mode: 'insensitive' } },
+          {
+            cpf: {
+              contains: normalizeCpfDigits(q as string) || (q as string),
+              mode: 'insensitive',
+            },
+          },
         ],
       },
       take: parseInt(limit as string),
@@ -137,6 +186,7 @@ export async function createClient(req: Request, res: Response) {
       phone,
       manualPhone,
       manual_phone,
+      cpf: cpfRaw,
       name,
       email,
       companyName,
@@ -156,11 +206,31 @@ export async function createClient(req: Request, res: Response) {
       return res.status(400).json({ error: 'Phone is required' })
     }
 
+    let cpfDigits: string | null = null
+    if (cpfRaw !== undefined && cpfRaw !== null && String(cpfRaw).trim() !== '') {
+      cpfDigits = parseOptionalCpf(cpfRaw)
+      if (!cpfDigits) {
+        return res.status(400).json({ error: 'CPF inválido' })
+      }
+      try {
+        assertValidCpfOrThrow(cpfDigits)
+      } catch {
+        return res.status(400).json({ error: 'CPF inválido' })
+      }
+      const dupCpf = await prisma.client.findFirst({
+        where: { companyId, cpf: cpfDigits },
+      })
+      if (dupCpf) {
+        return res.status(409).json({ error: 'Já existe cliente com este CPF' })
+      }
+    }
+
     const client = await prisma.client.create({
       data: {
         companyId,
         phone: phoneValue,
         ...(manualPhoneValue ? { manualPhone: manualPhoneValue } : {}),
+        ...(cpfDigits ? { cpf: cpfDigits } : {}),
         name,
         email,
         companyName,
@@ -197,6 +267,24 @@ export async function updateClient(req: Request, res: Response) {
       delete updateData.manual_phone
     }
 
+    if (updateData.cpf !== undefined) {
+      const raw = updateData.cpf
+      if (raw === null || raw === '') {
+        updateData.cpf = null
+      } else {
+        const d = parseOptionalCpf(raw)
+        if (!d) {
+          return res.status(400).json({ error: 'CPF inválido' })
+        }
+        try {
+          assertValidCpfOrThrow(d)
+        } catch {
+          return res.status(400).json({ error: 'CPF inválido' })
+        }
+        updateData.cpf = d
+      }
+    }
+
     // Identificador do canal WhatsApp não é alterado pelo PUT do painel (só manual_phone / demais campos).
     if (updateData.phone !== undefined) {
       delete updateData.phone
@@ -207,14 +295,30 @@ export async function updateClient(req: Request, res: Response) {
       return res.status(404).json({ error: 'Client not found' })
     }
 
+    if (updateData.cpf && typeof updateData.cpf === 'string') {
+      const other = await prisma.client.findFirst({
+        where: {
+          companyId,
+          cpf: updateData.cpf,
+          NOT: { id: clientId },
+        },
+      })
+      if (other) {
+        return res.status(409).json({ error: 'Já existe cliente com este CPF' })
+      }
+    }
+
     const client = await prisma.client.update({
       where: { id: clientId },
       data: updateData,
     })
 
     res.json(shapeClient(client))
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating client:', error)
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Já existe cliente com este CPF' })
+    }
     res.status(500).json({ error: 'Failed to update client' })
   }
 }
@@ -244,6 +348,130 @@ export async function deleteClient(req: Request, res: Response) {
   } catch (error) {
     console.error('Error deleting client:', error)
     res.status(500).json({ error: 'Failed to delete client' })
+  }
+}
+
+/**
+ * POST /clients/:clientId/sync-whatsapp
+ * Transfere apenas o `phone` (identificador WhatsApp/LID) do cliente "não cadastrado"
+ * para um cliente já cadastrado no painel; realoca vínculos e remove o registro duplicado.
+ */
+export async function syncUnregisteredWhatsappToClient(
+  req: Request,
+  res: Response,
+) {
+  try {
+    const companyId = req.user!.companyId
+    const sourceId = (req.params as { clientId: string }).clientId
+    const targetId = req.body?.target_client_id
+    if (!targetId || typeof targetId !== 'string') {
+      return res.status(400).json({
+        error: 'Informe target_client_id (UUID do cliente cadastrado).',
+      })
+    }
+    if (sourceId === targetId) {
+      return res.status(400).json({
+        error: 'Origem e destino não podem ser o mesmo cliente.',
+      })
+    }
+
+    // Validação fora da transação: evita segurar conexão aberta (pooler / P2028).
+    const source = await prisma.client.findFirst({
+      where: { id: sourceId, companyId },
+    })
+    const target = await prisma.client.findFirst({
+      where: { id: targetId, companyId },
+    })
+    if (!source || !target) {
+      return res.status(404).json({ error: 'Cliente não encontrado.' })
+    }
+    if (!isPainelNaoCadastrado(source)) {
+      return res.status(400).json({
+        error:
+          'Este cliente não está como não cadastrado (já possui telefone manual ou CPF).',
+      })
+    }
+    if (!isPainelCadastrado(target)) {
+      return res.status(400).json({
+        error:
+          'Escolha um cliente já cadastrado no painel (com telefone manual ou CPF).',
+      })
+    }
+
+    const waPhone = source.phone.trim()
+    if (!waPhone) {
+      return res.status(400).json({
+        error: 'Cliente de origem sem identificador de canal.',
+      })
+    }
+
+    const tempPhone = await uniqueMergePlaceholderPhone(prisma, companyId)
+
+    // Transação em lote (não interativa): compatível com PgBouncer em modo transaction
+    // e evita P2028 ("Transaction not found") em transações longas via pooler.
+    await prisma.$transaction([
+      prisma.client.update({
+        where: { id: source.id },
+        data: { phone: tempPhone },
+      }),
+      prisma.client.update({
+        where: { id: target.id },
+        data: { phone: waPhone },
+      }),
+      prisma.agentConversation.updateMany({
+        where: { companyId, clientId: source.id },
+        data: { clientId: target.id },
+      }),
+      prisma.petshopPet.updateMany({
+        where: { companyId, clientId: source.id },
+        data: { clientId: target.id },
+      }),
+      prisma.petshopAppointment.updateMany({
+        where: { companyId, clientId: source.id },
+        data: { clientId: target.id },
+      }),
+      prisma.petshopLodging.updateMany({
+        where: { companyId, clientId: source.id },
+        data: { clientId: target.id },
+      }),
+      prisma.petshopLodgingReservation.updateMany({
+        where: { companyId, clientId: source.id },
+        data: { clientId: target.id },
+      }),
+      prisma.$executeRaw`
+        DELETE FROM client_sentiment_analysis
+        WHERE company_id = ${companyId}
+          AND client_id = ${source.id}::uuid
+      `,
+      prisma.client.delete({ where: { id: source.id } }),
+    ])
+
+    const updated = await prisma.client.findUniqueOrThrow({
+      where: { id: target.id },
+      include: {
+        _count: {
+          select: { appointments: true, pets: true, conversations: true },
+        },
+      },
+    })
+
+    res.json({ success: true, client: shapeClient(updated) })
+  } catch (error: unknown) {
+    const err = error as Error & { status?: number; code?: string }
+    console.error('syncUnregisteredWhatsappToClient:', error)
+    if (err.code === 'P2002') {
+      return res.status(409).json({
+        error:
+          'Conflito ao atualizar telefone do canal. Tente novamente ou contate o suporte.',
+      })
+    }
+    if (err.code === 'P2028') {
+      return res.status(503).json({
+        error:
+          'Conexão com o banco expirou durante a operação. Tente de novo; se persistir, use DATABASE_URL direto (porta 5432) em vez do pooler (:6543).',
+      })
+    }
+    res.status(500).json({ error: 'Falha ao sincronizar contatos.' })
   }
 }
 
@@ -342,6 +570,7 @@ export async function getClientContext(req: Request, res: Response) {
       name: client.name,
       phone: client.phone,
       manual_phone: (client as any).manualPhone ?? undefined,
+      cpf: client.cpf ?? undefined,
       email: client.email,
       conversation_stage: client.conversationStage,
       specialty_identified: client.specialtyIdentified,

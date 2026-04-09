@@ -57,8 +57,8 @@ export async function startBaileysSession(
       keys: makeCacheableSignalKeyStore(state.keys, undefined as any),
     },
     printQRInTerminal: false,
-    shouldIgnoreJid: (jid: string) =>
-      jid.includes('@broadcast') || jid === 'status@broadcast',
+    shouldIgnoreJid: (jid?: string) =>
+      !jid || jid.includes('@broadcast') || jid === 'status@broadcast',
   })
 
   activeSockets.set(companyIdStr, socket)

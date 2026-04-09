@@ -2,6 +2,7 @@ agno
 openai
 fastapi
 uvicorn
+watchfiles>=0.21
 asyncpg
 psycopg2-binary
 redis

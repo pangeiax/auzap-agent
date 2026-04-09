@@ -75,6 +75,18 @@ export const clientService = {
     return response.data
   },
 
+  /** Liga o `phone` (WhatsApp/LID) do cliente não cadastrado ao cliente destino e remove o duplicado. */
+  async syncUnregisteredWhatsapp(
+    sourceClientId: string,
+    targetClientId: string,
+  ): Promise<Client> {
+    const response = await api.post<{ success: boolean; client: Client }>(
+      `/clients/${sourceClientId}/sync-whatsapp`,
+      { target_client_id: targetClientId },
+    )
+    return response.data.client
+  },
+
   async getClientConversations(
     clientId: string,
     limit = 50,

@@ -2,6 +2,7 @@ export interface User {
   id: number
   email: string
   name: string
+  cpf?: string
   petshop_id: number
   is_active: boolean
   is_superuser: boolean
@@ -16,6 +17,7 @@ export interface UserCreate {
   name: string
   password: string
   petshop_id: number
+  cpf?: string
 }
 
 export interface UserLogin {

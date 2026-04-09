@@ -15,8 +15,14 @@ import {
   ArrowLeft,
   Loader2,
   Eye,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import {
+  isValidCpfDigits,
+  maskCpfInput,
+  normalizeCpfDigits,
+} from "@/lib/cpf";
 import { normalizePetSize, petSizeAbbrev, PET_SIZE_OPTIONS, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
 import { formatPhoneForDisplay, maskPhone, dateFromISO, dateToISO } from "@/lib/masks";
 import { useAddressByCep, useToast } from "@/hooks";
@@ -36,6 +42,7 @@ import type {
   Service,
 } from "@/types";
 
+import { ClientCombobox } from "@/components/molecules/ClientCombobox";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import { EmptyState } from "@/components/molecules/EmptyState";
 import { Modal } from "@/components/molecules/Modal";
@@ -89,6 +96,7 @@ interface Customer {
   phone: string;
   // Apenas para visualizacao no frontend (nao usada para envio/recebimento).
   manualPhone?: string;
+  cpf?: string;
   status: "ativo" | "inativo";
   address?: string;
   notes?: string;
@@ -174,6 +182,26 @@ function getClientPhoneDisplay(customer: Customer): string {
   return manual;
 }
 
+/** Sem telefone manual e sem CPF — alinhado ao gatilho do fluxo de recadastro no WhatsApp. */
+function needsNaoCadastradoBadge(customer: Customer): boolean {
+  return !customer.manualPhone?.trim() && !customer.cpf?.trim();
+}
+
+function customerToSyncComboboxClient(c: Customer): Client {
+  return {
+    id: c.id,
+    name: c.name,
+    phone: c.phone,
+    manualPhone: c.manualPhone,
+    cpf: c.cpf,
+    email: c.email,
+    created_at: "",
+    updated_at: "",
+    is_active: c.status === "ativo",
+    conversation_stage: "",
+  };
+}
+
 function ClientsSidebar({
   customers,
   selectedId,
@@ -185,6 +213,7 @@ function ClientsSidebar({
   loading,
   error,
   deletingCustomerId,
+  onRequestSyncWhatsApp,
 }: {
   customers: Customer[];
   selectedId: string | null;
@@ -196,13 +225,15 @@ function ClientsSidebar({
   loading?: boolean;
   error?: string | null;
   deletingCustomerId?: string | null;
+  onRequestSyncWhatsApp?: (customerId: string) => void;
 }) {
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       customer.phone.includes(searchQuery) ||
-      getClientPhoneDisplay(customer).includes(searchQuery),
+      getClientPhoneDisplay(customer).includes(searchQuery) ||
+      (customer.cpf ?? "").includes(normalizeCpfDigits(searchQuery)),
   );
 
   const renderMobileView = () => (
@@ -378,13 +409,35 @@ function ClientsSidebar({
                     <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
                       {customer.name}
                     </span>
-                    <span
-                      className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${customer.status === "ativo"
-                        ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
-                        : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
-                        }`}
-                    >
-                      {customer.status}
+                    <span className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                      {needsNaoCadastradoBadge(customer) &&
+                        onRequestSyncWhatsApp && (
+                          <button
+                            type="button"
+                            title="Sincronizar WhatsApp com cliente já cadastrado"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              onRequestSyncWhatsApp(customer.id);
+                            }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
+                          >
+                            <Link2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      {needsNaoCadastradoBadge(customer) && (
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                          Não cadastrado
+                        </span>
+                      )}
+                      <span
+                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${customer.status === "ativo"
+                          ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
+                          : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
+                          }`}
+                      >
+                        {customer.status}
+                      </span>
                     </span>
                   </div>
                   <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
@@ -452,6 +505,7 @@ function CustomerDetails({
   loadingPets,
   loadingAppointments,
   loadingConversations,
+  onRequestSyncWhatsApp,
 }: {
   customer: Customer | null;
   onBack: () => void;
@@ -473,6 +527,7 @@ function CustomerDetails({
   loadingPets?: boolean;
   loadingAppointments?: boolean;
   loadingConversations?: boolean;
+  onRequestSyncWhatsApp?: (customerId: string) => void;
 }) {
   const [petModalOpen, setPetModalOpen] = useState(false);
   const [editingPet, setEditingPet] = useState<Pet | null>(null);
@@ -598,6 +653,16 @@ function CustomerDetails({
             </div>
           </div>
           <div className="flex items-center lg:gap-2">
+            {needsNaoCadastradoBadge(customer) && onRequestSyncWhatsApp && (
+              <button
+                type="button"
+                title="Sincronizar WhatsApp com cliente já cadastrado"
+                onClick={() => onRequestSyncWhatsApp(customer.id)}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-amber-700 hover:bg-amber-500/15 dark:text-amber-400 dark:hover:bg-amber-500/10"
+              >
+                <Link2 className="h-5 w-5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={onEditCustomer}
@@ -1030,6 +1095,7 @@ const emptyCustomerForm = {
   name: "",
   email: "",
   phone: "",
+  cpf: "",
   status: "ativo" as "ativo" | "inativo",
   address: "",
   notes: "",
@@ -1214,6 +1280,7 @@ function clientToCustomer(c: ApiClient): Customer {
     email: c.email ?? "",
     phone: phoneDisplay,
     manualPhone: c.manualPhone ?? undefined,
+    cpf: c.cpf ?? undefined,
     status: isActive ? "ativo" : "inativo",
     address: undefined,
     notes: c.notes ?? undefined,
@@ -1270,6 +1337,11 @@ export default function ClientesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [syncModalSourceId, setSyncModalSourceId] = useState<string | null>(
+    null,
+  );
+  const [syncTargetClientId, setSyncTargetClientId] = useState("");
+  const [syncSubmitting, setSyncSubmitting] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
   const [customerStep, setCustomerStep] = useState<1 | 2>(1);
@@ -1313,28 +1385,83 @@ export default function ClientesPage() {
 
   const selectedCustomer = customers.find((c) => c.id === selectedId) ?? null;
 
-  useEffect(() => {
-    let cancelled = false;
+  const reloadClientList = useCallback(async () => {
     setCustomersLoading(true);
     setCustomersError(null);
-    clientService
-      .listClients({ limit: 500 })
-      .then((list) => {
-        if (!cancelled) setCustomers(list.map(clientToCustomer));
-      })
-      .catch((err: any) => {
-        if (!cancelled)
-          setCustomersError(
-            err.response?.data?.detail ?? "Erro ao carregar clientes.",
-          );
-      })
-      .finally(() => {
-        if (!cancelled) setCustomersLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const list = await clientService.listClients({ limit: 500 });
+      setCustomers(list.map(clientToCustomer));
+    } catch (err: any) {
+      setCustomersError(
+        err.response?.data?.detail ?? "Erro ao carregar clientes.",
+      );
+    } finally {
+      setCustomersLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void reloadClientList();
+  }, [reloadClientList]);
+
+  const syncModalSourceCustomer = useMemo(
+    () =>
+      syncModalSourceId
+        ? (customers.find((c) => c.id === syncModalSourceId) ?? null)
+        : null,
+    [customers, syncModalSourceId],
+  );
+
+  const syncComboboxClients = useMemo(
+    () =>
+      customers
+        .filter(
+          (c) =>
+            c.id !== syncModalSourceId && !needsNaoCadastradoBadge(c),
+        )
+        .map(customerToSyncComboboxClient),
+    [customers, syncModalSourceId],
+  );
+
+  const handleConfirmSyncWhatsApp = useCallback(async () => {
+    if (!syncModalSourceId) return;
+    if (!syncTargetClientId) {
+      toast.error(
+        "Selecione um cliente",
+        "Escolha o cadastro de destino na lista.",
+      );
+      return;
+    }
+    setSyncSubmitting(true);
+    const targetId = syncTargetClientId;
+    try {
+      await clientService.syncUnregisteredWhatsapp(
+        syncModalSourceId,
+        targetId,
+      );
+      toast.success(
+        "WhatsApp sincronizado",
+        "O identificador do WhatsApp foi vinculado ao cliente selecionado.",
+      );
+      setSyncModalSourceId(null);
+      setSyncTargetClientId("");
+      setSelectedId(targetId);
+      await reloadClientList();
+    } catch (err: any) {
+      const msg =
+        err.response?.data?.error ??
+        err.response?.data?.detail ??
+        "Não foi possível sincronizar.";
+      toast.error("Erro ao sincronizar", msg);
+    } finally {
+      setSyncSubmitting(false);
+    }
+  }, [
+    syncModalSourceId,
+    syncTargetClientId,
+    toast,
+    reloadClientList,
+  ]);
 
   useEffect(() => {
     if (customerModalOpen) {
@@ -1350,6 +1477,9 @@ export default function ClientesPage() {
           email: editingCustomer.email,
           // Campo "manual" para visualizacao. O `phone` (mensagens) permanece intacto no backend.
           phone: editingCustomer.manualPhone ?? "",
+          cpf: editingCustomer.cpf
+            ? maskCpfInput(editingCustomer.cpf)
+            : "",
           status: editingCustomer.status,
           address: addrLine,
           notes: notesOnly,
@@ -1747,13 +1877,18 @@ export default function ClientesPage() {
   );
 
   const handleSaveCustomer = useCallback(async () => {
-    const { name, email, phone, status, notes } = customerForm;
+    const { name, email, phone, cpf, status, notes } = customerForm;
     const phoneValue = phone.trim();
+    const cpfDigits = normalizeCpfDigits(cpf);
     const editing = Boolean(editingCustomer);
 
     if (!name.trim()) return;
     // Na criacao, `phone` continua obrigatorio (backend exige).
     if (!editing && !phoneValue) return;
+    if (cpfDigits && !isValidCpfDigits(cpfDigits)) {
+      setSaveError("CPF inválido.");
+      return;
+    }
 
     const addr = address;
     const addressStr = [
@@ -1777,6 +1912,7 @@ export default function ClientesPage() {
         // O campo `phone` (usado pela logica de envio/recepcao) permanece intacto.
         const updated = await clientService.updateClient(editingCustomer.id, {
           ...(phoneValue ? { manualPhone: phoneValue } : {}),
+          ...(cpfDigits ? { cpf: cpfDigits } : { cpf: null }),
           name: name.trim(),
           email: email.trim() || undefined,
           is_active: status === "ativo",
@@ -1796,6 +1932,7 @@ export default function ClientesPage() {
         const newClient = await clientService.createClient({
           phone: phoneValue,
           manualPhone: phoneValue,
+          ...(cpfDigits ? { cpf: cpfDigits } : {}),
           name: name.trim(),
           email: email.trim() || undefined,
           source: "manual",
@@ -1846,6 +1983,10 @@ export default function ClientesPage() {
           loading={customersLoading}
           error={customersError}
           deletingCustomerId={deletingCustomerId}
+          onRequestSyncWhatsApp={(id) => {
+            setSyncTargetClientId("");
+            setSyncModalSourceId(id);
+          }}
         />
       }
     >
@@ -1871,6 +2012,10 @@ export default function ClientesPage() {
           loadingPets={loadingPets}
           loadingAppointments={loadingAppointments}
           loadingConversations={loadingConversations}
+          onRequestSyncWhatsApp={(id) => {
+            setSyncTargetClientId("");
+            setSyncModalSourceId(id);
+          }}
         />
       </AnimatePresence>
 
@@ -1927,6 +2072,56 @@ export default function ClientesPage() {
       </Modal>
 
       <Modal
+        isOpen={Boolean(syncModalSourceId)}
+        onClose={() => {
+          if (syncSubmitting) return;
+          setSyncModalSourceId(null);
+          setSyncTargetClientId("");
+        }}
+        title="Sincronizar WhatsApp"
+        onSubmit={() => void handleConfirmSyncWhatsApp()}
+        submitText="Sincronizar"
+        cancelText="Cancelar"
+        isLoading={syncSubmitting}
+        className="max-w-[440px]"
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+            O identificador técnico do WhatsApp (incl. LID) do contato{" "}
+            <span className="font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              {syncModalSourceCustomer?.name ?? "—"}
+            </span>{" "}
+            será vinculado ao cliente cadastrado que você escolher abaixo. Nome,
+            CPF, e-mail e telefone manual do cadastro escolhido não serão
+            alterados. Pets, agendamentos e conversas do contato duplicado
+            passam para esse cliente e o duplicado é removido.
+          </p>
+          <div>
+            <label
+              htmlFor="sync-target-client"
+              className="mb-1.5 block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc]"
+            >
+              Cliente cadastrado
+            </label>
+            <ClientCombobox
+              id="sync-target-client"
+              clients={syncComboboxClients}
+              value={syncTargetClientId}
+              onChange={setSyncTargetClientId}
+              placeholder="Buscar por nome, telefone, e-mail ou CPF…"
+              disabled={syncSubmitting || syncComboboxClients.length === 0}
+            />
+            {syncComboboxClients.length === 0 && (
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                Não há outro cliente cadastrado (com telefone manual ou CPF) para
+                vincular.
+              </p>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={searchModalOpen}
         onClose={() => setSearchModalOpen(false)}
         title="Buscar clientes"
@@ -1951,7 +2146,8 @@ export default function ClientesPage() {
                   customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   customer.phone.includes(searchQuery) ||
-                  getClientPhoneDisplay(customer).includes(searchQuery)
+                  getClientPhoneDisplay(customer).includes(searchQuery) ||
+                  (customer.cpf ?? "").includes(normalizeCpfDigits(searchQuery))
               )
               .map((customer) => (
                 <button
@@ -1974,14 +2170,21 @@ export default function ClientesPage() {
                         <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
                           {customer.name}
                         </span>
-                        <span
-                          className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${
-                            customer.status === "ativo"
-                              ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
-                              : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
-                          }`}
-                        >
-                          {customer.status}
+                        <span className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                          {needsNaoCadastradoBadge(customer) && (
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                              Não cadastrado
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                              customer.status === "ativo"
+                                ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
+                                : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
+                            }`}
+                          >
+                            {customer.status}
+                          </span>
                         </span>
                       </div>
                       <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
@@ -2000,7 +2203,8 @@ export default function ClientesPage() {
                 customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 customer.phone.includes(searchQuery) ||
-                getClientPhoneDisplay(customer).includes(searchQuery)
+                getClientPhoneDisplay(customer).includes(searchQuery) ||
+                (customer.cpf ?? "").includes(normalizeCpfDigits(searchQuery))
             ).length === 0 && (
               <div className="text-center py-8 text-[#727B8E] dark:text-[#8a94a6]">
                 <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -2108,6 +2312,17 @@ export default function ClientesPage() {
                 value={customerForm.email}
                 onChange={(e) =>
                   setCustomerForm((f) => ({ ...f, email: e.target.value }))
+                }
+              />
+              <Input
+                label="CPF"
+                placeholder="000.000.000-00 (opcional)"
+                value={customerForm.cpf}
+                onChange={(e) =>
+                  setCustomerForm((f) => ({
+                    ...f,
+                    cpf: maskCpfInput(e.target.value),
+                  }))
                 }
               />
             </>

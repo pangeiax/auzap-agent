@@ -11,6 +11,11 @@ import { FormField } from "@/components/molecules/FormField";
 import { AuthHeader } from "@/components/molecules/AuthHeader";
 import { useAuthContext } from "@/contexts";
 import { petshopService } from "@/services";
+import {
+  isValidCpfDigits,
+  maskCpfInput,
+  normalizeCpfDigits,
+} from "@/lib/cpf";
 
 function maskWhatsApp(value: string): string {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -30,6 +35,13 @@ function whatsAppToDigits(masked: string): string {
 const criarContaSchema = z
   .object({
     nome: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
+    cpf: z
+      .string()
+      .min(1, "CPF é obrigatório")
+      .refine(
+        (v) => isValidCpfDigits(normalizeCpfDigits(v)),
+        "CPF inválido",
+      ),
     whatsapp: z
       .string()
       .regex(
@@ -60,7 +72,11 @@ export default function CriarContaPage() {
     formState: { errors },
     setError,
     control,
-  } = useForm<CriarContaForm>();
+  } = useForm<CriarContaForm>({
+    defaultValues: {
+      cpf: "",
+    },
+  });
 
   const onSubmit = async (data: CriarContaForm) => {
     const result = criarContaSchema.safeParse(data);
@@ -77,8 +93,9 @@ export default function CriarContaPage() {
     setIsSubmitting(true);
 
     try {
-      const { nome, whatsapp, email, senha } = result.data;
+      const { nome, cpf, whatsapp, email, senha } = result.data;
       const phone = whatsAppToDigits(whatsapp) || "5500000000000";
+      const cpfDigits = normalizeCpfDigits(cpf);
 
       const petshop = await petshopService.createPetshop({
         name: `Petshop de ${nome}`,
@@ -94,6 +111,7 @@ export default function CriarContaPage() {
         name: nome,
         password: senha,
         petshop_id: petshop.id,
+        cpf: cpfDigits,
       });
 
       await login({ email, password: senha });
@@ -101,6 +119,7 @@ export default function CriarContaPage() {
       navigate("/home");
     } catch (err: any) {
       const message =
+        err.response?.data?.error ||
         err.response?.data?.detail ||
         (Array.isArray(err.response?.data?.detail)
           ? err.response?.data?.detail
@@ -141,6 +160,38 @@ export default function CriarContaPage() {
           error={errors.nome?.message}
           {...register("nome")}
         />
+
+        <div className="flex w-full flex-col gap-3">
+          <label
+            htmlFor="cpf"
+            className="flex items-center gap-1.5 font-be-vietnam-pro text-base font-semibold leading-[23px] text-[#434A57] dark:text-[#f5f9fc]"
+          >
+            CPF<span className="text-[#1E62EC]">*</span>
+          </label>
+          <Controller
+            name="cpf"
+            control={control}
+            render={({ field }) => (
+              <input
+                {...field}
+                id="cpf"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="000.000.000-00"
+                maxLength={14}
+                className="flex h-[47px] w-full rounded-[4px] border border-[#727B8E]/10 bg-[#FAFAFA] dark:border-[#40485A] dark:bg-[#212225] px-[19px] py-[13px] font-be-vietnam-pro text-sm font-normal leading-5 text-[#434A57] dark:text-[#f5f9fc] placeholder:text-[#727B8E]/50 dark:placeholder:text-[#8a94a6]/70 outline-none transition-colors focus:border-[#1E62EC] focus:ring-1 focus:ring-[#1E62EC]/30"
+                value={field.value ?? ""}
+                onChange={(e) => field.onChange(maskCpfInput(e.target.value))}
+              />
+            )}
+          />
+          {errors.cpf?.message && (
+            <p className="font-be-vietnam-pro text-xs text-red-500">
+              {errors.cpf.message}
+            </p>
+          )}
+        </div>
 
         <div className="flex w-full flex-col gap-3">
           <label

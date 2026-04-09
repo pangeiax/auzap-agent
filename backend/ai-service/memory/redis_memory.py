@@ -11,6 +11,7 @@ HISTORY_TTL = 60 * 60 * 24
 MAX_HISTORY_MESSAGES = 6
 ROUTER_CTX_TTL = HISTORY_TTL
 SUMMARY_TTL = HISTORY_TTL
+IDENTITY_MIG_TTL = HISTORY_TTL
 
 
 def _redis_client():
@@ -35,6 +36,10 @@ def _router_ctx_key(company_id: int, client_phone: str) -> str:
 
 def _summary_key(company_id: int, client_phone: str) -> str:
     return f"chat_summary:{company_id}:{client_phone}"
+
+
+def _identity_mig_key(company_id: int, client_phone: str) -> str:
+    return f"identity_mig:{company_id}:{client_phone}"
 
 
 async def get_summary_state(company_id: int, client_phone: str) -> dict | None:
@@ -141,6 +146,52 @@ async def clear_history(company_id: int, client_phone: str):
             _key(company_id, client_phone),
             _router_ctx_key(company_id, client_phone),
             _summary_key(company_id, client_phone),
+            _identity_mig_key(company_id, client_phone),
         )
+    finally:
+        await r.aclose()
+
+
+async def get_identity_migration_phase(company_id: int, client_phone: str) -> str | None:
+    """Fase do fluxo de recadastro: None | awaiting_consent | awaiting_details | completed."""
+    r = _redis_client()
+    try:
+        raw = await r.get(_identity_mig_key(company_id, client_phone))
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(data, dict):
+            p = data.get("phase")
+            return str(p) if p else None
+        return None
+    finally:
+        await r.aclose()
+
+
+async def set_identity_migration_phase(
+    company_id: int, client_phone: str, phase: str | None
+) -> None:
+    r = _redis_client()
+    try:
+        key = _identity_mig_key(company_id, client_phone)
+        if not phase:
+            await r.delete(key)
+            return
+        await r.set(
+            key,
+            json.dumps({"phase": phase}, ensure_ascii=False),
+            ex=IDENTITY_MIG_TTL,
+        )
+    finally:
+        await r.aclose()
+
+
+async def clear_identity_migration_phase(company_id: int, client_phone: str) -> None:
+    r = _redis_client()
+    try:
+        await r.delete(_identity_mig_key(company_id, client_phone))
     finally:
         await r.aclose()
