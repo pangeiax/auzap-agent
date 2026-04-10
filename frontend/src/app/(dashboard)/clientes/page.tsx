@@ -18,13 +18,19 @@ import {
   Link2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { isValidCpfDigits, maskCpfInput, normalizeCpfDigits } from "@/lib/cpf";
 import {
-  isValidCpfDigits,
-  maskCpfInput,
-  normalizeCpfDigits,
-} from "@/lib/cpf";
-import { normalizePetSize, petSizeAbbrev, PET_SIZE_OPTIONS, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
-import { formatPhoneForDisplay, maskPhone, dateFromISO, dateToISO } from "@/lib/masks";
+  normalizePetSize,
+  petSizeAbbrev,
+  PET_SIZE_OPTIONS,
+  PET_SIZE_OPTIONS_WITH_PLACEHOLDER,
+} from "@/lib/petSize";
+import {
+  formatPhoneForDisplay,
+  maskPhone,
+  dateFromISO,
+  dateToISO,
+} from "@/lib/masks";
 import { useAddressByCep, useToast } from "@/hooks";
 import { useAuthContext } from "@/contexts";
 import { appointmentService, clientService, petService } from "@/services";
@@ -169,7 +175,8 @@ function formatClientPhoneForSidebar(phone: string): string {
   // Quando o sistema envia um identificador tipo "@lid" (ou qualquer valor com letras),
   // mostramos uma mensagem neutra apenas na UI.
   if (!phone) return "—";
-  if (phone.includes("@") || /[a-z]/i.test(phone)) return "Numero nao identificado";
+  if (phone.includes("@") || /[a-z]/i.test(phone))
+    return "Numero nao identificado";
   return phone;
 }
 
@@ -227,13 +234,14 @@ function ClientsSidebar({
   deletingCustomerId?: string | null;
   onRequestSyncWhatsApp?: (customerId: string) => void;
 }) {
+  const _cpfQuery = normalizeCpfDigits(searchQuery);
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       customer.phone.includes(searchQuery) ||
       getClientPhoneDisplay(customer).includes(searchQuery) ||
-      (customer.cpf ?? "").includes(normalizeCpfDigits(searchQuery)),
+      (_cpfQuery.length > 0 && (customer.cpf ?? "").includes(_cpfQuery)),
   );
 
   const renderMobileView = () => (
@@ -263,8 +271,9 @@ function ClientsSidebar({
                   type="button"
                   disabled={deletingCustomerId === customer.id}
                   onClick={() => onSelect(customer.id)}
-                  className={`w-full p-3 border-b border-[#727B8E]/10 ${selectedId === customer.id ? "bg-[#F4F6F9]" : "bg-white"
-                    } disabled:pointer-events-none disabled:opacity-70`}
+                  className={`w-full p-3 border-b border-[#727B8E]/10 ${
+                    selectedId === customer.id ? "bg-[#F4F6F9]" : "bg-white"
+                  } disabled:pointer-events-none disabled:opacity-70`}
                 >
                   <div className="relative w-[49px] h-[49px] mx-auto">
                     <div className="w-full h-full rounded-full bg-[#FAFAFA] border border-[#727B8E]/10 flex items-center justify-center">
@@ -276,16 +285,16 @@ function ClientsSidebar({
                         </span>
                       )}
                     </div>
-                    {customer.status === "ativo" && deletingCustomerId !== customer.id && (
-                      <div className="absolute bottom-0 right-0 w-2 h-2 bg-[#3DCA21] rounded-full border-2 border-white/10" />
-                    )}
+                    {customer.status === "ativo" &&
+                      deletingCustomerId !== customer.id && (
+                        <div className="absolute bottom-0 right-0 w-2 h-2 bg-[#3DCA21] rounded-full border-2 border-white/10" />
+                      )}
                   </div>
                 </button>
               ))}
             </div>
 
             <div className="pt-2">
-
               <Button
                 onClick={onNewCustomer}
                 className="h-[37px] px-5 bg-[#1E62EC] text-white text-xs font-medium rounded-lg hover:bg-[#1E62EC]/90"
@@ -305,7 +314,7 @@ function ClientsSidebar({
                     image="not_found_clientes_ativos"
                     description=""
                     buttonText=""
-                    onButtonClick={() => { }}
+                    onButtonClick={() => {}}
                   />
                 </div>
                 <p className="text-sm font-medium text-[#727B8E] mb-4">
@@ -389,10 +398,11 @@ function ClientsSidebar({
               disabled={deletingCustomerId === customer.id}
               onClick={() => onSelect(customer.id)}
               whileHover={{ backgroundColor: "rgba(244, 246, 249, 0.5)" }}
-              className={`w-full p-4 text-left border-b border-[#727B8E]/5 dark:border-[#40485A]/50 transition-colors disabled:pointer-events-none disabled:opacity-70 ${selectedId === customer.id
-                ? "bg-[#F4F6F9] dark:bg-[#212225]"
-                : ""
-                }`}
+              className={`w-full p-4 text-left border-b border-[#727B8E]/5 dark:border-[#40485A]/50 transition-colors disabled:pointer-events-none disabled:opacity-70 ${
+                selectedId === customer.id
+                  ? "bg-[#F4F6F9] dark:bg-[#212225]"
+                  : ""
+              }`}
             >
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#1E62EC]/20">
@@ -431,10 +441,11 @@ function ClientsSidebar({
                         </span>
                       )}
                       <span
-                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${customer.status === "ativo"
-                          ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
-                          : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
-                          }`}
+                        className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                          customer.status === "ativo"
+                            ? "bg-[#3DCA21]/20 text-[#3DCA21] border-[#3DCA21]/30"
+                            : "bg-[#727B8E]/20 text-[#727B8E] border-[#727B8E]/30"
+                        }`}
                       >
                         {customer.status}
                       </span>
@@ -443,7 +454,9 @@ function ClientsSidebar({
                   <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
                     {customer.petsCount} pet
                     {customer.petsCount !== 1 ? "s" : ""} •{" "}
-                    {formatClientPhoneForSidebar(getClientPhoneDisplay(customer))}
+                    {formatClientPhoneForSidebar(
+                      getClientPhoneDisplay(customer),
+                    )}
                   </p>
                   <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
                     {customer.totalAppointments} agendamentos
@@ -594,7 +607,10 @@ function CustomerDetails({
 
     setSavingPet(true);
     try {
-      await onSavePet(petForm as Omit<Pet, "id" | "customerId">, editingPet?.id);
+      await onSavePet(
+        petForm as Omit<Pet, "id" | "customerId">,
+        editingPet?.id,
+      );
       setPetModalOpen(false);
       setPetForm(emptyPetForm);
       setEditingPet(null);
@@ -723,10 +739,11 @@ function CustomerDetails({
           <button
             type="button"
             onClick={() => onTabChange("pets")}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors min-w-fit ${activeTab === "pets"
-              ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
-              : "text-[#727B8E] dark:text-[#8a94a6]"
-              }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors min-w-fit ${
+              activeTab === "pets"
+                ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
+                : "text-[#727B8E] dark:text-[#8a94a6]"
+            }`}
           >
             <PawPrint className="h-4 w-4" />
             Pets ({customer.petsCount})
@@ -734,10 +751,11 @@ function CustomerDetails({
           <button
             type="button"
             onClick={() => onTabChange("agendamentos")}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "agendamentos"
-              ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
-              : "text-[#727B8E] dark:text-[#8a94a6]"
-              }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "agendamentos"
+                ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
+                : "text-[#727B8E] dark:text-[#8a94a6]"
+            }`}
           >
             <Calendar className="h-4 w-4" />
             Agendamentos
@@ -745,10 +763,11 @@ function CustomerDetails({
           <button
             type="button"
             onClick={() => onTabChange("conversas")}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "conversas"
-              ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
-              : "text-[#727B8E] dark:text-[#8a94a6]"
-              }`}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "conversas"
+                ? "bg-white dark:bg-[#1A1B1D] text-[#434A57] dark:text-[#f5f9fc] shadow-sm"
+                : "text-[#727B8E] dark:text-[#8a94a6]"
+            }`}
           >
             <MessageCircle className="h-4 w-4" />
             Conversas
@@ -996,7 +1015,8 @@ function CustomerDetails({
               value={petForm.name}
               onChange={(e) => {
                 setPetForm((prev) => ({ ...prev, name: e.target.value }));
-                if (e.target.value) setPetFormErrors((prev) => ({ ...prev, name: undefined }));
+                if (e.target.value)
+                  setPetFormErrors((prev) => ({ ...prev, name: undefined }));
               }}
             />
             {petFormErrors.name && (
@@ -1010,7 +1030,8 @@ function CustomerDetails({
               value={petForm.species}
               onChange={(e) => {
                 setPetForm((prev) => ({ ...prev, species: e.target.value }));
-                if (e.target.value) setPetFormErrors((prev) => ({ ...prev, species: undefined }));
+                if (e.target.value)
+                  setPetFormErrors((prev) => ({ ...prev, species: undefined }));
               }}
               options={[
                 { value: "cachorro", label: "Cachorro" },
@@ -1021,7 +1042,9 @@ function CustomerDetails({
               ]}
             />
             {petFormErrors.species && (
-              <p className="mt-1 text-xs text-red-500">{petFormErrors.species}</p>
+              <p className="mt-1 text-xs text-red-500">
+                {petFormErrors.species}
+              </p>
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1057,12 +1080,15 @@ function CustomerDetails({
                 value={petForm.size}
                 onChange={(e) => {
                   setPetForm((prev) => ({ ...prev, size: e.target.value }));
-                  if (e.target.value) setPetFormErrors((prev) => ({ ...prev, size: undefined }));
+                  if (e.target.value)
+                    setPetFormErrors((prev) => ({ ...prev, size: undefined }));
                 }}
                 options={[...PET_SIZE_OPTIONS]}
               />
               {petFormErrors.size && (
-                <p className="mt-1 text-xs text-red-500">{petFormErrors.size}</p>
+                <p className="mt-1 text-xs text-red-500">
+                  {petFormErrors.size}
+                </p>
               )}
             </div>
           </div>
@@ -1086,7 +1112,6 @@ function CustomerDetails({
           />
         </div>
       </Modal>
-
     </motion.div>
   );
 }
@@ -1121,7 +1146,6 @@ type ApiPet = PetType & {
 type ApiPetAppointment = ApiAppointment & {
   pet_id?: string | null;
 };
-
 
 function formatPetAge(pet: ApiPet): string {
   if (pet.age !== undefined && pet.age !== null) {
@@ -1330,9 +1354,8 @@ export default function ClientesPage() {
     null,
   );
   const [deletingPetId, setDeletingPetId] = useState<string | null>(null);
-  const [appointmentDetail, setAppointmentDetail] = useState<Appointment | null>(
-    null,
-  );
+  const [appointmentDetail, setAppointmentDetail] =
+    useState<Appointment | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
@@ -1416,8 +1439,7 @@ export default function ClientesPage() {
     () =>
       customers
         .filter(
-          (c) =>
-            c.id !== syncModalSourceId && !needsNaoCadastradoBadge(c),
+          (c) => c.id !== syncModalSourceId && !needsNaoCadastradoBadge(c),
         )
         .map(customerToSyncComboboxClient),
     [customers, syncModalSourceId],
@@ -1435,10 +1457,7 @@ export default function ClientesPage() {
     setSyncSubmitting(true);
     const targetId = syncTargetClientId;
     try {
-      await clientService.syncUnregisteredWhatsapp(
-        syncModalSourceId,
-        targetId,
-      );
+      await clientService.syncUnregisteredWhatsapp(syncModalSourceId, targetId);
       toast.success(
         "WhatsApp sincronizado",
         "O identificador do WhatsApp foi vinculado ao cliente selecionado.",
@@ -1456,12 +1475,7 @@ export default function ClientesPage() {
     } finally {
       setSyncSubmitting(false);
     }
-  }, [
-    syncModalSourceId,
-    syncTargetClientId,
-    toast,
-    reloadClientList,
-  ]);
+  }, [syncModalSourceId, syncTargetClientId, toast, reloadClientList]);
 
   useEffect(() => {
     if (customerModalOpen) {
@@ -1477,9 +1491,7 @@ export default function ClientesPage() {
           email: editingCustomer.email,
           // Campo "manual" para visualizacao. O `phone` (mensagens) permanece intacto no backend.
           phone: editingCustomer.manualPhone ?? "",
-          cpf: editingCustomer.cpf
-            ? maskCpfInput(editingCustomer.cpf)
-            : "",
+          cpf: editingCustomer.cpf ? maskCpfInput(editingCustomer.cpf) : "",
           status: editingCustomer.status,
           address: addrLine,
           notes: notesOnly,
@@ -1584,7 +1596,9 @@ export default function ClientesPage() {
             ...first,
             pairedAppointmentId: second.id,
             timeEnd: second.time,
-            notes: [first.notes, second.notes].filter(Boolean).join("\n\n") || first.notes,
+            notes:
+              [first.notes, second.notes].filter(Boolean).join("\n\n") ||
+              first.notes,
           }),
         );
         setCustomers((prev) =>
@@ -1664,8 +1678,8 @@ export default function ClientesPage() {
       toast.error(
         "Erro ao excluir cliente",
         error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Não foi possível excluir o cliente.",
+          error.response?.data?.error ||
+          "Não foi possível excluir o cliente.",
       );
     } finally {
       setDeletingCustomerId(null);
@@ -1684,10 +1698,10 @@ export default function ClientesPage() {
         prev.map((c) =>
           c.id === selectedCustomer.id
             ? {
-              ...c,
-              pets: c.pets.filter((p) => p.id !== petId),
-              petsCount: Math.max(c.petsCount - 1, 0),
-            }
+                ...c,
+                pets: c.pets.filter((p) => p.id !== petId),
+                petsCount: Math.max(c.petsCount - 1, 0),
+              }
             : c,
         ),
       );
@@ -1702,8 +1716,8 @@ export default function ClientesPage() {
       toast.error(
         "Erro ao excluir pet",
         error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Não foi possível excluir o pet.",
+          error.response?.data?.error ||
+          "Não foi possível excluir o pet.",
       );
     } finally {
       setDeletingPetId(null);
@@ -1730,15 +1744,15 @@ export default function ClientesPage() {
           prev.map((c) =>
             c.id === selectedCustomer.id
               ? {
-                ...c,
-                appointments: c.appointments.filter(
-                  (a) => !removeIds.includes(a.id),
-                ),
-                totalAppointments: Math.max(
-                  c.totalAppointments - removeIds.length,
-                  0,
-                ),
-              }
+                  ...c,
+                  appointments: c.appointments.filter(
+                    (a) => !removeIds.includes(a.id),
+                  ),
+                  totalAppointments: Math.max(
+                    c.totalAppointments - removeIds.length,
+                    0,
+                  ),
+                }
               : c,
           ),
         );
@@ -1758,15 +1772,15 @@ export default function ClientesPage() {
         prev.map((c) =>
           c.id === selectedCustomer.id
             ? {
-              ...c,
-              appointments: c.appointments.filter(
-                (a) => !removeIds.includes(a.id),
-              ),
-              totalAppointments: Math.max(
-                c.totalAppointments - removeIds.length,
-                0,
-              ),
-            }
+                ...c,
+                appointments: c.appointments.filter(
+                  (a) => !removeIds.includes(a.id),
+                ),
+                totalAppointments: Math.max(
+                  c.totalAppointments - removeIds.length,
+                  0,
+                ),
+              }
             : c,
         ),
       );
@@ -1781,8 +1795,8 @@ export default function ClientesPage() {
       toast.error(
         "Erro ao remover agendamento",
         error.response?.data?.detail ||
-        error.response?.data?.error ||
-        "Não foi possível remover o agendamento.",
+          error.response?.data?.error ||
+          "Não foi possível remover o agendamento.",
       );
     } finally {
       setDeletingAppointmentId(null);
@@ -1860,8 +1874,8 @@ export default function ClientesPage() {
         toast.error(
           "Erro ao salvar pet",
           error.response?.data?.detail ||
-          error.response?.data?.error ||
-          "Não foi possível salvar o pet.",
+            error.response?.data?.error ||
+            "Não foi possível salvar o pet.",
         );
         throw error;
       }
@@ -1977,8 +1991,8 @@ export default function ClientesPage() {
             setCustomerModalOpen(true);
           }}
           onSearchClick={() => {
-            console.log('click search');
-            setSearchModalOpen(true)
+            console.log("click search");
+            setSearchModalOpen(true);
           }}
           loading={customersLoading}
           error={customersError}
@@ -2036,15 +2050,23 @@ export default function ClientesPage() {
             </div>
             <div className="rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-4 space-y-2.5 text-[#434A57] dark:text-[#f5f9fc]">
               <div className="flex justify-between gap-3">
-                <span className="text-[#727B8E] dark:text-[#8a94a6]">Serviço</span>
-                <span className="text-right font-medium">{appointmentDetail.service}</span>
+                <span className="text-[#727B8E] dark:text-[#8a94a6]">
+                  Serviço
+                </span>
+                <span className="text-right font-medium">
+                  {appointmentDetail.service}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-[#727B8E] dark:text-[#8a94a6]">Pet</span>
-                <span className="text-right font-medium">{appointmentDetail.petName}</span>
+                <span className="text-right font-medium">
+                  {appointmentDetail.petName}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-[#727B8E] dark:text-[#8a94a6]">Data e horário</span>
+                <span className="text-[#727B8E] dark:text-[#8a94a6]">
+                  Data e horário
+                </span>
                 <span className="text-right font-medium">
                   {appointmentDetail.date} às{" "}
                   {appointmentDetail.timeEnd
@@ -2113,8 +2135,8 @@ export default function ClientesPage() {
             />
             {syncComboboxClients.length === 0 && (
               <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
-                Não há outro cliente cadastrado (com telefone manual ou CPF) para
-                vincular.
+                Não há outro cliente cadastrado (com telefone manual ou CPF)
+                para vincular.
               </p>
             )}
           </div>
@@ -2141,14 +2163,20 @@ export default function ClientesPage() {
 
           <div className="flex flex-col gap-2">
             {customers
-              .filter(
-                (customer) =>
-                  customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              .filter((customer) => {
+                const cpfQ = normalizeCpfDigits(searchQuery);
+                return (
+                  customer.name
+                    .toLowerCase()
+                    .includes(searchQuery.toLowerCase()) ||
+                  customer.email
+                    .toLowerCase()
+                    .includes(searchQuery.toLowerCase()) ||
                   customer.phone.includes(searchQuery) ||
                   getClientPhoneDisplay(customer).includes(searchQuery) ||
-                  (customer.cpf ?? "").includes(normalizeCpfDigits(searchQuery))
-              )
+                  (cpfQ.length > 0 && (customer.cpf ?? "").includes(cpfQ))
+                );
+              })
               .map((customer) => (
                 <button
                   key={customer.id}
@@ -2188,8 +2216,11 @@ export default function ClientesPage() {
                         </span>
                       </div>
                       <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-1">
-                        {customer.petsCount} pet{customer.petsCount !== 1 ? "s" : ""} •{" "}
-                        {formatClientPhoneForSidebar(getClientPhoneDisplay(customer))}
+                        {customer.petsCount} pet
+                        {customer.petsCount !== 1 ? "s" : ""} •{" "}
+                        {formatClientPhoneForSidebar(
+                          getClientPhoneDisplay(customer),
+                        )}
                       </p>
                       <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
                         {customer.totalAppointments} agendamentos
@@ -2198,14 +2229,20 @@ export default function ClientesPage() {
                   </div>
                 </button>
               ))}
-            {customers.filter(
-              (customer) =>
-                customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            {customers.filter((customer) => {
+              const cpfQ = normalizeCpfDigits(searchQuery);
+              return (
+                customer.name
+                  .toLowerCase()
+                  .includes(searchQuery.toLowerCase()) ||
+                customer.email
+                  .toLowerCase()
+                  .includes(searchQuery.toLowerCase()) ||
                 customer.phone.includes(searchQuery) ||
                 getClientPhoneDisplay(customer).includes(searchQuery) ||
-                (customer.cpf ?? "").includes(normalizeCpfDigits(searchQuery))
-            ).length === 0 && (
+                (cpfQ.length > 0 && (customer.cpf ?? "").includes(cpfQ))
+              );
+            }).length === 0 && (
               <div className="text-center py-8 text-[#727B8E] dark:text-[#8a94a6]">
                 <Search className="w-12 h-12 mx-auto mb-2 opacity-50" />
                 <p>Nenhum cliente encontrado</p>

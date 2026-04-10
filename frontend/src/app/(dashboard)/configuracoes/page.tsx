@@ -164,7 +164,11 @@ function slotConfigToRules(
   for (const [dow, slots] of Object.entries(config)) {
     for (const [time, slot] of Object.entries(slots)) {
       if (slot.enabled) {
-        rules.push({ day_of_week: Number(dow), slot_time: time, max_capacity: slot.capacity });
+        rules.push({
+          day_of_week: Number(dow),
+          slot_time: time,
+          max_capacity: slot.capacity,
+        });
       }
     }
   }
@@ -184,19 +188,46 @@ function HourlyCapacityEditor({
 }) {
   const [defaultCap, setDefaultCap] = useState(2);
 
-  const updateSlot = (dow: number, time: string, field: keyof HourSlotConfig, value: boolean | number) => {
+  const updateSlot = (
+    dow: number,
+    time: string,
+    field: keyof HourSlotConfig,
+    value: boolean | number,
+  ) => {
     const daySlots = config[dow] ?? {};
-    onChange({ ...config, [dow]: { ...daySlots, [time]: { ...(daySlots[time] ?? { enabled: false, capacity: 1 }), [field]: value } } });
+    onChange({
+      ...config,
+      [dow]: {
+        ...daySlots,
+        [time]: {
+          ...(daySlots[time] ?? { enabled: false, capacity: 1 }),
+          [field]: value,
+        },
+      },
+    });
   };
   const toggleAllInDay = (dow: number, enabled: boolean) => {
     const daySlots = config[dow] ?? {};
-    onChange({ ...config, [dow]: Object.fromEntries(Object.entries(daySlots).map(([t, s]) => [t, { enabled, capacity: enabled ? defaultCap : s.capacity }])) });
+    onChange({
+      ...config,
+      [dow]: Object.fromEntries(
+        Object.entries(daySlots).map(([t, s]) => [
+          t,
+          { enabled, capacity: enabled ? defaultCap : s.capacity },
+        ]),
+      ),
+    });
   };
   const applyToEnabled = () => {
     const next: Record<number, DaySlotConfig> = {};
     for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
       const daySlots = config[dayOfWeek] ?? {};
-      next[dayOfWeek] = Object.fromEntries(Object.entries(daySlots).map(([t, s]) => [t, { ...s, capacity: s.enabled ? defaultCap : s.capacity }]));
+      next[dayOfWeek] = Object.fromEntries(
+        Object.entries(daySlots).map(([t, s]) => [
+          t,
+          { ...s, capacity: s.enabled ? defaultCap : s.capacity },
+        ]),
+      );
     }
     onChange(next);
   };
@@ -204,9 +235,17 @@ function HourlyCapacityEditor({
     const next: Record<number, DaySlotConfig> = {};
     for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
       const bhInfo = getDayBHInfo(businessHours, dayOfWeek);
-      if (!bhInfo.isOpen) { next[dayOfWeek] = config[dayOfWeek] ?? {}; continue; }
+      if (!bhInfo.isOpen) {
+        next[dayOfWeek] = config[dayOfWeek] ?? {};
+        continue;
+      }
       const daySlots = config[dayOfWeek] ?? {};
-      next[dayOfWeek] = Object.fromEntries(Object.entries(daySlots).map(([t]) => [t, { enabled: true, capacity: defaultCap }]));
+      next[dayOfWeek] = Object.fromEntries(
+        Object.entries(daySlots).map(([t]) => [
+          t,
+          { enabled: true, capacity: defaultCap },
+        ]),
+      );
     }
     onChange(next);
   };
@@ -215,7 +254,9 @@ function HourlyCapacityEditor({
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] px-4 py-3">
         <div>
-          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[#727B8E]">Capacidade padrão</p>
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[#727B8E]">
+            Capacidade padrão
+          </p>
           <input
             type="number"
             min="1"
@@ -317,7 +358,9 @@ function HourlyCapacityEditor({
                       <button
                         type="button"
                         disabled={disabled}
-                        onClick={() => updateSlot(dayOfWeek, h, "enabled", !slot.enabled)}
+                        onClick={() =>
+                          updateSlot(dayOfWeek, h, "enabled", !slot.enabled)
+                        }
                         className="font-medium disabled:cursor-not-allowed"
                         title={slot.enabled ? "Desativar" : "Ativar"}
                       >
@@ -333,7 +376,12 @@ function HourlyCapacityEditor({
                             value={slot.capacity}
                             disabled={disabled}
                             onChange={(e) =>
-                              updateSlot(dayOfWeek, h, "capacity", parseInt(e.target.value) || 1)
+                              updateSlot(
+                                dayOfWeek,
+                                h,
+                                "capacity",
+                                parseInt(e.target.value) || 1,
+                              )
                             }
                             className="w-7 bg-transparent text-center text-xs outline-none disabled:cursor-not-allowed"
                             title="Vagas"
@@ -419,7 +467,9 @@ function SettingsProfileSidebar({
               {displayPhone && (
                 <div className="flex items-start gap-2 text-xs text-[#727B8E] dark:text-[#8a94a6]">
                   <Smartphone className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#1E62EC]/80" />
-                  <span className="min-w-0 break-all">{maskPhone(displayPhone)}</span>
+                  <span className="min-w-0 break-all">
+                    {maskPhone(displayPhone)}
+                  </span>
                 </div>
               )}
 
@@ -689,10 +739,7 @@ function ServicosContent({
         color: spEditColor,
         description: spEditDescription || undefined,
       });
-      toast.success(
-        "Especialidade salva!",
-        "Configurações atualizadas.",
-      );
+      toast.success("Especialidade salva!", "Configurações atualizadas.");
       setEditSpecialtyOpen(false);
       await onRefreshSpecialties();
     } catch (err: any) {
@@ -708,7 +755,6 @@ function ServicosContent({
   return (
     <>
       <div className="lg:flex lg:flex-row min-h-0 gap-5">
-
         <div className="flex w-full lg:max-w-52 shrink-0 flex-col gap-1">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#727B8E] dark:text-[#8a94a6]">
@@ -739,7 +785,14 @@ function ServicosContent({
                       : "border-[#727B8E]/10 dark:border-[#40485A] hover:border-[#727B8E]/25 bg-white dark:bg-[#1A1B1D]",
                     !sp.isActive && "opacity-50",
                   )}
-                  style={isSelected ? { backgroundColor: `${spColor}12`, borderColor: `${spColor}45` } : {}}
+                  style={
+                    isSelected
+                      ? {
+                          backgroundColor: `${spColor}12`,
+                          borderColor: `${spColor}45`,
+                        }
+                      : {}
+                  }
                   onClick={() => setSelectedSpecialtyId(sp.id)}
                 >
                   <span
@@ -747,7 +800,9 @@ function ServicosContent({
                     style={{ backgroundColor: spColor }}
                   />
                   <span
-                    className={cn("min-w-0 flex-1 truncate text-sm font-medium")}
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-sm font-medium",
+                    )}
                     style={{ color: isSelected ? spColor : "#434A57" }}
                   >
                     {sp.name}
@@ -760,16 +815,25 @@ function ServicosContent({
                   <button
                     type="button"
                     title="Editar especialidade"
-                    onClick={(e) => { e.stopPropagation(); handleOpenEditSpecialty(sp); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenEditSpecialty(sp);
+                    }}
                     className="shrink-0 flex h-6 w-6 items-center justify-center rounded-lg opacity-40 hover:opacity-100 hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-all"
                   >
-                    <Edit2 className="h-3.5 w-3.5" style={{ color: isSelected ? spColor : "#727B8E" }} />
+                    <Edit2
+                      className="h-3.5 w-3.5"
+                      style={{ color: isSelected ? spColor : "#727B8E" }}
+                    />
                   </button>
                   {sp.isActive ? (
                     <button
                       type="button"
                       title="Desativar especialidade"
-                      onClick={(e) => { e.stopPropagation(); setDeactivateSpecialtyModal(sp); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeactivateSpecialtyModal(sp);
+                      }}
                       className="shrink-0 flex h-6 w-6 items-center justify-center rounded-lg opacity-0 group-hover:opacity-40 hover:!opacity-100 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all text-red-400"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -819,21 +883,31 @@ function ServicosContent({
             <>
               <div className="mb-3 flex items-center justify-between">
                 {(() => {
-                  const sp = displaySpecialties.find((s) => s.id === effectiveSelected);
+                  const sp = displaySpecialties.find(
+                    (s) => s.id === effectiveSelected,
+                  );
                   const spColor = sp?.color || "#1E62EC";
                   return (
                     <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: spColor }} />
-                      <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">{sp?.name}</p>
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: spColor }}
+                      />
+                      <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                        {sp?.name}
+                      </p>
                       <span className="text-xs text-[#727B8E]">
-                        {servicesForSelected.length} serviço{servicesForSelected.length !== 1 ? "s" : ""}
+                        {servicesForSelected.length} serviço
+                        {servicesForSelected.length !== 1 ? "s" : ""}
                       </span>
                     </div>
                   );
                 })()}
                 <button
                   type="button"
-                  onClick={() => effectiveSelected && onNewService(effectiveSelected)}
+                  onClick={() =>
+                    effectiveSelected && onNewService(effectiveSelected)
+                  }
                   className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-[#1a55d4] transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -843,15 +917,20 @@ function ServicosContent({
 
               {loading ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-sm text-[#727B8E]">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Carregando serviços...
+                  <Loader2 className="h-4 w-4 animate-spin" /> Carregando
+                  serviços...
                 </div>
               ) : servicesForSelected.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#727B8E]/15 py-16 text-center">
                   <Plus className="h-8 w-8 text-[#727B8E]/30" />
-                  <p className="text-sm text-[#727B8E]">Nenhum serviço nesta especialidade.</p>
+                  <p className="text-sm text-[#727B8E]">
+                    Nenhum serviço nesta especialidade.
+                  </p>
                   <button
                     type="button"
-                    onClick={() => effectiveSelected && onNewService(effectiveSelected)}
+                    onClick={() =>
+                      effectiveSelected && onNewService(effectiveSelected)
+                    }
                     className="flex items-center gap-1.5 rounded-lg bg-[#1E62EC] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a55d4] transition-colors"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -861,33 +940,46 @@ function ServicosContent({
               ) : (
                 <div className="space-y-2">
                   {servicesForSelected.map((s) => {
-                    const selectedSp = displaySpecialties.find((sp) => sp.id === effectiveSelected);
+                    const selectedSp = displaySpecialties.find(
+                      (sp) => sp.id === effectiveSelected,
+                    );
                     const spColor = selectedSp?.color || "#1E62EC";
                     return (
                       <div
                         key={s.id}
                         className="group flex items-center gap-3 rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] px-4 py-3 hover:border-[#727B8E]/20 transition-colors"
                       >
-                        <div className="h-9 w-1 shrink-0 rounded-full" style={{ backgroundColor: spColor }} />
+                        <div
+                          className="h-9 w-1 shrink-0 rounded-full"
+                          style={{ backgroundColor: spColor }}
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">{s.name}</p>
-                            <span className={cn(
-                              "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
-                              s.isActive
-                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-                            )}>
+                            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                              {s.name}
+                            </p>
+                            <span
+                              className={cn(
+                                "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                                s.isActive
+                                  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                  : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+                              )}
+                            >
                               {s.isActive ? "Ativo" : "Inativo"}
                             </span>
                           </div>
                           <p className="mt-0.5 text-xs text-[#727B8E] dark:text-[#8a94a6]">
                             {s.durationMin}min
-                            {s.price ? ` · R$ ${Number(s.price).toFixed(2)}` : ""}
+                            {s.price
+                              ? ` · R$ ${Number(s.price).toFixed(2)}`
+                              : ""}
                             {s.priceBySize
                               ? ` · P:${s.priceBySize.small ?? "—"} M:${s.priceBySize.medium ?? "—"} G:${s.priceBySize.large ?? "—"} GG:${s.priceBySize.xlarge ?? "—"}`
                               : ""}
-                            {s.durationMultiplierLarge === 2 ? " · 2× G/GG" : ""}
+                            {s.durationMultiplierLarge === 2
+                              ? " · 2× G/GG"
+                              : ""}
                             {s.description ? ` · ${s.description}` : ""}
                           </p>
                         </div>
@@ -907,11 +999,18 @@ function ServicosContent({
                             title={s.isActive ? "Desativar" : "Ativar"}
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-[#727B8E] hover:bg-[#F4F6F9] dark:hover:bg-[#212225] transition-colors disabled:opacity-40"
                           >
-                            {togglingId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                            {togglingId === s.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Clock className="h-4 w-4" />
+                            )}
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setServiceToDelete(s); setDeleteModalOpen(true); }}
+                            onClick={() => {
+                              setServiceToDelete(s);
+                              setDeleteModalOpen(true);
+                            }}
                             title="Excluir serviço"
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
                           >
@@ -1082,50 +1181,47 @@ function ServicosContent({
       >
         <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
           <Input
-                label="Nome"
-                value={spEditName}
-                onChange={(e) => setSpEditName(e.target.value)}
-                placeholder="Nome da especialidade"
-              />
-              <div>
-                <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
-                  Cor
-                </label>
-                <input
-                  type="color"
-                  value={spEditColor}
-                  onChange={(e) => setSpEditColor(e.target.value)}
-                  className="h-10 w-20 cursor-pointer rounded border border-[#727B8E]/20"
-                />
-              </div>
-              <Input
-                label="Descrição (opcional)"
-                value={spEditDescription}
-                onChange={(e) => setSpEditDescription(e.target.value)}
-                placeholder="Descrição da especialidade"
-              />
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setEditSpecialtyOpen(false)}
-                  disabled={savingSpEdit}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleSaveSpecialtyEdit}
-                  disabled={savingSpEdit}
-                >
-                  {savingSpEdit ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Salvando...
-                    </>
-                  ) : (
-                    "Salvar"
-                  )}
-                </Button>
-              </div>
+            label="Nome"
+            value={spEditName}
+            onChange={(e) => setSpEditName(e.target.value)}
+            placeholder="Nome da especialidade"
+          />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+              Cor
+            </label>
+            <input
+              type="color"
+              value={spEditColor}
+              onChange={(e) => setSpEditColor(e.target.value)}
+              className="h-10 w-20 cursor-pointer rounded border border-[#727B8E]/20"
+            />
+          </div>
+          <Input
+            label="Descrição (opcional)"
+            value={spEditDescription}
+            onChange={(e) => setSpEditDescription(e.target.value)}
+            placeholder="Descrição da especialidade"
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setEditSpecialtyOpen(false)}
+              disabled={savingSpEdit}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveSpecialtyEdit} disabled={savingSpEdit}>
+              {savingSpEdit ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Salvando...
+                </>
+              ) : (
+                "Salvar"
+              )}
+            </Button>
+          </div>
         </div>
       </Modal>
     </>
@@ -1624,7 +1720,7 @@ function WhatsAppContent({
             Configurações de Mensagens
           </h3>
           <div className="space-y-4">
-            <div className="rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4">
+            {/* <div className="rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
@@ -1640,9 +1736,9 @@ function WhatsAppContent({
                   className="h-5 w-5 rounded border-[#727B8E]/30 text-[#1E62EC] focus:ring-2 focus:ring-[#1E62EC]/20"
                 />
               </div>
-            </div>
+            </div> */}
 
-            <div className="rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4">
+            {/* <div className="rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
@@ -1658,9 +1754,9 @@ function WhatsAppContent({
                   className="h-5 w-5 rounded border-[#727B8E]/30 text-[#1E62EC] focus:ring-2 focus:ring-[#1E62EC]/20"
                 />
               </div>
-            </div>
+            </div> */}
 
-            <div className="rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4">
+            {/* <div className="rounded-lg border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
@@ -1676,7 +1772,7 @@ function WhatsAppContent({
                   className="h-5 w-5 rounded border-[#727B8E]/30 text-[#1E62EC] focus:ring-2 focus:ring-[#1E62EC]/20"
                 />
               </div>
-            </div>
+            </div> */}
           </div>
         </section>
       )}
@@ -2025,7 +2121,9 @@ function RoomTypeSection({
   deletingId: string | null;
 }) {
   const label = lodgingType === "hotel" ? "Hotel" : "Creche";
-  const totalCapacity = roomTypes.filter((r) => r.is_active).reduce((s, r) => s + r.capacity, 0);
+  const totalCapacity = roomTypes
+    .filter((r) => r.is_active)
+    .reduce((s, r) => s + r.capacity, 0);
 
   return (
     <div className="rounded-lg border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] p-4 flex flex-col gap-3">
@@ -2036,13 +2134,15 @@ function RoomTypeSection({
           </p>
           {roomTypes.length > 0 && (
             <p className="text-[10px] text-[#727B8E] mt-0.5">
-              Capacidade total ativa: <strong>{totalCapacity}</strong> vaga{totalCapacity !== 1 ? "s" : ""}
-              {" "}· substitui o campo "Vagas por dia" para {label}.
+              Capacidade total ativa: <strong>{totalCapacity}</strong> vaga
+              {totalCapacity !== 1 ? "s" : ""} · substitui o campo "Vagas por
+              dia" para {label}.
             </p>
           )}
           {roomTypes.length === 0 && (
             <p className="text-[10px] text-[#727B8E] mt-0.5">
-              Sem tipos configurados — usa a capacidade da tabela "Vagas por dia".
+              Sem tipos configurados — usa a capacidade da tabela "Vagas por
+              dia".
             </p>
           )}
         </div>
@@ -2087,7 +2187,10 @@ function RoomTypeSection({
                     R$ {rt.daily_rate.toFixed(2)}/dia
                   </span>
                   {rt.description && (
-                    <span className="text-xs text-[#727B8E] truncate max-w-[160px]" title={rt.description}>
+                    <span
+                      className="text-xs text-[#727B8E] truncate max-w-[160px]"
+                      title={rt.description}
+                    >
                       {rt.description}
                     </span>
                   )}
@@ -2154,9 +2257,13 @@ function HospedagemContent() {
   const [daycareRoomTypes, setDaycareRoomTypes] = useState<RoomType[]>([]);
   const [roomTypeModalOpen, setRoomTypeModalOpen] = useState(false);
   const [roomTypeEditing, setRoomTypeEditing] = useState<RoomType | null>(null);
-  const [roomTypeForm, setRoomTypeForm] = useState<CreateRoomTypeData & { description: string }>(EMPTY_ROOM_TYPE_FORM);
+  const [roomTypeForm, setRoomTypeForm] = useState<
+    CreateRoomTypeData & { description: string }
+  >(EMPTY_ROOM_TYPE_FORM);
   const [savingRoomType, setSavingRoomType] = useState(false);
-  const [deletingRoomTypeId, setDeletingRoomTypeId] = useState<string | null>(null);
+  const [deletingRoomTypeId, setDeletingRoomTypeId] = useState<string | null>(
+    null,
+  );
 
   const fetchRoomTypes = useCallback(async () => {
     const all = await roomTypeService.list();
@@ -2238,7 +2345,9 @@ function HospedagemContent() {
       toast.success("Removido!", `"${rt.name}" foi excluído.`);
       await fetchRoomTypes();
     } catch (err: any) {
-      const msg = err?.response?.data?.error ?? "Não foi possível excluir o tipo de quarto.";
+      const msg =
+        err?.response?.data?.error ??
+        "Não foi possível excluir o tipo de quarto.";
       toast.error("Erro", msg);
     } finally {
       setDeletingRoomTypeId(null);
@@ -2262,8 +2371,16 @@ function HospedagemContent() {
         setDaycareCheckinTime(cfg.daycare_checkin_time);
         setDaycareCheckoutTime(cfg.daycare_checkout_time);
         setAgendaDays(agenda?.days ?? null);
-        setHotelRoomTypes((allRoomTypes as RoomType[]).filter((r) => r.lodging_type === "hotel"));
-        setDaycareRoomTypes((allRoomTypes as RoomType[]).filter((r) => r.lodging_type === "daycare"));
+        setHotelRoomTypes(
+          (allRoomTypes as RoomType[]).filter(
+            (r) => r.lodging_type === "hotel",
+          ),
+        );
+        setDaycareRoomTypes(
+          (allRoomTypes as RoomType[]).filter(
+            (r) => r.lodging_type === "daycare",
+          ),
+        );
       })
       .catch(() =>
         toast.error(
@@ -2291,7 +2408,10 @@ function HospedagemContent() {
         daycare_checkin_time: daycareCheckinTime,
         daycare_checkout_time: daycareCheckoutTime,
       });
-      toast.success("Hospedagem salva!", "Configurações atualizadas com sucesso.");
+      toast.success(
+        "Hospedagem salva!",
+        "Configurações atualizadas com sucesso.",
+      );
     } catch {
       toast.error("Erro", "Não foi possível salvar a hospedagem.");
     } finally {
@@ -2312,312 +2432,366 @@ function HospedagemContent() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
         <div className="flex flex-col gap-6 pb-2">
-      <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-              Hotel
-            </p>
-            <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
-              Hospedagem noturna para pets.
-            </p>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              className="sr-only peer"
-              checked={hotelEnabled}
-              onChange={(e) => setHotelEnabled(e.target.checked)}
-            />
-            <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
-          </label>
-        </div>
-        {hotelEnabled && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Horário de check-in
+          <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  Hotel
+                </p>
+                <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+                  Hospedagem noturna para pets.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={hotelEnabled}
+                  onChange={(e) => setHotelEnabled(e.target.checked)}
+                />
+                <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
               </label>
-              <Input
-                type="time"
-                value={hotelCheckinTime}
-                onChange={(e) => setHotelCheckinTime(e.target.value)}
-              />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Horário de check-out
+            {hotelEnabled && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                    Horário de check-in
+                  </label>
+                  <Input
+                    type="time"
+                    value={hotelCheckinTime}
+                    onChange={(e) => setHotelCheckinTime(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                    Horário de check-out
+                  </label>
+                  <Input
+                    type="time"
+                    value={hotelCheckoutTime}
+                    onChange={(e) => setHotelCheckoutTime(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {hotelEnabled && (
+              <RoomTypeSection
+                lodgingType="hotel"
+                roomTypes={hotelRoomTypes}
+                onAdd={() => openNewRoomType("hotel")}
+                onEdit={openEditRoomType}
+                onToggle={handleToggleRoomType}
+                onDelete={handleDeleteRoomType}
+                deletingId={deletingRoomTypeId}
+              />
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  Creche
+                </p>
+                <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+                  Cuidados diurnos e atividades para pets.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={daycareEnabled}
+                  onChange={(e) => setDaycareEnabled(e.target.checked)}
+                />
+                <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
               </label>
-              <Input
-                type="time"
-                value={hotelCheckoutTime}
-                onChange={(e) => setHotelCheckoutTime(e.target.value)}
+            </div>
+            {daycareEnabled && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                    Horário de entrada
+                  </label>
+                  <Input
+                    type="time"
+                    value={daycareCheckinTime}
+                    onChange={(e) => setDaycareCheckinTime(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                    Horário de saída
+                  </label>
+                  <Input
+                    type="time"
+                    value={daycareCheckoutTime}
+                    onChange={(e) => setDaycareCheckoutTime(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {daycareEnabled && (
+              <RoomTypeSection
+                lodgingType="daycare"
+                roomTypes={daycareRoomTypes}
+                onAdd={() => openNewRoomType("daycare")}
+                onEdit={openEditRoomType}
+                onToggle={handleToggleRoomType}
+                onDelete={handleDeleteRoomType}
+                deletingId={deletingRoomTypeId}
               />
-            </div>
-          </div>
-        )}
-
-        {hotelEnabled && (
-          <RoomTypeSection
-            lodgingType="hotel"
-            roomTypes={hotelRoomTypes}
-            onAdd={() => openNewRoomType("hotel")}
-            onEdit={openEditRoomType}
-            onToggle={handleToggleRoomType}
-            onDelete={handleDeleteRoomType}
-            deletingId={deletingRoomTypeId}
-          />
-        )}
-      </div>
-
-      <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-              Creche
-            </p>
-            <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
-              Cuidados diurnos e atividades para pets.
-            </p>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              className="sr-only peer"
-              checked={daycareEnabled}
-              onChange={(e) => setDaycareEnabled(e.target.checked)}
-            />
-            <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-[#1E62EC]"></div>
-          </label>
-        </div>
-        {daycareEnabled && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Horário de entrada
-              </label>
-              <Input
-                type="time"
-                value={daycareCheckinTime}
-                onChange={(e) => setDaycareCheckinTime(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Horário de saída
-              </label>
-              <Input
-                type="time"
-                value={daycareCheckoutTime}
-                onChange={(e) => setDaycareCheckoutTime(e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {daycareEnabled && (
-          <RoomTypeSection
-            lodgingType="daycare"
-            roomTypes={daycareRoomTypes}
-            onAdd={() => openNewRoomType("daycare")}
-            onEdit={openEditRoomType}
-            onToggle={handleToggleRoomType}
-            onDelete={handleDeleteRoomType}
-            deletingId={deletingRoomTypeId}
-          />
-        )}
-      </div>
-
-      <Modal
-        isOpen={roomTypeModalOpen}
-        onClose={() => setRoomTypeModalOpen(false)}
-        title={roomTypeEditing ? "Editar tipo de quarto" : "Novo tipo de quarto"}
-      >
-        <div className="flex flex-col gap-4">
-          <div>
-            <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-              Nome <span className="text-red-500">*</span>
-            </label>
-            <Input
-              value={roomTypeForm.name}
-              onChange={(e) => setRoomTypeForm((p) => ({ ...p, name: e.target.value }))}
-              placeholder="ex: Standard, Premium, Suíte VIP"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-              Descrição
-            </label>
-            <TextArea
-              value={roomTypeForm.description}
-              onChange={(e) => setRoomTypeForm((p) => ({ ...p, description: e.target.value }))}
-              placeholder="Descreva o que inclui este tipo de quarto..."
-              rows={2}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Capacidade (vagas) <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="number"
-                min="0"
-                value={roomTypeForm.capacity}
-                onChange={(e) =>
-                  setRoomTypeForm((p) => ({ ...p, capacity: Number(e.target.value) }))
-                }
-                placeholder="ex: 5"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
-                Diária (R$) <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={roomTypeForm.daily_rate}
-                onChange={(e) =>
-                  setRoomTypeForm((p) => ({ ...p, daily_rate: Number(e.target.value) }))
-                }
-                placeholder="ex: 150,00"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRoomTypeModalOpen(false)}
-              disabled={savingRoomType}
-            >
-              Cancelar
-            </Button>
-            <Button size="sm" onClick={handleSaveRoomType} disabled={savingRoomType}>
-              {savingRoomType ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                  Salvando...
-                </>
-              ) : roomTypeEditing ? (
-                "Salvar alterações"
-              ) : (
-                "Criar tipo"
-              )}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {(hotelEnabled || daycareEnabled) && (
-        <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
-          <div>
-            <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-              Visão geral de capacidade
-            </p>
-            <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
-              Calculada automaticamente: soma dos tipos de quarto ativos × agenda de funcionamento.
-              Dias fechados (aba Agenda) sempre terão capacidade zero.
-            </p>
+            )}
           </div>
 
-          {(hotelEnabled && hotelRoomTypes.filter((r) => r.is_active).length === 0) && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
-              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                <strong>Hotel</strong> habilitado mas sem tipos de quarto ativos. Adicione pelo menos um tipo de quarto para que reservas sejam aceitas.
-              </p>
-            </div>
-          )}
-          {(daycareEnabled && daycareRoomTypes.filter((r) => r.is_active).length === 0) && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
-              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                <strong>Creche</strong> habilitada mas sem tipos de quarto ativos. Adicione pelo menos um tipo de quarto para que reservas sejam aceitas.
-              </p>
-            </div>
-          )}
-
-          <div className="overflow-x-auto pb-1">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#727B8E]/10">
-                  <th className="text-left text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 pr-4">
-                    Dia
-                  </th>
-                  {hotelEnabled && (
-                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-4">
-                      Hotel
-                    </th>
+          <Modal
+            isOpen={roomTypeModalOpen}
+            onClose={() => setRoomTypeModalOpen(false)}
+            title={
+              roomTypeEditing ? "Editar tipo de quarto" : "Novo tipo de quarto"
+            }
+          >
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                  Nome <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  value={roomTypeForm.name}
+                  onChange={(e) =>
+                    setRoomTypeForm((p) => ({ ...p, name: e.target.value }))
+                  }
+                  placeholder="ex: Standard, Premium, Suíte VIP"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                  Descrição
+                </label>
+                <TextArea
+                  value={roomTypeForm.description}
+                  onChange={(e) =>
+                    setRoomTypeForm((p) => ({
+                      ...p,
+                      description: e.target.value,
+                    }))
+                  }
+                  placeholder="Descreva o que inclui este tipo de quarto..."
+                  rows={2}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                    Capacidade (vagas) <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={roomTypeForm.capacity}
+                    onChange={(e) =>
+                      setRoomTypeForm((p) => ({
+                        ...p,
+                        capacity: Number(e.target.value),
+                      }))
+                    }
+                    placeholder="ex: 5"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] mb-1">
+                    Diária (R$) <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={roomTypeForm.daily_rate}
+                    onChange={(e) =>
+                      setRoomTypeForm((p) => ({
+                        ...p,
+                        daily_rate: Number(e.target.value),
+                      }))
+                    }
+                    placeholder="ex: 150,00"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRoomTypeModalOpen(false)}
+                  disabled={savingRoomType}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleSaveRoomType}
+                  disabled={savingRoomType}
+                >
+                  {savingRoomType ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      Salvando...
+                    </>
+                  ) : roomTypeEditing ? (
+                    "Salvar alterações"
+                  ) : (
+                    "Criar tipo"
                   )}
-                  {daycareEnabled && (
-                    <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-4">
-                      Creche
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {LODGING_DAY_NAMES.map(({ dayOfWeek, label }) => {
-                  const closed = isLodgingDayClosedFromAgenda(agendaDays, dayOfWeek);
-                  const hotelCap = closed ? 0 : hotelRoomTypes.filter((r) => r.is_active).reduce((s, r) => s + r.capacity, 0);
-                  const daycareCap = closed ? 0 : daycareRoomTypes.filter((r) => r.is_active).reduce((s, r) => s + r.capacity, 0);
-                  return (
-                    <tr
-                      key={dayOfWeek}
-                      className={cn(
-                        "border-b border-[#727B8E]/5 last:border-0",
-                        closed && "opacity-40",
-                      )}
-                    >
-                      <td className="py-2.5 pr-4">
-                        <div className="flex items-center gap-2">
-                          <span className={cn("text-sm font-medium", closed ? "text-[#727B8E]" : "text-[#434A57] dark:text-[#f5f9fc]")}>
-                            {label}
-                          </span>
-                          {closed && (
-                            <span className="rounded-full bg-[#727B8E]/10 px-1.5 py-0.5 text-[10px] text-[#727B8E]">
-                              Fechado
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          {(hotelEnabled || daycareEnabled) && (
+            <div className="rounded-xl border border-[#727B8E]/10 bg-white dark:border-[#40485A] dark:bg-[#1A1B1D] p-5 flex flex-col gap-4">
+              <div>
+                <p className="text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  Visão geral de capacidade
+                </p>
+                <p className="text-xs text-[#727B8E] dark:text-[#8a94a6] mt-0.5">
+                  Calculada automaticamente: soma dos tipos de quarto ativos ×
+                  agenda de funcionamento. Dias fechados (aba Agenda) sempre
+                  terão capacidade zero.
+                </p>
+              </div>
+
+              {hotelEnabled &&
+                hotelRoomTypes.filter((r) => r.is_active).length === 0 && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
+                    <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      <strong>Hotel</strong> habilitado mas sem tipos de quarto
+                      ativos. Adicione pelo menos um tipo de quarto para que
+                      reservas sejam aceitas.
+                    </p>
+                  </div>
+                )}
+              {daycareEnabled &&
+                daycareRoomTypes.filter((r) => r.is_active).length === 0 && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 px-3 py-2.5">
+                    <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      <strong>Creche</strong> habilitada mas sem tipos de quarto
+                      ativos. Adicione pelo menos um tipo de quarto para que
+                      reservas sejam aceitas.
+                    </p>
+                  </div>
+                )}
+
+              <div className="overflow-x-auto pb-1">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#727B8E]/10">
+                      <th className="text-left text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 pr-4">
+                        Dia
+                      </th>
                       {hotelEnabled && (
-                        <td className="py-2.5 px-4 text-center">
-                          {closed ? (
-                            <span className="text-xs text-[#727B8E]">—</span>
-                          ) : hotelRoomTypes.filter((r) => r.is_active).length === 0 ? (
-                            <span className="text-xs text-amber-500">Sem tipos</span>
-                          ) : (
-                            <span className="inline-flex items-center justify-center w-10 h-8 rounded-lg bg-[#1E62EC]/8 dark:bg-[#1E62EC]/15 text-sm font-semibold text-[#1E62EC]">
-                              {hotelCap}
-                            </span>
-                          )}
-                        </td>
+                        <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-4">
+                          Hotel
+                        </th>
                       )}
                       {daycareEnabled && (
-                        <td className="py-2.5 px-4 text-center">
-                          {closed ? (
-                            <span className="text-xs text-[#727B8E]">—</span>
-                          ) : daycareRoomTypes.filter((r) => r.is_active).length === 0 ? (
-                            <span className="text-xs text-amber-500">Sem tipos</span>
-                          ) : (
-                            <span className="inline-flex items-center justify-center w-10 h-8 rounded-lg bg-[#8B5CF6]/8 dark:bg-[#8B5CF6]/15 text-sm font-semibold text-[#8B5CF6]">
-                              {daycareCap}
-                            </span>
-                          )}
-                        </td>
+                        <th className="text-center text-xs font-medium text-[#727B8E] dark:text-[#8a94a6] pb-2 px-4">
+                          Creche
+                        </th>
                       )}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                  </thead>
+                  <tbody>
+                    {LODGING_DAY_NAMES.map(({ dayOfWeek, label }) => {
+                      const closed = isLodgingDayClosedFromAgenda(
+                        agendaDays,
+                        dayOfWeek,
+                      );
+                      const hotelCap = closed
+                        ? 0
+                        : hotelRoomTypes
+                            .filter((r) => r.is_active)
+                            .reduce((s, r) => s + r.capacity, 0);
+                      const daycareCap = closed
+                        ? 0
+                        : daycareRoomTypes
+                            .filter((r) => r.is_active)
+                            .reduce((s, r) => s + r.capacity, 0);
+                      return (
+                        <tr
+                          key={dayOfWeek}
+                          className={cn(
+                            "border-b border-[#727B8E]/5 last:border-0",
+                            closed && "opacity-40",
+                          )}
+                        >
+                          <td className="py-2.5 pr-4">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  "text-sm font-medium",
+                                  closed
+                                    ? "text-[#727B8E]"
+                                    : "text-[#434A57] dark:text-[#f5f9fc]",
+                                )}
+                              >
+                                {label}
+                              </span>
+                              {closed && (
+                                <span className="rounded-full bg-[#727B8E]/10 px-1.5 py-0.5 text-[10px] text-[#727B8E]">
+                                  Fechado
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          {hotelEnabled && (
+                            <td className="py-2.5 px-4 text-center">
+                              {closed ? (
+                                <span className="text-xs text-[#727B8E]">
+                                  —
+                                </span>
+                              ) : hotelRoomTypes.filter((r) => r.is_active)
+                                  .length === 0 ? (
+                                <span className="text-xs text-amber-500">
+                                  Sem tipos
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center justify-center w-10 h-8 rounded-lg bg-[#1E62EC]/8 dark:bg-[#1E62EC]/15 text-sm font-semibold text-[#1E62EC]">
+                                  {hotelCap}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {daycareEnabled && (
+                            <td className="py-2.5 px-4 text-center">
+                              {closed ? (
+                                <span className="text-xs text-[#727B8E]">
+                                  —
+                                </span>
+                              ) : daycareRoomTypes.filter((r) => r.is_active)
+                                  .length === 0 ? (
+                                <span className="text-xs text-amber-500">
+                                  Sem tipos
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center justify-center w-10 h-8 rounded-lg bg-[#8B5CF6]/8 dark:bg-[#8B5CF6]/15 text-sm font-semibold text-[#8B5CF6]">
+                                  {daycareCap}
+                                </span>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2984,9 +3158,10 @@ export default function ConfiguracoesPage() {
           ? 2
           : 1,
         block_ai_schedule: editingData.block_ai_schedule,
-        dependent_service_id: editingData.block_ai_schedule && editingData.dependent_service_id
-          ? Number(editingData.dependent_service_id)
-          : null,
+        dependent_service_id:
+          editingData.block_ai_schedule && editingData.dependent_service_id
+            ? Number(editingData.dependent_service_id)
+            : null,
       });
       toast.success("Sucesso!", "Serviço atualizado com sucesso.");
       handleCloseEditModal();
@@ -2999,7 +3174,10 @@ export default function ConfiguracoesPage() {
     }
   };
 
-  const handleCreateSpecialty = async (name: string, color?: string): Promise<string> => {
+  const handleCreateSpecialty = async (
+    name: string,
+    color?: string,
+  ): Promise<string> => {
     const sp = await specialtyService.create({ name, color });
     specialtiesLoadedRef.current = false;
     await fetchSpecialties();
@@ -3139,9 +3317,11 @@ export default function ConfiguracoesPage() {
           ? 2
           : 1,
         block_ai_schedule: newServiceData.block_ai_schedule,
-        dependent_service_id: newServiceData.block_ai_schedule && newServiceData.dependent_service_id
-          ? Number(newServiceData.dependent_service_id)
-          : null,
+        dependent_service_id:
+          newServiceData.block_ai_schedule &&
+          newServiceData.dependent_service_id
+            ? Number(newServiceData.dependent_service_id)
+            : null,
       });
       handleCloseNewServiceModal();
       await fetchServices();
@@ -3286,10 +3466,10 @@ export default function ConfiguracoesPage() {
               {specialties
                 .filter((sp) => sp.name !== "Hospedagem")
                 .map((sp) => (
-                <option key={sp.id} value={sp.id}>
-                  {sp.name}
-                </option>
-              ))}
+                  <option key={sp.id} value={sp.id}>
+                    {sp.name}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -3469,7 +3649,10 @@ export default function ConfiguracoesPage() {
               <select
                 value={String(editingData.dependent_service_id)}
                 onChange={(e) =>
-                  handleEditingDataChange("dependent_service_id", e.target.value)
+                  handleEditingDataChange(
+                    "dependent_service_id",
+                    e.target.value,
+                  )
                 }
                 className="w-full rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] dark:border-[#40485A] px-3 py-2 text-sm text-[#434A57] dark:text-[#f5f9fc]"
               >
@@ -3479,7 +3662,7 @@ export default function ConfiguracoesPage() {
                     (s) =>
                       s.specialtyId === editingData.specialty_id &&
                       s.id !== selectedService?.id &&
-                      !s.blockAiSchedule
+                      !s.blockAiSchedule,
                   )
                   .map((s) => (
                     <option key={s.id} value={s.id}>
@@ -3488,7 +3671,8 @@ export default function ConfiguracoesPage() {
                   ))}
               </select>
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                O bot recomendará este serviço antes de aceitar o agendamento do serviço bloqueado.
+                O bot recomendará este serviço antes de aceitar o agendamento do
+                serviço bloqueado.
               </p>
             </div>
           )}
@@ -3543,10 +3727,10 @@ export default function ConfiguracoesPage() {
               {specialties
                 .filter((sp) => sp.name !== "Hospedagem")
                 .map((sp) => (
-                <option key={sp.id} value={sp.id}>
-                  {sp.name}
-                </option>
-              ))}
+                  <option key={sp.id} value={sp.id}>
+                    {sp.name}
+                  </option>
+                ))}
             </select>
             {specialties.length === 0 && (
               <p className="mt-1 text-xs text-amber-600">
@@ -3738,7 +3922,7 @@ export default function ConfiguracoesPage() {
                   .filter(
                     (s) =>
                       s.specialtyId === newServiceData.specialty_id &&
-                      !s.blockAiSchedule
+                      !s.blockAiSchedule,
                   )
                   .map((s) => (
                     <option key={s.id} value={s.id}>
@@ -3747,7 +3931,8 @@ export default function ConfiguracoesPage() {
                   ))}
               </select>
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                O bot recomendará este serviço antes de aceitar o agendamento do serviço bloqueado.
+                O bot recomendará este serviço antes de aceitar o agendamento do
+                serviço bloqueado.
               </p>
             </div>
           )}
