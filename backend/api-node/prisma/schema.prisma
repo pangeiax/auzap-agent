@@ -431,6 +431,7 @@ model PetshopStaff {
 
 model PetshopStaffSchedule {
   id        String    @id @default(uuid()) @db.Uuid
+  companyId Int       @map("company_id")
   staffId   String    @map("staff_id") @db.Uuid
   type      String?   @db.VarChar(50)
   startDate DateTime  @map("start_date") @db.Date

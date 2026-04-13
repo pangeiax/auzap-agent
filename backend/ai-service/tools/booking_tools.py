@@ -567,9 +567,9 @@ def _fetch_staff_blocks(staff_id: str, target_date: str) -> list[dict]:
             FROM petshop_staff_schedules
             WHERE staff_id = %s
               AND start_date <= %s
-              AND (end_date >= %s OR end_date IS NULL)
+              AND (end_date >= %s OR (end_date IS NULL AND start_date = %s))
             """,
-            (staff_id, target_date, target_date),
+            (staff_id, target_date, target_date, target_date),
         )
         return [dict(r) for r in cur.fetchall()]
 
