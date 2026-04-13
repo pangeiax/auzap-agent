@@ -16,7 +16,7 @@ import { Modal } from "@/components/molecules/Modal";
 import { Input } from "@/components/atoms/Input";
 import { Select } from "@/components/atoms/Select";
 import { TextArea } from "@/components/atoms/TextArea";
-import { useAvailableScheduleSlots, useToast } from "@/hooks";
+import { useToast } from "@/hooks";
 import { WEEK_LABELS, STATUS_OPTIONS } from "@/data/calendar";
 import {
   appointmentService,
@@ -24,6 +24,8 @@ import {
   petService,
   serviceService,
 } from "@/services";
+import { staffService } from "@/services/staffService";
+import type { StaffSlot } from "@/services/staffService";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { maskPhone, dateToISO, dateFromISO } from "@/lib/masks";
 import { normalizePetSize, PET_SIZE_OPTIONS_WITH_PLACEHOLDER } from "@/lib/petSize";
@@ -49,27 +51,22 @@ function normalizeStatus(status: string): CalendarStatus {
 }
 
 function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
-  // When scheduled_at has an explicit BRT offset (e.g. "...T14:00:00-03:00") we parse
-  // the date/time from the string directly to avoid local-timezone shifts that could
-  // move an appointment to a different day in non-BRT browsers.
+  // Usar campos diretos do novo formato (start_time, scheduled_date)
+  // Fallback para parsear scheduled_at se campos diretos não existirem
   let dateStr: string;
   let timeStr: string;
-  if (a.scheduled_at) {
-    // Extract date and time from the ISO string before any timezone conversion
+
+  if (a.scheduled_date && a.start_time) {
+    // Novo formato: campos separados, sem conversão de timezone necessária
+    dateStr = a.scheduled_date;
+    timeStr = a.start_time;
+  } else if (a.scheduled_at) {
+    // Fallback: parsear scheduled_at (já vem com -03:00 do backend)
     const raw = a.scheduled_at;
-    // Handle both "YYYY-MM-DDTHH:mm:ssZ" and "YYYY-MM-DDTHH:mm:ss±HH:mm"
     const match = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
     if (match) {
       dateStr = match[1]!;
       timeStr = match[2]!;
-      // If the offset is -03:00, the date/time already represent BRT — use directly.
-      // If offset is Z (UTC), convert to BRT by subtracting 3 hours.
-      if (raw.endsWith("Z") || raw.endsWith("+00:00")) {
-        const d = new Date(raw);
-        d.setUTCHours(d.getUTCHours() - 3);
-        dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-        timeStr = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-      }
     } else {
       const d = new Date(raw);
       dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -78,8 +75,10 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
   } else {
     const d = new Date();
     dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    timeStr = "00:00";
   }
+
+  const timeEnd = a.end_time || undefined;
   const petName = a.pet_name || a.client_name || "Agendamento";
   const manualPhone = a.phone_client_manual ?? null;
   const shouldFallback =
@@ -95,6 +94,7 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
     petInitials: getInitials(petName),
     type: a.specialty || "Consulta",
     time: timeStr,
+    timeEnd,
     date: dateStr,
     status: normalizeStatus(a.status),
     clientName: a.client_name || undefined,
@@ -102,6 +102,7 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
     pairedAppointmentId:
       extractPairedAppointmentId(a.notes) ?? undefined,
     notes: notesForDisplay(a.notes) || undefined,
+    staffName: a.staff_name || undefined,
   };
 }
 
@@ -112,7 +113,10 @@ interface NewAppointmentForm {
   petId: string;
   date: string;
   time: string;
-  slotId: string;
+  staffId: string;
+  staffName: string;
+  startTime: string;
+  endTime: string;
   serviceId: string;
   status: string;
   notes: string;
@@ -123,7 +127,10 @@ const initialFormState: NewAppointmentForm = {
   petId: "",
   date: "",
   time: "",
-  slotId: "",
+  staffId: "",
+  staffName: "",
+  startTime: "",
+  endTime: "",
   serviceId: "",
   status: "pendente",
   notes: "",
@@ -134,7 +141,7 @@ interface FormErrors {
   petId?: string;
   date?: string;
   serviceId?: string;
-  slotId?: string;
+  staffSlot?: string;
   newClientName?: string;
   newClientPhone?: string;
   newPetName?: string;
@@ -324,17 +331,10 @@ export default function CalendarioPage() {
   );
   const clientPetsCache = useRef<Map<string, Pet[]>>(new Map());
 
-  // Only fetch slots when both date AND service are selected
-  const {
-    slots: availableSlots,
-    loading: slotsLoading,
-    error: slotsError,
-  } = useAvailableScheduleSlots(
-    formData.serviceId ? formData.date : "",
-    formData.serviceId || undefined,
-    isModalOpen,
-    formData.petId || undefined,
-  );
+  // Staff availability
+  const [staffSlots, setStaffSlots] = useState<StaffSlot[]>([]);
+  const [staffSlotsLoading, setStaffSlotsLoading] = useState(false);
+  const [staffSlotsError, setStaffSlotsError] = useState<string | null>(null);
 
   const mergedEvents = useMemo(
     () =>
@@ -396,17 +396,75 @@ export default function CalendarioPage() {
     [services],
   );
 
+  // Fetch staff availability when date + service are selected in the modal
   useEffect(() => {
-    setFormData((prev) => {
-      if (!prev.slotId && !prev.time) return prev;
-      const selectedSlot = availableSlots.find(
-        (slot) => slot.slot_id === prev.slotId,
-      );
-      if (!selectedSlot) return { ...prev, slotId: "", time: "" };
-      if (prev.time === selectedSlot.time) return prev;
-      return { ...prev, time: selectedSlot.time };
-    });
-  }, [availableSlots]);
+    if (!isModalOpen || !formData.date || !formData.serviceId) {
+      setStaffSlots([]);
+      setStaffSlotsError(null);
+      return;
+    }
+
+    const dateISO = dateToISO(formData.date);
+    if (!dateISO) return;
+
+    const selectedService = services.find(
+      (s) => String(s.id) === formData.serviceId,
+    );
+    const specialtyId =
+      selectedService?.specialtyId ?? selectedService?.specialty?.id;
+
+    if (!specialtyId) {
+      setStaffSlots([]);
+      setStaffSlotsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setStaffSlotsLoading(true);
+    setStaffSlotsError(null);
+
+    staffService
+      .getAvailability({
+        specialty_id: specialtyId,
+        date: dateISO,
+        service_id: formData.serviceId,
+        pet_id: formData.petId || undefined,
+      })
+      .then((res) => {
+        if (!cancelled) {
+          setStaffSlots(res.available_slots);
+          // Reset staff selection if previously selected slot is no longer available
+          setFormData((prev) => {
+            if (!prev.staffId) return prev;
+            const still = res.available_slots.find(
+              (s) =>
+                s.staff_id === prev.staffId && s.start_time === prev.startTime,
+            );
+            if (!still)
+              return {
+                ...prev,
+                staffId: "",
+                staffName: "",
+                startTime: "",
+                endTime: "",
+                time: "",
+              };
+            return prev;
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled)
+          setStaffSlotsError("Não foi possível carregar os horários disponíveis.");
+      })
+      .finally(() => {
+        if (!cancelled) setStaffSlotsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isModalOpen, formData.date, formData.serviceId, formData.petId, services]);
 
   const month = currentDate.getMonth();
   const year = currentDate.getFullYear();
@@ -606,6 +664,8 @@ export default function CalendarioPage() {
     setNewPetSize("");
     setIsCreatingPet(false);
     setClientPets([]);
+    setStaffSlots([]);
+    setStaffSlotsError(null);
   };
 
   const handleCreateClient = async () => {
@@ -795,7 +855,8 @@ export default function CalendarioPage() {
     if (!formData.petId) errs.petId = "Selecione um pet";
     if (!formData.date) errs.date = "Informe a data";
     if (!formData.serviceId) errs.serviceId = "Selecione um serviço";
-    if (!formData.slotId) errs.slotId = "Selecione um horário";
+    if (!formData.staffId || !formData.startTime)
+      errs.staffSlot = "Selecione um horário";
 
     if (Object.keys(errs).length > 0) {
       setFormErrors(errs);
@@ -808,28 +869,19 @@ export default function CalendarioPage() {
       return;
     }
 
-    const selectedSlot = availableSlots.find(
-      (slot) => slot.slot_id === formData.slotId,
-    );
-    if (!selectedSlot) {
-      setFormErrors((prev) => ({
-        ...prev,
-        slotId: "Horário indisponível, selecione outro",
-      }));
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
       const selectedPet = clientPets.find((p) => p.id === formData.petId);
-      const scheduledAt = `${dateISO}T${selectedSlot.time}:00`;
+      const scheduledAt = `${dateISO}T${formData.startTime}:00`;
 
       await appointmentService.scheduleAppointment({
         client_id: formData.clientId,
         pet_id: formData.petId,
         service_id: formData.serviceId,
-        slot_id: selectedSlot.slot_id,
+        staff_id: formData.staffId,
+        start_time: formData.startTime,
+        end_time: formData.endTime,
         scheduled_at: scheduledAt,
         status: appointmentStatusToApi(normalizeStatus(formData.status)),
         notes: formData.notes || undefined,
@@ -850,13 +902,9 @@ export default function CalendarioPage() {
       availabilityCache.current.clear();
       setCurrentDate(new Date(y, m - 1, 1));
       setSelectedDate(new Date(y, m - 1, d));
-      const timeMsg =
-        selectedSlot.uses_consecutive_slots && selectedSlot.paired_slot_time
-          ? `${selectedSlot.time} e ${selectedSlot.paired_slot_time} (dois horários seguidos)`
-          : selectedSlot.time;
       toast.success(
         "Agendamento criado",
-        `${selectedPet?.name ?? "O pet"} foi agendado para ${timeMsg}.`,
+        `${selectedPet?.name ?? "O pet"} foi agendado para ${formData.startTime} com ${formData.staffName}.`,
       );
     } catch (error) {
       console.error("Erro ao criar agendamento:", error);
@@ -1204,12 +1252,15 @@ export default function CalendarioPage() {
                 value={brDateToYmdSafe(formData.date)}
                 minYmd={getTodayYmd()}
                 onChange={(ymd) => {
-                  setFormErrors((prev) => ({ ...prev, date: undefined, slotId: undefined }));
+                  setFormErrors((prev) => ({ ...prev, date: undefined, staffSlot: undefined }));
                   setFormData((prev) => ({
                     ...prev,
                     date: dateFromISO(ymd),
                     time: "",
-                    slotId: "",
+                    staffId: "",
+                    staffName: "",
+                    startTime: "",
+                    endTime: "",
                   }));
                 }}
               />
@@ -1227,11 +1278,14 @@ export default function CalendarioPage() {
                 }))}
                 value={formData.serviceId}
                 onChange={(e) => {
-                  setFormErrors((prev) => ({ ...prev, serviceId: undefined, slotId: undefined }));
+                  setFormErrors((prev) => ({ ...prev, serviceId: undefined, staffSlot: undefined }));
                   setFormData((prev) => ({
                     ...prev,
                     serviceId: e.target.value,
-                    slotId: "",
+                    staffId: "",
+                    staffName: "",
+                    startTime: "",
+                    endTime: "",
                     time: "",
                   }));
                 }}
@@ -1244,12 +1298,14 @@ export default function CalendarioPage() {
 
           {formData.date && formData.serviceId && (
             <div>
-              {slotsLoading ? (
+              {staffSlotsLoading ? (
                 <div className="flex items-center gap-2 rounded-lg border border-[#727B8E]/20 bg-[#F4F6F9] p-3 dark:border-[#40485A] dark:bg-[#212225]">
                   <Loader2 className="h-4 w-4 animate-spin text-[#1E62EC]" />
-                  <span className="text-sm text-[#727B8E]">Buscando horários disponíveis...</span>
+                  <span className="text-sm text-[#727B8E]">
+                    Buscando horários disponíveis...
+                  </span>
                 </div>
-              ) : availableSlots.length === 0 ? (
+              ) : staffSlots.length === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/40 dark:bg-amber-900/20">
                   <p className="text-sm text-amber-700 dark:text-amber-400">
                     Nenhum horário disponível para esta data e serviço.
@@ -1260,41 +1316,54 @@ export default function CalendarioPage() {
                   <p className="mb-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
                     Horário disponível <span className="text-red-500">*</span>
                   </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {availableSlots.map((slot) => (
-                      <button
-                        key={slot.slot_id}
-                        type="button"
-                        onClick={() => {
-                          setFormErrors((prev) => ({ ...prev, slotId: undefined }));
-                          setFormData((prev) => ({
-                            ...prev,
-                            slotId: slot.slot_id ?? "",
-                            time: slot.time,
-                          }));
-                        }}
-                        className={`flex flex-col items-center rounded-lg border px-2 py-2 text-sm min-h-[60px] transition-all ${
-                          formData.slotId === slot.slot_id
-                            ? "border-[#1E62EC] bg-[#1E62EC]/10 text-[#1E62EC] dark:border-[#2172e5] dark:bg-[#2172e5]/20 dark:text-[#2172e5]"
-                            : "border-[#727B8E]/20 bg-white text-[#434A57] hover:border-[#1E62EC]/40 hover:bg-[#1E62EC]/5 dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc]"
-                        }`}
-                      >
-                        <span className="font-semibold">{slot.time}</span>
-                        <span className="text-[10px] opacity-70">
-                          {slot.remaining_capacity === 1
-                            ? "1 vaga"
-                            : `${slot.remaining_capacity} vagas`}
-                        </span>
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {staffSlots.map((slot, idx) => {
+                      const slotKey = `${slot.staff_id}|${slot.start_time}`;
+                      const selectedKey = `${formData.staffId}|${formData.startTime}`;
+                      const isSelected = slotKey === selectedKey;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setFormErrors((prev) => ({
+                              ...prev,
+                              staffSlot: undefined,
+                            }));
+                            setFormData((prev) => ({
+                              ...prev,
+                              staffId: slot.staff_id,
+                              staffName: slot.staff_name,
+                              startTime: slot.start_time,
+                              endTime: slot.end_time,
+                              time: slot.start_time,
+                            }));
+                          }}
+                          className={`flex min-h-[60px] flex-col items-center rounded-lg border px-2 py-2 text-sm transition-all ${
+                            isSelected
+                              ? "border-[#1E62EC] bg-[#1E62EC]/10 text-[#1E62EC] dark:border-[#2172e5] dark:bg-[#2172e5]/20 dark:text-[#2172e5]"
+                              : "border-[#727B8E]/20 bg-white text-[#434A57] hover:border-[#1E62EC]/40 hover:bg-[#1E62EC]/5 dark:border-[#40485A] dark:bg-[#212225] dark:text-[#f5f9fc]"
+                          }`}
+                        >
+                          <span className="font-semibold">{slot.start_time}</span>
+                          <span className="text-[10px] opacity-70 text-center leading-tight mt-0.5">
+                            {slot.staff_name}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  {formErrors.slotId && (
-                    <p className="mt-1 text-xs text-red-500">{formErrors.slotId}</p>
+                  {formErrors.staffSlot && (
+                    <p className="mt-1 text-xs text-red-500">
+                      {formErrors.staffSlot}
+                    </p>
                   )}
                 </div>
               )}
-              {slotsError && (
-                <p className="mt-1 text-xs text-red-500 dark:text-red-400">{slotsError}</p>
+              {staffSlotsError && (
+                <p className="mt-1 text-xs text-red-500 dark:text-red-400">
+                  {staffSlotsError}
+                </p>
               )}
             </div>
           )}
@@ -1377,6 +1446,16 @@ export default function CalendarioPage() {
                   </span>
                   <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
                     {selectedEvent.clientPhone}
+                  </span>
+                </div>
+              )}
+              {selectedEvent.staffName && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#727B8E] dark:text-[#8a94a6]">
+                    Profissional
+                  </span>
+                  <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedEvent.staffName}
                   </span>
                 </div>
               )}

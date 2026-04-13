@@ -842,6 +842,8 @@ async def run_router(
     base_input_with_guardrails = specialist_input
     specialist_response = None
     reply = ""
+    _POST_GUARDRAIL_MAX = 1  # Máximo de 1 reprocessamento por guardrail pós-processamento
+    post_guardrail_count = 0
 
     for attempt in range(_VERIFICAR_REPROCESS_MAX):
         specialist_response = specialist.run(specialist_input)
@@ -852,23 +854,31 @@ async def run_router(
                 reply = cleaned
 
         if not _must_reprocess_verificar(agent_name, specialist_response, reply):
-            # Guardrails de pós-processamento
-            must_reprocess, reprocess_suffix = check_post_guardrails(
-                reply=reply,
-                run_output=specialist_response,
-                agent_name=agent_name,
-                router_ctx=router_ctx,
-                history=history,
-                current_user_message=message,
-            )
-            if not must_reprocess:
+            # Guardrails de pós-processamento (com limite próprio para evitar loops)
+            if post_guardrail_count < _POST_GUARDRAIL_MAX:
+                must_reprocess, reprocess_suffix = check_post_guardrails(
+                    reply=reply,
+                    run_output=specialist_response,
+                    agent_name=agent_name,
+                    router_ctx=router_ctx,
+                    history=history,
+                    current_user_message=message,
+                )
+                if not must_reprocess:
+                    break
+                post_guardrail_count += 1
+                logger.warning(
+                    "GUARDRAIL pós-processamento disparou reprocessamento (%s/%s) | agent=%s | motivo=%.100s",
+                    post_guardrail_count, _POST_GUARDRAIL_MAX, agent_name, reprocess_suffix
+                )
+                specialist_input = base_input_with_guardrails + reprocess_suffix
+                continue
+            else:
+                logger.warning(
+                    "GUARDRAIL pós-processamento atingiu limite de %s — aceitando resposta como está | agent=%s",
+                    _POST_GUARDRAIL_MAX, agent_name
+                )
                 break
-            logger.warning(
-                "GUARDRAIL pós-processamento disparou reprocessamento | agent=%s | motivo=%.100s",
-                agent_name, reprocess_suffix
-            )
-            specialist_input = base_input_with_guardrails + reprocess_suffix
-            continue
 
         logger.warning(
             "Reprocessando especialista por 'verificar/retorno em breve' fora de escalonamento | agent=%s attempt=%s/%s",

@@ -100,6 +100,43 @@ def cache_invalidate_client_pets(company_id: int, client_id: str) -> None:
         logger.warning("cache_invalidate_client_pets falhou: %s", e)
 
 
+SLOT_TTL_SEC = 600  # 10 minutos
+
+
+def cache_set_slots(company_id: int, client_id: str, slots: list) -> None:
+    """Armazena slots retornados por get_available_times no Redis (TTL 10 min)."""
+    if not client_id or not slots:
+        return
+    try:
+        r = _redis()
+        for slot in slots:
+            sid = slot.get("slot_id")
+            if not sid:
+                continue
+            key = f"{_PREFIX}:slot:{company_id}:{client_id}:{sid}"
+            r.setex(key, SLOT_TTL_SEC, _json_dumps(slot))
+        r.close()
+    except Exception as e:
+        logger.warning("cache_set_slots falhou: %s", e)
+
+
+def cache_get_slot(company_id: int, client_id: str, slot_id: str) -> dict | None:
+    """Recupera um slot do cache pelo slot_id temporário."""
+    if not client_id or not slot_id:
+        return None
+    key = f"{_PREFIX}:slot:{company_id}:{client_id}:{slot_id}"
+    try:
+        r = _redis()
+        raw = r.get(key)
+        r.close()
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception as e:
+        logger.warning("cache_get_slot falhou: %s", e)
+        return None
+
+
 def build_booking_tool_cache_hint(context: dict, router_ctx: dict | None = None) -> str:
     """
     Texto opcional anexado ao input do booking_agent com último snapshot válido no Redis.

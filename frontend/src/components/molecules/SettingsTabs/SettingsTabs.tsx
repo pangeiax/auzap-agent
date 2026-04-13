@@ -8,11 +8,13 @@ export type SettingsTabId =
   | 'ia-playground'
   | 'horarios'
   | 'hospedagem'
+  | 'funcionarios'
 
 const TABS: { id: SettingsTabId; label: string, disabled?: boolean}[] = [
   { id: 'servicos', label: 'Serviços' },
   { id: 'empresa', label: 'Empresa' },
   { id: 'horarios', label: 'Agenda' },
+  { id: 'funcionarios', label: 'Funcionários' },
   { id: 'hospedagem', label: 'Hospedagem' },
   { id: 'whatsapp', label: 'WhatsApp' },
   { id: 'pagamento', label: 'Pagamento', disabled: true },

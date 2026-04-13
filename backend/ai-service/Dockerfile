@@ -14,6 +14,6 @@ COPY . .
 
 EXPOSE 8000
 
-# Com --reload, sem watchfiles o Uvicorn usa StatReload e faz rglob de *.py em /app —
-# com venv/ montado do host isso pode estourar RAM (OSError Errno 12).
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-exclude", "venv"]
+# Sem watchfiles, uvicorn usa StatReload (polling) — evita crash de memória em Docker/Windows.
+RUN pip uninstall -y watchfiles 2>/dev/null; true
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-exclude", "venv", "--reload-exclude", "__pycache__"]
