@@ -313,6 +313,12 @@ function StaffForm({ initial, specialties, onSave, onCancel, saving, title }: St
 
 // ── Linha de bloqueio ─────────────────────────────────────────
 
+function fmtDate(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const d = new Date(raw);
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
+}
+
 function ScheduleRow({
   schedule,
   onDelete,
@@ -321,9 +327,9 @@ function ScheduleRow({
   onDelete: () => void;
 }) {
   const typeLabel = SCHEDULE_TYPES.find(t => t.value === schedule.type)?.label ?? schedule.type ?? "Bloqueio";
-  const period = schedule.endDate
-    ? `${schedule.startDate} → ${schedule.endDate}`
-    : schedule.startDate;
+  const start = fmtDate(schedule.startDate);
+  const end = fmtDate(schedule.endDate);
+  const period = end && end !== start ? `${start} → ${end}` : start;
   const times =
     schedule.startTime && schedule.endTime
       ? `${fmt(schedule.startTime)} – ${fmt(schedule.endTime)}`
@@ -402,16 +408,19 @@ function StaffCard({ staff, specialties, onEdit, onDeactivate, onReactivate }: S
     if (expanded) loadSchedules();
   }, [expanded, loadSchedules]);
 
+  const [savingSchedule, setSavingSchedule] = useState(false);
+
   async function handleAddSchedule() {
     if (!scheduleForm.start_date) {
       toastError("Data de início é obrigatória");
       return;
     }
+    setSavingSchedule(true);
     try {
       const clean: CreateScheduleData = {
         type: scheduleForm.type || undefined,
         start_date: scheduleForm.start_date,
-        end_date: scheduleForm.end_date || undefined,
+        end_date: scheduleForm.end_date || scheduleForm.start_date,
         start_time: scheduleForm.start_time || undefined,
         end_time: scheduleForm.end_time || undefined,
         notes: scheduleForm.notes || undefined,
@@ -423,6 +432,8 @@ function StaffCard({ staff, specialties, onEdit, onDeactivate, onReactivate }: S
       loadSchedules();
     } catch {
       toastError("Erro ao adicionar bloqueio");
+    } finally {
+      setSavingSchedule(false);
     }
   }
 
@@ -563,8 +574,8 @@ function StaffCard({ staff, specialties, onEdit, onDeactivate, onReactivate }: S
                 </div>
               </div>
               <div className="mt-2 flex justify-end">
-                <Button onClick={handleAddSchedule} className="text-sm py-1.5">
-                  Salvar bloqueio
+                <Button onClick={handleAddSchedule} disabled={savingSchedule} className="text-sm py-1.5">
+                  {savingSchedule ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar bloqueio"}
                 </Button>
               </div>
             </div>

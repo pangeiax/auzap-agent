@@ -156,6 +156,7 @@ export async function createStaffSchedule(req: Request, res: Response) {
 
   const schedule = await prisma.petshopStaffSchedule.create({
     data: {
+      companyId,
       staffId: id,
       type: body.type ?? null,
       startDate: new Date(body.start_date),
@@ -264,7 +265,7 @@ export async function computeStaffAvailability(
         startDate: { lte: parsedDate },
         OR: [
           { endDate: { gte: parsedDate } },
-          { endDate: null },
+          { endDate: null, startDate: parsedDate },
         ],
       },
     })
