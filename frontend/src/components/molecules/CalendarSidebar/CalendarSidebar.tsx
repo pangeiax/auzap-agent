@@ -145,7 +145,7 @@ export function CalendarSidebar({
                         ? `${event.time} – ${event.timeEnd}`
                         : event.time}
                     </p>
-                    {event.timeEnd && (
+                    {event.timeEnd && event.pairedAppointmentId && (
                       <p className="text-[10px] text-[#727B8E]/80 dark:text-[#8a94a6]/80">
                         Dois horários consecutivos
                       </p>

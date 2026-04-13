@@ -1484,7 +1484,9 @@ export default function CalendarioPage() {
                 </span>
                 <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
                   {selectedEvent.timeEnd
-                    ? `${selectedEvent.time} – ${selectedEvent.timeEnd} (dois horários seguidos)`
+                    ? selectedEvent.pairedAppointmentId
+                      ? `${selectedEvent.time} – ${selectedEvent.timeEnd} (dois horários seguidos)`
+                      : `${selectedEvent.time} – ${selectedEvent.timeEnd}`
                     : selectedEvent.time}
                 </span>
               </div>
