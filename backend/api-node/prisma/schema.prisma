@@ -42,6 +42,7 @@ model SaasCompany {
   lodgingCapacities   PetshopLodgingCapacity[]
   lodgingReservations PetshopLodgingReservation[]
   roomTypes           PetshopRoomType[]
+  staff               PetshopStaff[]
 
   @@map("saas_companies")
 }
@@ -367,7 +368,10 @@ model PetshopAppointment {
   serviceId     Int       @map("service_id")
   slotId        String?   @map("slot_id") @db.Uuid
   scheduleId    Int?      @map("schedule_id")
+  staffId       String?   @map("staff_id") @db.Uuid
   scheduledDate DateTime? @map("scheduled_date") @db.Date
+  startTime     DateTime? @map("start_time") @db.Time
+  endTime       DateTime? @map("end_time") @db.Time
   status        String    @default("pending") @db.VarChar(30)
   confirmed     Boolean   @default(false)
   notes         String?
@@ -384,6 +388,7 @@ model PetshopAppointment {
   service     PetshopService   @relation(fields: [serviceId], references: [id])
   slot        PetshopSlot?     @relation(fields: [slotId], references: [id])
   schedule    PetshopSchedule? @relation(fields: [scheduleId], references: [id])
+  staff       PetshopStaff?    @relation(fields: [staffId], references: [id])
 
   @@index([slotId],       map: "idx_appointments_slot")
   @@index([companyId],    map: "idx_appointments_company")
@@ -392,6 +397,55 @@ model PetshopAppointment {
   @@index([scheduledDate], map: "idx_appointments_date")
   @@index([status],       map: "idx_appointments_status")
   @@map("petshop_appointments")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STAFF — funcionários com jornada semanal
+// ═══════════════════════════════════════════════════════════════
+
+model PetshopStaff {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    Int       @map("company_id")
+  name         String    @db.VarChar(200)
+  role         String?   @db.VarChar(100)
+  specialtyIds String[]  @map("specialty_ids") @db.Uuid
+  daysOfWeek   Int[]     @map("days_of_week")
+  workStart    DateTime  @map("work_start") @db.Time
+  workEnd      DateTime  @map("work_end") @db.Time
+  lunchStart   DateTime? @map("lunch_start") @db.Time
+  lunchEnd     DateTime? @map("lunch_end") @db.Time
+  isActive       Boolean   @default(true) @map("is_active")
+  notes          String?
+  workHoursByDay Json?     @map("work_hours_by_day") @db.JsonB
+  createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime? @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  saasCompany  SaasCompany              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  schedules    PetshopStaffSchedule[]
+  appointments PetshopAppointment[]
+
+  @@index([companyId],             map: "idx_staff_company")
+  @@index([companyId, isActive],   map: "idx_staff_company_active")
+  @@map("petshop_staff")
+}
+
+model PetshopStaffSchedule {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId Int       @map("company_id")
+  staffId   String    @map("staff_id") @db.Uuid
+  type      String?   @db.VarChar(50)
+  startDate DateTime  @map("start_date") @db.Date
+  endDate   DateTime? @map("end_date") @db.Date
+  startTime DateTime? @map("start_time") @db.Time
+  endTime   DateTime? @map("end_time") @db.Time
+  notes     String?
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  staff PetshopStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId],             map: "idx_staff_schedules_staff")
+  @@index([staffId, startDate],  map: "idx_staff_schedules_dates")
+  @@map("petshop_staff_schedules")
 }
 
 model PetshopLodging {

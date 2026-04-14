@@ -12,13 +12,28 @@ import {
 } from './brainPlanConstants'
 import { isUuidString, parseOptionalUuid } from '../../lib/uuidValidation'
 import { cancelPetshopAppointment } from '../appointments/appointmentCancelCore'
-import { computeAvailableSlotsResponse } from '../appointments/availableSlotsQuery'
-import {
-  normalizeHhMm,
-  resolveSlotIdFromDateTimeServicePet,
-} from '../appointments/appointmentSlotResolve'
+import { computeStaffAvailability } from '../staff/staffController'
 
-export { normalizeHhMm }
+export function normalizeHhMm(input: string): string | null {
+  const t = input.trim().toLowerCase().replace(/\s+/g, '')
+  let h: number
+  let min = 0
+  const withColon = t.match(/^(\d{1,2}):(\d{2})$/)
+  const withH = t.match(/^(\d{1,2})h(\d{2})?$/)
+  if (withColon) {
+    h = Number.parseInt(withColon[1]!, 10)
+    min = Number.parseInt(withColon[2]!, 10)
+  } else if (withH) {
+    h = Number.parseInt(withH[1]!, 10)
+    min = withH[2] ? Number.parseInt(withH[2]!, 10) : 0
+  } else if (/^\d{1,2}$/.test(t)) {
+    h = Number.parseInt(t, 10)
+  } else {
+    return null
+  }
+  if (!Number.isFinite(h) || h < 0 || h > 23 || min < 0 || min > 59) return null
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
 
 /** Resolve id numérico do serviço: valida id ou, se inválido, casa por nome (evita rascunho com id inventado). */
 async function resolveActionBrainServiceId(
@@ -132,14 +147,40 @@ async function resolveActionBrainPetId(
   }
 }
 
+/** Resolve slot_id diretamente do banco por data+hora+especialidade do serviço. */
 async function resolveSlotIdFromAvailable(
   companyId: number,
   scheduledDateYmd: string,
   serviceId: number,
-  petIdUuid: string | undefined,
+  _petIdUuid: string | undefined,
   timeRaw: string,
 ): Promise<string | null> {
-  return resolveSlotIdFromDateTimeServicePet(companyId, scheduledDateYmd, serviceId, petIdUuid, timeRaw)
+  const want = normalizeHhMm(timeRaw)
+  if (!want) return null
+  const [year, month, day] = scheduledDateYmd.split('-').map(Number)
+  if (!year || !month || !day) return null
+  const slotDate = new Date(Date.UTC(year, month - 1, day))
+  const [hh, mm] = want.split(':').map(Number)
+  const slotTime = new Date(Date.UTC(1970, 0, 1, hh, mm, 0))
+
+  const service = await prisma.petshopService.findFirst({
+    where: { id: serviceId, companyId },
+    select: { specialtyId: true },
+  })
+  if (!service?.specialtyId) return null
+
+  const slot = await prisma.petshopSlot.findFirst({
+    where: {
+      companyId,
+      specialtyId: service.specialtyId,
+      slotDate,
+      slotTime,
+      isBlocked: false,
+    },
+    select: { id: true, maxCapacity: true, usedCapacity: true },
+  })
+  if (!slot || slot.maxCapacity - slot.usedCapacity <= 0) return null
+  return slot.id
 }
 
 function formatUtcHhMm(d: Date): string {
@@ -730,13 +771,24 @@ export async function executeActionBrainTool(name: string, args: Record<string, 
       if ('error' in resolvedSvc) return resolvedSvc.error
       const service_id = resolvedSvc.id
 
-      const result = await computeAvailableSlotsResponse(companyId, target_date, service_id, pet_id)
-      if ('error' in result) return `Erro: ${result.error}`
+      // Resolve specialty_id from service
+      const svcForSpec = await prisma.petshopService.findFirst({
+        where: { id: service_id, companyId },
+        select: { specialtyId: true },
+      })
+      if (!svcForSpec?.specialtyId) return 'Serviço não tem especialidade vinculada.'
+
+      const result = await computeStaffAvailability(companyId, {
+        specialty_id: svcForSpec.specialtyId,
+        date: target_date,
+        service_id: String(service_id),
+        pet_id,
+      })
       return JSON.stringify({
         type: 'available_times',
         date: result.date,
         available_times: result.available_slots,
-        total_available: result.total_available,
+        total_available: result.available_slots.length,
       })
     }
 

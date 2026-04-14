@@ -15,11 +15,11 @@ def build_sales_agent(context: dict, router_ctx: dict) -> Agent:
     if router_says_conversation_only(router_ctx):
         tools = []
     else:
-        # Sales needs get_services + set_pet_size (to collect porte for pricing)
+        # Sales needs get_services (catalog) + get_client_pets (resolve pet size for pricing)
         get_services = build_booking_tools(company_id, client_id)[1]
         client_tools = build_client_tools(company_id, client_id)
-        set_pet_size = client_tools[2]
-        tools = [get_services, set_pet_size]
+        get_client_pets = client_tools[0]
+        tools = [get_services, get_client_pets]
 
     return Agent(
         name="Sales Agent",

@@ -99,7 +99,7 @@ def build_router_tools_instruction_block(router_ctx: dict) -> str:
             "chame **get_client_pets** mesmo com [none] — o prompt do agente manda.\n"
         )
     legend = (
-        "pets=get_client_pets/set_pet_size/create_pet | services=get_services | "
+        "pets=get_client_pets/create_pet/update_pet_size | services=get_services | "
         "slots=get_available_times | appointments=compromissos futuros/cancel/remarcar | "
         "lodging=ferramentas de hotel/creche"
     )

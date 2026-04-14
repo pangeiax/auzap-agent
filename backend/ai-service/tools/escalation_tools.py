@@ -28,6 +28,8 @@ def build_escalation_tools(company_id: int, client_id: str) -> list:
             return {"success": False, "message": "summary é obrigatório para o escalonamento."}
         if not last_message or not last_message.strip():
             return {"success": False, "message": "last_message é obrigatório para o escalonamento."}
+        if not client_id or not str(client_id).strip():
+            return {"success": False, "message": "client_id não identificado. Não é possível escalar."}
 
         logger.info("escalate_to_human | client_id=%s | summary=%.100r", client_id, summary)
 

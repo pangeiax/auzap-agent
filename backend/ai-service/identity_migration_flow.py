@@ -674,9 +674,27 @@ async def try_handle_identity_migration(
             )
             pets, appts = _fetch_pets_and_upcoming(company_id, str(client_id))
             await _redis_set_completed_best_effort(company_id, client_phone)
+            if pets:
+                return {
+                    "reply": _format_found_reply(pets, appts),
+                    "router_ctx": _router_ctx_after_merge(has_pets=True),
+                    "agent_used": "identity_migration",
+                    "stage": "IDENTITY_MATCHED",
+                }
+            # Merge sem pets — pedir cadastro de pet
+            intro = (
+                "Encontramos seu cadastro na nossa base! 🎉\n"
+                "Cadastro atualizado com sucesso!\n\n"
+                "Agora vamos cadastrar seu(s) pet(s). Me passa os dados:\n\n"
+                "Nome:\n"
+                "Espécie: (cachorro ou gato)\n"
+                "Raça:\n"
+                "Porte: P (até 7kg) | M (7-15kg) | G (15-25kg) | GG (acima de 25kg)\n\n"
+                "Se tiver mais de um pet, envie os dados de cada um separadamente 😉"
+            )
             return {
-                "reply": _format_found_reply(pets, appts),
-                "router_ctx": _router_ctx_after_merge(has_pets=len(pets) > 0),
+                "reply": intro,
+                "router_ctx": _router_ctx_onboarding_pet(None),
                 "agent_used": "identity_migration",
                 "stage": "IDENTITY_MATCHED",
             }
@@ -699,8 +717,13 @@ async def try_handle_identity_migration(
                 "stage": "IDENTITY_MATCHED",
             }
         intro = (
-            "Perfeito, cadastro atualizado! 🐾 Agora vamos cadastrar seu pet por aqui — "
-            "me fala o nome dele(a) e se é cachorro ou gato para a gente seguir."
+            "Perfeito, cadastro atualizado! 🐾 Agora vamos cadastrar seu pet.\n\n"
+            "Me passa os dados dele(a):\n\n"
+            "Nome:\n"
+            "Espécie: (cachorro ou gato)\n"
+            "Raça:\n"
+            "Porte: P (até 7kg) | M (7-15kg) | G (15-25kg) | GG (acima de 25kg)\n\n"
+            "Se tiver mais de um pet, envie os dados de cada um separadamente 😉"
         )
         return {
             "reply": intro,

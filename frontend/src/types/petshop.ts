@@ -58,13 +58,4 @@ export interface CapacityRule {
   isActive: boolean
 }
 
-export interface PetshopSlot {
-  id: string
-  companyId: number
-  specialtyId: string
-  slotDate: string
-  slot_time: string
-  maxCapacity: number
-  usedCapacity: number
-  vagas_restantes?: number
-}
+
