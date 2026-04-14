@@ -711,12 +711,12 @@ def _build_staff_available_slots(
             # Não mostrar horários já passados (horário de Brasília)
             slot_dt = datetime.combine(parsed_date, datetime.strptime(start_str, '%H:%M').time())
             if slot_dt <= now_dt:
-                cursor += duration_min
+                cursor += 15
                 continue
 
             # Não mostrar horários que o pet já tem compromisso
             if start_str in pet_occupied_starts:
-                cursor += duration_min
+                cursor += 15
                 continue
 
             conflict = any(cursor < b['end'] and slot_end > b['start'] for b in busy)
@@ -737,7 +737,7 @@ def _build_staff_available_slots(
                     ),
                 }
 
-            cursor += duration_min
+            cursor += 15
 
     return slots_by_time
 

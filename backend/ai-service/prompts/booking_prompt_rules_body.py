@@ -76,13 +76,12 @@ _BK_PASSO3 = """PASSO 3 — DATA E HORÁRIO
 • Só get_available_times com pet_id e data definidos. Sem «Data:» no ESTADO ATUAL → pergunte.
 • Params: specialty_id, target_date (YYYY-MM-DD), service_id (número), pet_id (UUID).
 • Disponibilidade aberta ("quando tem?") → get_available_times para cada dia do período; lista consolidada.
-• Liste horários como em available_times. Pedido de tudo → todos os itens. Só "opções" → 3 primeiros + pergunte.
+• Apresentação dos horários: NUNCA liste cada slot individualmente — resuma como faixas contínuas. Exemplo: "Temos horários das 09h às 13h e das 14h15 às 16h." Se houver intervalos (almoço, bloqueios), separe em faixas. Se o cliente pedir horário específico (ex: "11h45"), confirme se existe na lista; senão ofereça o mais próximo disponível. Seja natural e fluido, como se estivesse conversando pelo WhatsApp.
 • excluded_due_to_minimum_notice_or_past: horários já passados hoje — explique se perguntarem.
 • excluded_due_to_same_pet_already_booked_at_start: pet já ocupa esse início.
 • DATA SEM VAGA: na mesma rodada busque outros dias até ter horários reais. PROIBIDO parar só em "não tem".
 • Remarcação mesma data: get_available_times com ignore_appointment_ids (id + paired se G/GG).
 • G/GG + uses_double_slot: só slots com second_slot_time; slot_id = bloco inicial.
-• Horário quebrado (11h45): só confirme se existir na lista; senão ofereça slot real mais próximo.
 • NUNCA diga "disponível" sem lista da tool ou success=true."""
 
 _BK_PASSO4 = """PASSO 4 — CONFIRMAÇÃO
