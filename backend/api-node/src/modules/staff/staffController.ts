@@ -337,7 +337,7 @@ export async function computeStaffAvailability(
         })
       }
 
-      cursor += durationMinutes
+      cursor += 15
     }
   }
 

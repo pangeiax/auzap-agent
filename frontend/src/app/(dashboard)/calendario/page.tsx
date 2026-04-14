@@ -335,6 +335,7 @@ export default function CalendarioPage() {
   const [staffSlots, setStaffSlots] = useState<StaffSlot[]>([]);
   const [staffSlotsLoading, setStaffSlotsLoading] = useState(false);
   const [staffSlotsError, setStaffSlotsError] = useState<string | null>(null);
+  const [staffFilter, setStaffFilter] = useState<string | null>(null);
 
   const mergedEvents = useMemo(
     () =>
@@ -401,6 +402,7 @@ export default function CalendarioPage() {
     if (!isModalOpen || !formData.date || !formData.serviceId) {
       setStaffSlots([]);
       setStaffSlotsError(null);
+      setStaffFilter(null);
       return;
     }
 
@@ -416,12 +418,14 @@ export default function CalendarioPage() {
     if (!specialtyId) {
       setStaffSlots([]);
       setStaffSlotsError(null);
+      setStaffFilter(null);
       return;
     }
 
     let cancelled = false;
     setStaffSlotsLoading(true);
     setStaffSlotsError(null);
+    setStaffFilter(null);
 
     staffService
       .getAvailability({
@@ -1316,8 +1320,47 @@ export default function CalendarioPage() {
                   <p className="mb-2 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
                     Horário disponível <span className="text-red-500">*</span>
                   </p>
+
+                  {/* Mini filtro por profissional */}
+                  {(() => {
+                    const uniqueStaff = Array.from(
+                      new Map(staffSlots.map(s => [s.staff_id, s.staff_name])).entries()
+                    );
+                    return uniqueStaff.length > 1 ? (
+                      <div className="mb-3 flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setStaffFilter(null)}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                            staffFilter === null
+                              ? "border-[#1E62EC] bg-[#1E62EC] text-white"
+                              : "border-[#727B8E]/30 text-[#727B8E] hover:border-[#1E62EC] dark:border-[#40485A] dark:text-[#8a94a6]"
+                          }`}
+                        >
+                          Todos
+                        </button>
+                        {uniqueStaff.map(([id, name]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setStaffFilter(id)}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                              staffFilter === id
+                                ? "border-[#1E62EC] bg-[#1E62EC] text-white"
+                                : "border-[#727B8E]/30 text-[#727B8E] hover:border-[#1E62EC] dark:border-[#40485A] dark:text-[#8a94a6]"
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
+
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {staffSlots.map((slot, idx) => {
+                    {staffSlots
+                      .filter(slot => !staffFilter || slot.staff_id === staffFilter)
+                      .map((slot, idx) => {
                       const slotKey = `${slot.staff_id}|${slot.start_time}`;
                       const selectedKey = `${formData.staffId}|${formData.startTime}`;
                       const isSelected = slotKey === selectedKey;
