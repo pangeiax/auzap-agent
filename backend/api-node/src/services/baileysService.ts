@@ -103,20 +103,17 @@ export async function startBaileysSession(
       if (activeSockets.get(companyIdStr) !== socket) return
 
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+      const wasAuthenticated = !!socket.user?.id
+      // 515 = stream restart (normal após pairing ou reconexão) — sempre reconectar
+      const isRestartRequired = statusCode === 515 || statusCode === DisconnectReason.restartRequired
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && (wasAuthenticated || isRestartRequired)
 
-      console.log(`[Baileys][company:${companyIdStr}] Desconectado (code: ${statusCode}). Reconectar: ${shouldReconnect}`)
+      console.log(`[Baileys][company:${companyIdStr}] Desconectado (code: ${statusCode}). Autenticado: ${wasAuthenticated}. Restart: ${isRestartRequired}. Reconectar: ${shouldReconnect}`)
       clearTypingIntervalsForCompany(companyIdStr)
 
       if (shouldReconnect) {
-        // Se o socket já estava autenticado (tem user.id), o close pode ser transitório
-        // (ex: erro de init queries). Nesse caso, reconectar sem mudar status para "reconnecting"
-        const wasAuthenticated = !!socket.user?.id
-        if (!wasAuthenticated) {
-          await upsertSession(companyId, 'reconnecting')
-        } else {
-          console.log(`[Baileys][company:${companyIdStr}] Close transitório (socket autenticado). Reconectando sem mudar status.`)
-        }
+        // Socket autenticado ou restart necessário — reconecta
+        console.log(`[Baileys][company:${companyIdStr}] Reconectando (${isRestartRequired ? 'restart required' : 'close transitório'})...`)
         // Remove listeners do socket antigo mas não chama .end() (evita loop de close events)
         try {
           socket.ev.removeAllListeners('connection.update')
@@ -124,11 +121,18 @@ export async function startBaileysSession(
           socket.ev.removeAllListeners('messages.upsert')
         } catch {}
         activeSockets.delete(companyIdStr)
-        setTimeout(() => startBaileysSession(companyIdStr), 5000)
-      } else {
+        setTimeout(() => startBaileysSession(companyIdStr), isRestartRequired ? 1000 : 5000)
+      } else if (statusCode === DisconnectReason.loggedOut) {
+        // Logout explícito — limpa sessão
+        console.log(`[Baileys][company:${companyIdStr}] Logout. Removendo sessão.`)
         await upsertSession(companyId, 'disconnected')
         cleanupExistingSocket(companyIdStr)
         fs.rmSync(sessionDir, { recursive: true, force: true })
+      } else {
+        // Não autenticado (QR expirou, etc.) — para de reconectar
+        console.log(`[Baileys][company:${companyIdStr}] Sessão não autenticada. Parando reconexão.`)
+        await upsertSession(companyId, 'disconnected')
+        cleanupExistingSocket(companyIdStr)
       }
     }
 
@@ -152,8 +156,19 @@ export async function startBaileysSession(
     // Ignora eventos de sockets que já foram substituídos
     if (activeSockets.get(companyIdStr) !== socket) return
 
+    const now = Math.floor(Date.now() / 1000)
+
     for (const msg of messages) {
       if (!msg.message) continue
+
+      // Ignora mensagens antigas (offline/histórico) — evita duplicatas na reconexão
+      const msgTimestamp = typeof msg.messageTimestamp === 'number'
+        ? msg.messageTimestamp
+        : Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0)
+
+      if (msgTimestamp > 0 && (now - msgTimestamp) > 60) {
+        continue
+      }
 
       if (msg.key.fromMe) {
         // Mensagem enviada pelo próprio número (WhatsApp direto, celular, etc.)

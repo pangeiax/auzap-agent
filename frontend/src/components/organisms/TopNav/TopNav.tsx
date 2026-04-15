@@ -77,6 +77,7 @@ export function TopNav({ linked = true, onMenuClick }: TopNavProps) {
   const { pathname } = useLocation();
   const { theme, toggleTheme } = useTheme();
 
+
   return (
     <Tooltip.Provider delayDuration={200}>
       <div className="flex w-full items-center justify-between gap-2 px-1">

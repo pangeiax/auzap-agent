@@ -115,7 +115,7 @@ export async function getMyStatus(req: Request, res: Response) {
     return res.json({ status: 'disconnected', phone: null })
   }
 
-  // Reconciliar: se o banco diz "reconnecting" mas o socket está ativo e autenticado, corrigir
+  // Reconciliar: corrige divergência entre estado do banco e socket real
   let status = session.status
   const socket = getSocket(String(companyId))
 
@@ -126,8 +126,14 @@ export async function getMyStatus(req: Request, res: Response) {
       where: { companyId },
       data: { status: 'connected' },
     }).catch(() => {})
-  } else if (!socket && status === 'connected') {
+  } else if (!socket && (status === 'connected' || status === 'reconnecting')) {
+    // Sem socket ativo mas banco diz conectado/reconectando — marcar como desconectado
+    // Nota: 'connecting' não entra aqui pois pode ser reconexão em andamento (ex: restart 515)
     status = 'disconnected'
+    prisma.whatsappSession.update({
+      where: { companyId },
+      data: { status: 'disconnected' },
+    }).catch(() => {})
   }
 
   return res.json({
