@@ -151,8 +151,6 @@ export async function startBaileysSession(
 
   // ── Evento: mensagens recebidas ───────────
   socket.ev.on('messages.upsert', async ({ messages, type }: any) => {
-    if (type !== 'notify') return
-
     // Ignora eventos de sockets que já foram substituídos
     if (activeSockets.get(companyIdStr) !== socket) return
 
@@ -161,22 +159,35 @@ export async function startBaileysSession(
     for (const msg of messages) {
       if (!msg.message) continue
 
+      if (msg.key.fromMe) {
+        // Mensagem enviada pelo próprio número (WhatsApp direto, celular, etc.)
+        // Aceita qualquer type (notify, append, etc.) para capturar mensagens staff
+        // Mas aplica filtro de timestamp para evitar duplicatas na reconexão
+        const fromMeTimestamp = typeof msg.messageTimestamp === 'number'
+          ? msg.messageTimestamp
+          : Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0)
+
+        if (fromMeTimestamp > 0 && (now - fromMeTimestamp) > 60) {
+          continue
+        }
+
+        try {
+          await handleOutgoingMessage(companyId, msg)
+        } catch (err) {
+          console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar mensagem enviada:`, err)
+        }
+        continue
+      }
+
+      // Mensagens recebidas: apenas type 'notify' (ignora histórico/append)
+      if (type !== 'notify') continue
+
       // Ignora mensagens antigas (offline/histórico) — evita duplicatas na reconexão
       const msgTimestamp = typeof msg.messageTimestamp === 'number'
         ? msg.messageTimestamp
         : Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0)
 
       if (msgTimestamp > 0 && (now - msgTimestamp) > 60) {
-        continue
-      }
-
-      if (msg.key.fromMe) {
-        // Mensagem enviada pelo próprio número (WhatsApp direto, celular, etc.)
-        try {
-          await handleOutgoingMessage(companyId, msg)
-        } catch (err) {
-          console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar mensagem enviada:`, err)
-        }
         continue
       }
 
