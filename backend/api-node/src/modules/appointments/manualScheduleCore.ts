@@ -1,14 +1,38 @@
 /**
  * Criação de agendamento manual (mesma regra que POST /appointments/schedule), reutilizada pelo segundo cérebro.
  */
+import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { isUuidString } from '../../lib/uuidValidation'
-import {
-  findNextSlotInOrderedDay,
-  orderedSlotsSameDaySpecialty,
-  requiresConsecutiveSlotsBooking,
-  type SlotRow,
-} from './availableSlotsQuery'
+
+type SlotRow = {
+  id: string
+  specialtyId: string
+  slotDate: Date
+  slotTime: Date
+  maxCapacity: number
+  usedCapacity: number
+  isBlocked: boolean
+}
+
+function orderedSlotsSameDaySpecialty(slots: SlotRow[]): SlotRow[] {
+  return [...slots].sort((a, b) => a.slotTime.getTime() - b.slotTime.getTime())
+}
+
+function findNextSlotInOrderedDay(ordered: SlotRow[], currentId: string): SlotRow | null {
+  const idx = ordered.findIndex((s) => s.id === currentId)
+  if (idx < 0 || idx >= ordered.length - 1) return null
+  return ordered[idx + 1] ?? null
+}
+
+function requiresConsecutiveSlotsBooking(args: {
+  durationMultiplierLarge: Prisma.Decimal | null | undefined
+  petSize: string | null | undefined
+}): boolean {
+  if (args.durationMultiplierLarge == null) return false
+  const s = (args.petSize ?? '').trim().toUpperCase()
+  return Number(args.durationMultiplierLarge) > 1 && (s === 'G' || s === 'GG')
+}
 
 const DOUBLE_PAIR_PREFIX = '__DOUBLE_PAIR__:'
 

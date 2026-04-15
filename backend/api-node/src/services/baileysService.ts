@@ -10,7 +10,7 @@ import path from 'path'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 import { prisma } from '../lib/prisma'
-import { handleIncomingMessage } from '../modules/webhook/messageHandle'
+import { handleIncomingMessage, handleOutgoingMessage } from '../modules/webhook/messageHandle'
 
 // ─────────────────────────────────────────
 // Mapa de sockets ativos em memória
@@ -33,6 +33,25 @@ function clearTypingIntervalsForCompany(companyIdStr: string): void {
 }
 
 // ─────────────────────────────────────────
+// Cleanup: fecha socket antigo e remove listeners
+// ─────────────────────────────────────────
+function cleanupExistingSocket(companyIdStr: string): void {
+  const oldSocket = activeSockets.get(companyIdStr)
+  if (oldSocket) {
+    try {
+      oldSocket.ev.removeAllListeners('connection.update')
+      oldSocket.ev.removeAllListeners('creds.update')
+      oldSocket.ev.removeAllListeners('messages.upsert')
+      oldSocket.end(undefined)
+    } catch (err) {
+      console.warn(`[Baileys][company:${companyIdStr}] Erro ao limpar socket antigo:`, err)
+    }
+    activeSockets.delete(companyIdStr)
+  }
+  clearTypingIntervalsForCompany(companyIdStr)
+}
+
+// ─────────────────────────────────────────
 // Inicia sessão Baileys para uma company
 // ─────────────────────────────────────────
 export async function startBaileysSession(
@@ -42,6 +61,9 @@ export async function startBaileysSession(
   const companyId = Number(companyIdStr)
   const sessionsPath = process.env.BAILEYS_SESSIONS_PATH || './sessions'
   const sessionDir = path.join(sessionsPath, companyIdStr)
+
+  // Limpa socket anterior antes de criar novo (evita listeners duplicados e QR múltiplo)
+  cleanupExistingSocket(companyIdStr)
 
   if (!fs.existsSync(sessionDir)) {
     fs.mkdirSync(sessionDir, { recursive: true })
@@ -67,6 +89,9 @@ export async function startBaileysSession(
   socket.ev.on('connection.update', async (update: any) => {
     const { connection, lastDisconnect, qr } = update
 
+    // Ignora eventos de sockets que já foram substituídos
+    if (activeSockets.get(companyIdStr) !== socket) return
+
     if (qr && onQR) {
       console.log(`[Baileys][company:${companyIdStr}] QR gerado`)
       onQR(qr)
@@ -74,17 +99,35 @@ export async function startBaileysSession(
     }
 
     if (connection === 'close') {
+      // Verifica novamente se este socket ainda é o ativo (pode ter mudado durante async)
+      if (activeSockets.get(companyIdStr) !== socket) return
+
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut
 
-      console.log(`[Baileys][company:${companyIdStr}] Desconectado. Reconectar: ${shouldReconnect}`)
-      await upsertSession(companyId, 'disconnected')
+      console.log(`[Baileys][company:${companyIdStr}] Desconectado (code: ${statusCode}). Reconectar: ${shouldReconnect}`)
       clearTypingIntervalsForCompany(companyIdStr)
 
       if (shouldReconnect) {
-        setTimeout(() => startBaileysSession(companyIdStr), 3000)
-      } else {
+        // Se o socket já estava autenticado (tem user.id), o close pode ser transitório
+        // (ex: erro de init queries). Nesse caso, reconectar sem mudar status para "reconnecting"
+        const wasAuthenticated = !!socket.user?.id
+        if (!wasAuthenticated) {
+          await upsertSession(companyId, 'reconnecting')
+        } else {
+          console.log(`[Baileys][company:${companyIdStr}] Close transitório (socket autenticado). Reconectando sem mudar status.`)
+        }
+        // Remove listeners do socket antigo mas não chama .end() (evita loop de close events)
+        try {
+          socket.ev.removeAllListeners('connection.update')
+          socket.ev.removeAllListeners('creds.update')
+          socket.ev.removeAllListeners('messages.upsert')
+        } catch {}
         activeSockets.delete(companyIdStr)
+        setTimeout(() => startBaileysSession(companyIdStr), 5000)
+      } else {
+        await upsertSession(companyId, 'disconnected')
+        cleanupExistingSocket(companyIdStr)
         fs.rmSync(sessionDir, { recursive: true, force: true })
       }
     }
@@ -93,7 +136,9 @@ export async function startBaileysSession(
       const jid = socket.user?.id || ''
       const phone = jid.split(':')[0]
       console.log(`[Baileys][company:${companyIdStr}] Conectado como ${phone}`)
-      await upsertSession(companyId, 'connected', phone)
+      await upsertSession(companyId, 'connected', phone).catch(err =>
+        console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar status connected:`, err)
+      )
     }
   })
 
@@ -104,8 +149,21 @@ export async function startBaileysSession(
   socket.ev.on('messages.upsert', async ({ messages, type }: any) => {
     if (type !== 'notify') return
 
+    // Ignora eventos de sockets que já foram substituídos
+    if (activeSockets.get(companyIdStr) !== socket) return
+
     for (const msg of messages) {
-      if (msg.key.fromMe || !msg.message) continue
+      if (!msg.message) continue
+
+      if (msg.key.fromMe) {
+        // Mensagem enviada pelo próprio número (WhatsApp direto, celular, etc.)
+        try {
+          await handleOutgoingMessage(companyId, msg)
+        } catch (err) {
+          console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar mensagem enviada:`, err)
+        }
+        continue
+      }
 
       try {
         await handleIncomingMessage(companyId, socket, msg)
@@ -217,12 +275,15 @@ export function getSocket(companyIdStr: string) {
 // Desconecta sessão
 // ─────────────────────────────────────────
 export async function disconnectSession(companyIdStr: string): Promise<void> {
-  clearTypingIntervalsForCompany(companyIdStr)
   const socket = activeSockets.get(companyIdStr)
   if (socket) {
-    await socket.logout()
-    activeSockets.delete(companyIdStr)
+    try {
+      await socket.logout()
+    } catch (err) {
+      console.warn(`[Baileys][company:${companyIdStr}] Erro no logout:`, err)
+    }
   }
+  cleanupExistingSocket(companyIdStr)
 }
 
 // ─────────────────────────────────────────
@@ -230,12 +291,17 @@ export async function disconnectSession(companyIdStr: string): Promise<void> {
 // ─────────────────────────────────────────
 export async function restoreActiveSessions(): Promise<void> {
   const sessions = await prisma.whatsappSession.findMany({
-    where: { status: 'connected' },
+    where: { status: { in: ['connected', 'reconnecting'] } },
   })
 
   for (const session of sessions) {
-    console.log(`[Baileys] Restaurando sessão da company ${session.companyId}`)
-    await startBaileysSession(String(session.companyId))
+    const companyIdStr = String(session.companyId)
+    if (activeSockets.has(companyIdStr)) {
+      console.log(`[Baileys] Sessão da company ${companyIdStr} já ativa, pulando restauração`)
+      continue
+    }
+    console.log(`[Baileys] Restaurando sessão da company ${companyIdStr}`)
+    await startBaileysSession(companyIdStr)
   }
 }
 

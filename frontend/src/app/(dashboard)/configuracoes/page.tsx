@@ -43,7 +43,6 @@ import {
   serviceService,
   whatsappService,
   paymentService,
-  settingsService,
   specialtyService,
 } from "@/services";
 import {
@@ -53,25 +52,13 @@ import {
   type RoomType,
   type CreateRoomTypeData,
 } from "@/services/lodgingService";
-import type { AgendaDay } from "@/services/settingsService";
 import { useAuthContext } from "@/contexts/AuthContext";
+import { AbaFuncionarios } from "./AbaFuncionarios";
 import { AbaAgenda } from "./AbaAgenda";
 import type { Petshop } from "@/types";
 import type { User as AuthUser } from "@/types/auth";
 import type { Specialty } from "@/types/petshop";
 import type { Service } from "@/types";
-import type { CapacityRule } from "@/types/petshop";
-
-// ─── Hourly capacity helpers ──────────────────────────────────────────────────
-const DAY_CONFIGS_ORDERED = [
-  { dayOfWeek: 1, label: "Seg" },
-  { dayOfWeek: 2, label: "Ter" },
-  { dayOfWeek: 3, label: "Qua" },
-  { dayOfWeek: 4, label: "Qui" },
-  { dayOfWeek: 5, label: "Sex" },
-  { dayOfWeek: 6, label: "Sáb" },
-  { dayOfWeek: 0, label: "Dom" },
-] as const;
 
 const BH_DAY_NAMES = [
   "sunday",
@@ -82,323 +69,6 @@ const BH_DAY_NAMES = [
   "friday",
   "saturday",
 ] as const;
-
-type HourSlotConfig = { enabled: boolean; capacity: number };
-type DaySlotConfig = Record<string, HourSlotConfig>;
-
-function getDayBHInfo(
-  bh: Petshop["businessHours"] | undefined,
-  dayOfWeek: number,
-): { isOpen: boolean; open?: string; close?: string } {
-  const dayName = BH_DAY_NAMES[dayOfWeek];
-  if (!bh || !dayName) return { isOpen: false };
-  const entry = bh[dayName];
-  if (!entry) return { isOpen: false };
-  if (typeof entry === "string") {
-    if (entry === "closed") return { isOpen: false };
-    const [open, close] = entry.split("-");
-    if (!open || !close) return { isOpen: false };
-    return { isOpen: true, open, close };
-  }
-  if (typeof entry === "object") {
-    if ((entry as any).closed) return { isOpen: false };
-    const open = (entry as any).open as string | undefined;
-    const close = (entry as any).close as string | undefined;
-    if (open && close) return { isOpen: true, open, close };
-  }
-  return { isOpen: false };
-}
-
-function generateHourSlots(open: string, close: string): string[] {
-  const p1 = open.split(":").map(Number);
-  const p2 = close.split(":").map(Number);
-  const openMin = (p1[0] ?? 8) * 60 + (p1[1] ?? 0);
-  const closeMin = (p2[0] ?? 18) * 60 + (p2[1] ?? 0);
-  const slots: string[] = [];
-  for (let m = openMin; m < closeMin; m += 60) {
-    slots.push(
-      `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`,
-    );
-  }
-  return slots;
-}
-
-function buildInitialSlotConfig(
-  bh: Petshop["businessHours"] | undefined,
-  rules: CapacityRule[],
-): Record<number, DaySlotConfig> {
-  const rulesMap = new Map<string, CapacityRule>();
-  for (const r of rules) {
-    rulesMap.set(`${r.dayOfWeek}|${r.slot_time}`, r);
-  }
-  const result: Record<number, DaySlotConfig> = {};
-  for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
-    const bhInfo = getDayBHInfo(bh, dayOfWeek);
-    if (!bhInfo.isOpen || !bhInfo.open || !bhInfo.close) {
-      result[dayOfWeek] = {};
-      continue;
-    }
-    const hours = generateHourSlots(bhInfo.open, bhInfo.close);
-    const dayConfig: DaySlotConfig = {};
-    for (const h of hours) {
-      const rule = rulesMap.get(`${dayOfWeek}|${h}`);
-      dayConfig[h] = {
-        enabled: !!(rule?.isActive && (rule.maxCapacity ?? 0) > 0),
-        capacity:
-          rule?.maxCapacity && rule.maxCapacity > 0 ? rule.maxCapacity : 1,
-      };
-    }
-    result[dayOfWeek] = dayConfig;
-  }
-  return result;
-}
-
-function slotConfigToRules(
-  config: Record<number, DaySlotConfig>,
-): { day_of_week: number; slot_time: string; max_capacity: number }[] {
-  const rules: {
-    day_of_week: number;
-    slot_time: string;
-    max_capacity: number;
-  }[] = [];
-  for (const [dow, slots] of Object.entries(config)) {
-    for (const [time, slot] of Object.entries(slots)) {
-      if (slot.enabled) {
-        rules.push({
-          day_of_week: Number(dow),
-          slot_time: time,
-          max_capacity: slot.capacity,
-        });
-      }
-    }
-  }
-  return rules;
-}
-
-function HourlyCapacityEditor({
-  businessHours,
-  config,
-  onChange,
-  disabled,
-}: {
-  businessHours: Petshop["businessHours"] | undefined;
-  config: Record<number, DaySlotConfig>;
-  onChange: (c: Record<number, DaySlotConfig>) => void;
-  disabled?: boolean;
-}) {
-  const [defaultCap, setDefaultCap] = useState(2);
-
-  const updateSlot = (
-    dow: number,
-    time: string,
-    field: keyof HourSlotConfig,
-    value: boolean | number,
-  ) => {
-    const daySlots = config[dow] ?? {};
-    onChange({
-      ...config,
-      [dow]: {
-        ...daySlots,
-        [time]: {
-          ...(daySlots[time] ?? { enabled: false, capacity: 1 }),
-          [field]: value,
-        },
-      },
-    });
-  };
-  const toggleAllInDay = (dow: number, enabled: boolean) => {
-    const daySlots = config[dow] ?? {};
-    onChange({
-      ...config,
-      [dow]: Object.fromEntries(
-        Object.entries(daySlots).map(([t, s]) => [
-          t,
-          { enabled, capacity: enabled ? defaultCap : s.capacity },
-        ]),
-      ),
-    });
-  };
-  const applyToEnabled = () => {
-    const next: Record<number, DaySlotConfig> = {};
-    for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
-      const daySlots = config[dayOfWeek] ?? {};
-      next[dayOfWeek] = Object.fromEntries(
-        Object.entries(daySlots).map(([t, s]) => [
-          t,
-          { ...s, capacity: s.enabled ? defaultCap : s.capacity },
-        ]),
-      );
-    }
-    onChange(next);
-  };
-  const enableAllAndApply = () => {
-    const next: Record<number, DaySlotConfig> = {};
-    for (const { dayOfWeek } of DAY_CONFIGS_ORDERED) {
-      const bhInfo = getDayBHInfo(businessHours, dayOfWeek);
-      if (!bhInfo.isOpen) {
-        next[dayOfWeek] = config[dayOfWeek] ?? {};
-        continue;
-      }
-      const daySlots = config[dayOfWeek] ?? {};
-      next[dayOfWeek] = Object.fromEntries(
-        Object.entries(daySlots).map(([t]) => [
-          t,
-          { enabled: true, capacity: defaultCap },
-        ]),
-      );
-    }
-    onChange(next);
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#727B8E]/10 dark:border-[#40485A] bg-[#F4F6F9] dark:bg-[#212225] px-4 py-3">
-        <div>
-          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[#727B8E]">
-            Capacidade padrão
-          </p>
-          <input
-            type="number"
-            min="1"
-            max="99"
-            value={defaultCap}
-            disabled={disabled}
-            onChange={(e) => setDefaultCap(parseInt(e.target.value) || 1)}
-            className="w-16 rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-2 py-1.5 text-sm text-center text-[#434A57] dark:text-[#f5f9fc] focus:border-[#1E62EC] focus:outline-none disabled:opacity-40"
-          />
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={applyToEnabled}
-            className="rounded-lg border border-[#727B8E]/20 bg-white dark:bg-[#1A1B1D] px-3 py-1.5 text-xs font-medium text-[#434A57] dark:text-[#f5f9fc] hover:border-[#727B8E]/40 transition-colors disabled:opacity-40"
-          >
-            Aplicar nos ativos
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={enableAllAndApply}
-            className="rounded-lg border border-[#1E62EC]/25 bg-[#1E62EC]/10 px-3 py-1.5 text-xs font-medium text-[#1E62EC] hover:bg-[#1E62EC]/20 transition-colors disabled:opacity-40"
-          >
-            Habilitar todos
-          </button>
-        </div>
-      </div>
-
-      {DAY_CONFIGS_ORDERED.map(({ dayOfWeek, label }) => {
-        const bhInfo = getDayBHInfo(businessHours, dayOfWeek);
-        const daySlots = config[dayOfWeek] ?? {};
-        const hours = Object.keys(daySlots).sort();
-        const enabledCount = hours.filter((h) => daySlots[h]?.enabled).length;
-
-        return (
-          <div
-            key={dayOfWeek}
-            className={cn(
-              "rounded-lg border border-[#727B8E]/10 dark:border-[#40485A] p-3",
-              !bhInfo.isOpen && "opacity-40",
-            )}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="w-7 shrink-0 text-sm font-semibold text-[#434A57] dark:text-[#f5f9fc]">
-                {label}
-              </span>
-              {!bhInfo.isOpen ? (
-                <span className="text-xs text-[#727B8E]">
-                  Fechado (horário comercial)
-                </span>
-              ) : (
-                <>
-                  <span className="text-xs text-[#727B8E]">
-                    {bhInfo.open}–{bhInfo.close}
-                  </span>
-                  <span className="ml-auto flex items-center gap-1.5">
-                    {enabledCount > 0 && (
-                      <span className="rounded-full bg-[#1E62EC]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#1E62EC]">
-                        {enabledCount} ativo{enabledCount !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => toggleAllInDay(dayOfWeek, true)}
-                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-[#1E62EC] hover:bg-[#1E62EC]/10 transition-colors disabled:opacity-40"
-                    >
-                      Todos
-                    </button>
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => toggleAllInDay(dayOfWeek, false)}
-                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-[#727B8E] hover:bg-[#727B8E]/10 transition-colors disabled:opacity-40"
-                    >
-                      Nenhum
-                    </button>
-                  </span>
-                </>
-              )}
-            </div>
-
-            {bhInfo.isOpen && hours.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {hours.map((h) => {
-                  const slot = daySlots[h] ?? { enabled: false, capacity: 1 };
-                  return (
-                    <div
-                      key={h}
-                      className={cn(
-                        "flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors",
-                        slot.enabled
-                          ? "border-[#1E62EC]/40 bg-[#1E62EC]/10 text-[#1E62EC]"
-                          : "border-[#727B8E]/15 bg-[#F4F6F9] dark:bg-[#212225] text-[#727B8E]",
-                      )}
-                    >
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={() =>
-                          updateSlot(dayOfWeek, h, "enabled", !slot.enabled)
-                        }
-                        className="font-medium disabled:cursor-not-allowed"
-                        title={slot.enabled ? "Desativar" : "Ativar"}
-                      >
-                        {h}
-                      </button>
-                      {slot.enabled && (
-                        <>
-                          <span className="text-[#1E62EC]/40">|</span>
-                          <input
-                            type="number"
-                            min="1"
-                            max="99"
-                            value={slot.capacity}
-                            disabled={disabled}
-                            onChange={(e) =>
-                              updateSlot(
-                                dayOfWeek,
-                                h,
-                                "capacity",
-                                parseInt(e.target.value) || 1,
-                              )
-                            }
-                            className="w-7 bg-transparent text-center text-xs outline-none disabled:cursor-not-allowed"
-                            title="Vagas"
-                          />
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function settingsEntityInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -423,10 +93,6 @@ function SettingsProfileSidebar({
   onNovoServico?: () => void;
   showNovoServico: boolean;
   onLogout: () => void;
-  onGenerateSlots?: () => void;
-  generatingSlots?: boolean;
-  generateDays?: number;
-  onGenerateDaysChange?: (days: number) => void;
 }) {
   const establishmentName =
     petshop?.company?.name ?? petshop?.assistantName ?? "Estabelecimento";
@@ -1496,7 +1162,12 @@ function WhatsAppContent({
         if (statusCheckIntervalRef.current) {
           clearInterval(statusCheckIntervalRef.current);
         }
+      } else if (data.status === "reconnecting" || data.status === "connecting") {
+        // Reconectando — não mostrar como desconectado para evitar gerar QR desnecessário
+        setConnectionStatus("connecting");
+        setLastConnected((data as any).last_connected ?? null);
       } else {
+        setConnectionStatus("disconnected");
         setLastConnected((data as any).last_connected ?? null);
       }
     } catch (error) {
@@ -2083,15 +1754,19 @@ const LODGING_DAY_NAMES = [
   { dayOfWeek: 0, key: "sunday", label: "Domingo" },
 ] as const;
 
-/** Dias fechados vêm da aba Agenda (`petshop_business_hours`). */
-function isLodgingDayClosedFromAgenda(
-  agendaDays: AgendaDay[] | null,
+/** Verifica se o dia está fechado com base no businessHours do petshop. */
+function isLodgingDayClosed(
+  businessHours: Petshop["businessHours"] | null | undefined,
   dayOfWeek: number,
 ): boolean {
-  if (!agendaDays || agendaDays.length === 0) return true;
-  const row = agendaDays.find((d) => d.day_of_week === dayOfWeek);
-  if (!row) return true;
-  return row.is_closed;
+  if (!businessHours) return true;
+  const dayKey = BH_DAY_NAMES[dayOfWeek];
+  if (!dayKey) return true;
+  const entry = businessHours[dayKey];
+  if (!entry) return true;
+  if (typeof entry === "string") return !entry;
+  if (entry.closed) return true;
+  return !entry.open || !entry.close;
 }
 
 const EMPTY_ROOM_TYPE_FORM: CreateRoomTypeData & { description: string } = {
@@ -2240,6 +1915,7 @@ function RoomTypeSection({
 }
 
 function HospedagemContent() {
+  const { user } = useAuthContext();
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2250,7 +1926,7 @@ function HospedagemContent() {
   const [daycareEnabled, setDaycareEnabled] = useState(false);
   const [daycareCheckinTime, setDaycareCheckinTime] = useState("07:00");
   const [daycareCheckoutTime, setDaycareCheckoutTime] = useState("19:00");
-  const [agendaDays, setAgendaDays] = useState<AgendaDay[] | null>(null);
+  const [businessHours, setBusinessHours] = useState<Petshop["businessHours"] | null>(null);
 
   // ─── Room Types ────────────────────────────────────────────────────────────
   const [hotelRoomTypes, setHotelRoomTypes] = useState<RoomType[]>([]);
@@ -2357,12 +2033,13 @@ function HospedagemContent() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    const pId = user?.petshop_id;
     Promise.all([
       lodgingConfigService.get(),
-      settingsService.getAgenda().catch(() => null),
+      pId ? petshopService.getPetshop(pId).catch(() => null) : Promise.resolve(null),
       roomTypeService.list().catch(() => []),
     ])
-      .then(([cfg, agenda, allRoomTypes]) => {
+      .then(([cfg, petshopData, allRoomTypes]) => {
         if (cancelled) return;
         setHotelEnabled(cfg.hotel_enabled);
         setHotelCheckinTime(cfg.hotel_checkin_time);
@@ -2370,7 +2047,7 @@ function HospedagemContent() {
         setDaycareEnabled(cfg.daycare_enabled);
         setDaycareCheckinTime(cfg.daycare_checkin_time);
         setDaycareCheckoutTime(cfg.daycare_checkout_time);
-        setAgendaDays(agenda?.days ?? null);
+        setBusinessHours(petshopData?.businessHours ?? null);
         setHotelRoomTypes(
           (allRoomTypes as RoomType[]).filter(
             (r) => r.lodging_type === "hotel",
@@ -2707,8 +2384,8 @@ function HospedagemContent() {
                   </thead>
                   <tbody>
                     {LODGING_DAY_NAMES.map(({ dayOfWeek, label }) => {
-                      const closed = isLodgingDayClosedFromAgenda(
-                        agendaDays,
+                      const closed = isLodgingDayClosed(
+                        businessHours,
                         dayOfWeek,
                       );
                       const hotelCap = closed
@@ -2825,23 +2502,6 @@ export default function ConfiguracoesPage() {
 
   const [activeTab, setActiveTab] = useState<SettingsTabId>("servicos");
   const contentScrollRef = useRef<HTMLDivElement>(null);
-  const [generatingSlots, setGeneratingSlots] = useState(false);
-  const [generateDays, setGenerateDays] = useState(30);
-
-  const handleGenerateSlots = useCallback(async () => {
-    setGeneratingSlots(true);
-    try {
-      const result = await settingsService.generateSlots(generateDays);
-      const msg = result.warning
-        ? `${result.slots_created} slots criados. ${result.warning}`
-        : `${result.slots_created} slots criados para ${result.days_generated} dia(s).`;
-      toast.success("Slots gerados", msg);
-    } catch {
-      toast.error("Erro", "Não foi possível gerar os slots.");
-    } finally {
-      setGeneratingSlots(false);
-    }
-  }, [generateDays, toast]);
   const [petshop, setPetshop] = useState<Petshop | null>(null);
   const [petshopError, setPetshopError] = useState<string | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -3374,6 +3034,8 @@ export default function ConfiguracoesPage() {
         );
       case "horarios":
         return <AbaAgenda />;
+      case "funcionarios":
+        return <AbaFuncionarios />;
       case "whatsapp":
         return (
           <WhatsAppContent status={whatsappStatus} loading={loadingWhatsapp} />
@@ -3412,10 +3074,6 @@ export default function ConfiguracoesPage() {
                 showNovoServico={false}
                 onNovoServico={handleOpenNewServiceModal}
                 onLogout={logout}
-                onGenerateSlots={handleGenerateSlots}
-                generatingSlots={generatingSlots}
-                generateDays={generateDays}
-                onGenerateDaysChange={setGenerateDays}
               />
             </div>
 

@@ -1,6 +1,6 @@
 import { cn } from "@/lib/cn";
 
-/** Estado do dia para cores no calendário (vem de /appointments/available-dates → by_date) */
+/** Estado do dia para cores no calendário */
 export type CalendarDayAvailability = "closed" | "full" | "available";
 
 export interface CalendarEvent {
@@ -9,17 +9,19 @@ export interface CalendarEvent {
   petInitials: string;
   type: string;
   time: string;
-  /** Fim do serviço quando ocupa dois slots consecutivos (par G/GG). */
+  /** Fim do serviço */
   timeEnd?: string;
   date: string;
   status: "concluido" | "confirmado" | "pendente" | "cancelado";
   /** Tutor / dono */
   clientName?: string;
   clientPhone?: string;
-  /** ID do outro agendamento do par (bruto da API ou segundo slot após merge). */
+  /** ID do outro agendamento do par */
   pairedAppointmentId?: string;
-  /** Observações / descrição (sem marcadores internos de par). */
+  /** Observações */
   notes?: string;
+  /** Nome do profissional responsável */
+  staffName?: string;
 }
 
 interface CalendarGridProps {
@@ -29,7 +31,7 @@ interface CalendarGridProps {
   onSelectDate: (date: Date) => void;
   /** @deprecated use dayAvailability */
   availableDates?: Set<string>;
-  /** YYYY-MM-DD → closed (cinza), full (vermelho), available (verde) */
+  /** YYYY-MM-DD → closed, full, available */
   dayAvailability?: Map<string, CalendarDayAvailability>;
 }
 
@@ -93,141 +95,128 @@ export function CalendarGrid({
   const getEventsForDate = (d: Date) =>
     events.filter((e) => e.date === formatDateKey(d));
 
-  const statusColor: Record<string, string> = {
-    concluido: "text-[#3DCA21]",
-    confirmado: "text-[#1E62EC]",
-    pendente: "text-[#F59E0B]",
-    cancelado: "text-[#EF4444]",
+  const statusDot: Record<string, string> = {
+    concluido: "bg-emerald-400",
+    confirmado: "bg-[#1E62EC]",
+    pendente: "bg-amber-400",
+    cancelado: "bg-red-400",
+  };
+
+  const statusText: Record<string, string> = {
+    concluido: "text-emerald-600 dark:text-emerald-400",
+    confirmado: "text-[#1E62EC] dark:text-[#5b9aff]",
+    pendente: "text-amber-600 dark:text-amber-400",
+    cancelado: "text-red-500/60 dark:text-red-400/60 line-through",
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-      <div className="grid grid-cols-7 border-b border-[#727B8E]/10 dark:border-[#40485A]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-[#727B8E]/10 dark:border-[#40485A]">
+      {/* Header dos dias da semana */}
+      <div className="grid grid-cols-7 bg-[#F4F6F9] dark:bg-[#212225]">
         {weekDays.map((day) => (
           <div
             key={day}
-            className="py-3 text-center text-sm font-medium text-[#727B8E] dark:text-[#8a94a6]"
+            className="py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider text-[#727B8E] dark:text-[#8a94a6]"
           >
             {day}
           </div>
         ))}
       </div>
 
-      {weeks.map((week, wi) => (
-        <div
-          key={wi}
-          className="grid grid-cols-7 border-b border-[#727B8E]/10 last:border-b-0"
-        >
-          {week.map((day, di) => {
-            const dayEvents = getEventsForDate(day.date);
-            const selected = isSelected(day.date);
-            const dateKey = formatDateKey(day.date);
-            const status: CalendarDayAvailability | undefined =
-              day.isCurrentMonth && dayAvailability?.has(dateKey)
-                ? dayAvailability.get(dateKey)
-                : day.isCurrentMonth && availableDates != null
-                  ? availableDates.has(dateKey)
-                    ? "available"
-                    : "closed"
-                  : undefined;
-            const canSelect = day.isCurrentMonth;
-            const statusLabel =
-              status === "full"
-                ? "Dia lotado"
-                : status === "closed"
-                  ? "Fechado"
-                  : undefined;
-            const statusTitle =
-              status === "full"
-                ? "Dia lotado — sem vagas livres"
-                : status === "closed"
-                  ? "Sem expediente ou indisponível"
-                  : undefined;
-            return (
-              <button
-                key={di}
-                type="button"
-                onClick={() => canSelect && onSelectDate(day.date)}
-                disabled={!day.isCurrentMonth}
-                title={
-                  status === "full"
-                    ? statusTitle
-                    : status === "closed"
-                      ? statusTitle
-                      : undefined
-                }
-                className={cn(
-                  "min-h-[100px] p-2 text-left border-r border-[#727B8E]/10 dark:border-[#40485A] last:border-r-0 transition-colors duration-200",
-                  !day.isCurrentMonth && "bg-[#F4F6F9]/50 dark:bg-[#212225]/50",
-                  day.isCurrentMonth &&
-                    status === "available" &&
-                    "bg-emerald-50/90 hover:bg-emerald-100/90 dark:bg-emerald-950/25 dark:hover:bg-emerald-900/30 border-emerald-200/40 dark:border-emerald-800/30",
-                  day.isCurrentMonth &&
-                    status === "full" &&
-                    "bg-red-50/90 hover:bg-red-100/80 dark:bg-red-950/25 dark:hover:bg-red-900/30 border-red-200/40 dark:border-red-900/30",
-                  day.isCurrentMonth &&
-                    status === "closed" &&
-                    "bg-[#E8EAED] hover:bg-[#dfe2e6] dark:bg-[#2a2c30] dark:hover:bg-[#32353a] border-[#727B8E]/15",
-                  day.isCurrentMonth &&
-                    selected &&
-                    "ring-2 ring-inset ring-[#1E62EC]/50 dark:ring-[#2172e5]/60",
-                  day.isCurrentMonth && !selected && "hover:brightness-[0.98]",
-                )}
-              >
-                <span
-                  key={selected ? dateKey : undefined}
+      {/* Grid do calendário */}
+      <div className="flex flex-1 flex-col">
+        {weeks.map((week, wi) => (
+          <div
+            key={wi}
+            className="grid flex-1 grid-cols-7 border-t border-[#727B8E]/10 dark:border-[#40485A]"
+          >
+            {week.map((day, di) => {
+              const dayEvents = getEventsForDate(day.date);
+              const selected = isSelected(day.date);
+              const today = isToday(day.date);
+              const dateKey = formatDateKey(day.date);
+              const status: CalendarDayAvailability | undefined =
+                day.isCurrentMonth && dayAvailability?.has(dateKey)
+                  ? dayAvailability.get(dateKey)
+                  : day.isCurrentMonth && availableDates != null
+                    ? availableDates.has(dateKey)
+                      ? "available"
+                      : "closed"
+                    : undefined;
+              const canSelect = day.isCurrentMonth;
+              const isClosed = status === "closed";
+
+              return (
+                <button
+                  key={di}
+                  type="button"
+                  onClick={() => canSelect && onSelectDate(day.date)}
+                  disabled={!day.isCurrentMonth}
                   className={cn(
-                    "inline-block text-sm font-medium",
-                    selected && "animate-calendar-day-select",
-                    !day.isCurrentMonth
-                      ? "text-[#727B8E]/50 dark:text-[#8a94a6]/50"
-                      : status === "closed"
-                        ? "text-[#727B8E] dark:text-[#8a94a6]"
-                        : status === "full"
-                          ? "text-red-700 dark:text-red-300"
-                          : isToday(day.date)
-                            ? "text-emerald-800 dark:text-emerald-300 font-bold"
-                            : "text-[#166534] dark:text-emerald-200",
+                    "relative flex min-h-[110px] flex-col border-r border-[#727B8E]/10 p-1.5 text-left transition-colors last:border-r-0 dark:border-[#40485A]",
+                    !day.isCurrentMonth && "bg-[#F4F6F9]/40 dark:bg-[#1A1B1D]/60",
+                    day.isCurrentMonth && !isClosed && "bg-white dark:bg-[#1A1B1D] hover:bg-[#F4F6F9]/60 dark:hover:bg-[#212225]/80",
+                    day.isCurrentMonth && isClosed && "bg-[#F4F6F9]/80 dark:bg-[#212225]/60",
+                    selected && "ring-2 ring-inset ring-[#1E62EC] dark:ring-[#5b9aff]",
                   )}
                 >
-                  {day.date.getDate() < 10
-                    ? `0${day.date.getDate()}`
-                    : day.date.getDate()}
-                </span>
-                {day.isCurrentMonth && statusLabel && (
-                  <div className="mt-1">
+                  {/* Número do dia */}
+                  <div className="mb-1 flex items-center justify-between">
                     <span
                       className={cn(
-                        "text-[10px] font-medium",
-                        status === "full"
-                          ? "text-red-600/90 dark:text-red-400"
-                          : "text-[#727B8E] dark:text-[#8a94a6]",
+                        "flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium",
+                        !day.isCurrentMonth && "text-[#727B8E]/40 dark:text-[#8a94a6]/30",
+                        day.isCurrentMonth && !today && !isClosed && "text-[#434A57] dark:text-[#f5f9fc]",
+                        day.isCurrentMonth && isClosed && "text-[#727B8E]/70 dark:text-[#8a94a6]/50",
+                        today && "bg-[#1E62EC] text-white font-bold",
                       )}
                     >
-                      {statusLabel}
+                      {day.date.getDate()}
                     </span>
+                    {day.isCurrentMonth && isClosed && (
+                      <span className="text-[9px] font-medium text-[#727B8E]/60 dark:text-[#8a94a6]/40">
+                        Fechado
+                      </span>
+                    )}
+                    {day.isCurrentMonth && dayEvents.length > 0 && (
+                      <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#1E62EC]/10 px-1 text-[9px] font-bold text-[#1E62EC] dark:bg-[#1E62EC]/20 dark:text-[#5b9aff]">
+                        {dayEvents.length}
+                      </span>
+                    )}
                   </div>
-                )}
-                {day.isCurrentMonth && (
-                  <div className="mt-1 space-y-0.5">
-                    {dayEvents.slice(0, 3).map((ev) => (
-                      <div
-                        key={ev.id}
-                        className={`text-xs font-medium truncate ${statusColor[ev.status]}`}
-                      >
-                        {ev.timeEnd
-                          ? `${ev.time}–${ev.timeEnd}`
-                          : ev.time}{" "}
-                        - {ev.petName}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      ))}
+
+                  {/* Eventos do dia */}
+                  {day.isCurrentMonth && (
+                    <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+                      {dayEvents.slice(0, 3).map((ev) => (
+                        <div
+                          key={ev.id}
+                          className={cn(
+                            "flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium leading-tight truncate",
+                            ev.status === "cancelado"
+                              ? "bg-red-50/60 dark:bg-red-950/20"
+                              : "bg-[#1E62EC]/5 dark:bg-[#1E62EC]/10",
+                          )}
+                        >
+                          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDot[ev.status])} />
+                          <span className={cn("truncate", statusText[ev.status])}>
+                            {ev.time} {ev.petName}
+                          </span>
+                        </div>
+                      ))}
+                      {dayEvents.length > 3 && (
+                        <span className="px-1 text-[9px] font-medium text-[#727B8E] dark:text-[#8a94a6]">
+                          +{dayEvents.length - 3} mais
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -492,6 +492,7 @@ async function processMessage(
         normalizeRouterStage(agentResponse.stage)
       )
 
+      markMessageAsSaved(companyId, jid, agentResponse.reply)
       await sendTextMessage(String(companyId), jid, agentResponse.reply)
       console.log(
         `[Handler][company:${companyId}] Resposta enviada para ${phone} | agente: ${agentResponse.agent_used ?? 'n/a'} | estágio router: ${agentResponse.stage ?? 'n/a'} | estágio CRM: ${persistedStage ?? 'n/a'}`
@@ -576,4 +577,71 @@ async function generateAgentReply(
       reply: 'Desculpe, estou com dificuldades técnicas no momento. Tente novamente em alguns instantes.',
     }
   }
+}
+
+// ─────────────────────────────────────────
+// Mensagens enviadas pelo próprio número (fromMe)
+// Salva como role: 'staff' para distinguir de respostas da IA
+// ─────────────────────────────────────────
+
+// IDs de mensagens já salvas pela IA ou dashboard (evita duplicar)
+const recentlySavedOutgoing = new Map<string, number>()
+
+/** Marca uma mensagem como já salva (chamado pelo sendTextMessage da IA) */
+export function markMessageAsSaved(companyId: number, jid: string, text: string) {
+  const key = `${companyId}:${jid}:${text.slice(0, 100)}`
+  recentlySavedOutgoing.set(key, Date.now())
+  // Limpa após 30s
+  setTimeout(() => recentlySavedOutgoing.delete(key), 30000)
+}
+
+export async function handleOutgoingMessage(
+  companyId: number,
+  msg: proto.IWebMessageInfo
+): Promise<void> {
+  const jid = msg.key.remoteJid
+  if (!jid || jid.includes('@broadcast') || jid.includes('@g.us')) return
+
+  const text =
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    ''
+  if (!text) return
+
+  const phone = getClientIdentifierFromJid(jid)
+
+  // Verifica se esta mensagem já foi salva pela IA ou dashboard
+  const dedupKey = `${companyId}:${jid}:${text.slice(0, 100)}`
+  if (recentlySavedOutgoing.has(dedupKey)) {
+    recentlySavedOutgoing.delete(dedupKey)
+    return
+  }
+
+  // Busca conversa existente do cliente
+  const client = await prisma.client.findUnique({
+    where: { companyId_phone: { companyId, phone } },
+  })
+  if (!client) return
+
+  const conversation = await prisma.agentConversation.findFirst({
+    where: { companyId, clientId: client.id },
+    orderBy: { startedAt: 'desc' },
+  })
+  if (!conversation) return
+
+  await prisma.agentMessage.create({
+    data: {
+      conversationId: conversation.id,
+      companyId,
+      role: 'staff',
+      content: text,
+    },
+  })
+
+  await prisma.agentConversation.update({
+    where: { id: conversation.id },
+    data: { lastMessageAt: new Date() },
+  })
+
+  console.log(`[Handler][company:${companyId}] Mensagem enviada (staff) para ${phone}: ${text.substring(0, 80)}`)
 }

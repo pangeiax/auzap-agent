@@ -31,6 +31,11 @@ export interface Appointment {
   cancelled_at?: string
   cancel_reason?: string
   created_at: string
+  staff_id?: string
+  staff_name?: string
+  scheduled_date?: string
+  start_time?: string
+  end_time?: string
 }
 
 export interface AppointmentSchedule {
@@ -38,6 +43,9 @@ export interface AppointmentSchedule {
   scheduled_at: string
   slot_id?: string
   schedule_id?: number
+  staff_id?: string
+  start_time?: string
+  end_time?: string
   payment_method?: string
   origin_channel?: string
   pet_id?: string

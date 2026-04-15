@@ -7,6 +7,8 @@ export interface ChatMessage {
   isAudio?: boolean
   audioDuration?: string
   audioUrl?: string
+  /** Distingue quem enviou: 'assistant' (IA), 'staff' (humano), 'user' (cliente) */
+  senderRole?: 'user' | 'assistant' | 'staff'
 }
 
 export interface ChatConversation {
@@ -15,6 +17,8 @@ export interface ChatConversation {
   pets: string
   lastMessage: string
   time: string
+  /** Data da última mensagem (ex: "14/04") */
+  date?: string
   unreadCount: number
   isOnline: boolean
   phone: string

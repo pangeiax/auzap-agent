@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import app from './app'
 import { restoreActiveSessions } from './services/baileysService'
-import { startAppointmentReminderJob } from './jobs/appointmentReminderJob'
 
 const PORT = process.env.PORT || 3000
 

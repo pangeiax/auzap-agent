@@ -2,9 +2,6 @@ import logging
 import re
 import unicodedata
 
-import redis as sync_redis
-
-from config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
 from db import get_connection
 from memory.tool_result_cache import (
     cache_get_client_pets,
@@ -16,9 +13,6 @@ from tools.booking_tools import _effective_service_duration_minutes, _extract_do
 from tools.slot_time_utils import hhmm_after_minutes, slot_time_to_hhmm
 
 logger = logging.getLogger("ai-service.tools.client")
-
-PET_SIZE_GATE_PREFIX = "pet_size_gate"
-PET_SIZE_GATE_TTL_SEC = 7200
 
 
 def fetch_client_pets_snapshot(company_id: int, client_id: str) -> dict | None:
@@ -42,119 +36,29 @@ def fetch_client_pets_snapshot(company_id: int, client_id: str) -> dict | None:
     return out
 
 
-def _pet_size_gate_key(company_id: int, client_id: str, pet_name: str) -> str:
-    n = (pet_name or "").strip().lower()
-    return f"{PET_SIZE_GATE_PREFIX}:{company_id}:{client_id}:{n}"
-
-
-def _pet_size_gate_set(company_id: int, client_id: str, pet_name: str, size_db: str) -> None:
-    if not client_id or not (pet_name or "").strip() or not size_db:
-        return
-    try:
-        r = sync_redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            password=REDIS_PASSWORD or None,
-            decode_responses=True,
-        )
-        r.setex(
-            _pet_size_gate_key(company_id, client_id, pet_name),
-            PET_SIZE_GATE_TTL_SEC,
-            size_db,
-        )
-        r.close()
-    except Exception as e:
-        logger.warning("pet_size_gate set falhou: %s", e)
-
-
-def _pet_size_gate_get(company_id: int, client_id: str, pet_name: str) -> tuple[str | None, bool]:
-    """
-    Retorna (porte confirmado P/M/G/GG ou None, redis_ok).
-    None com redis_ok=True → chave não existe (set_pet_size ainda não foi chamado para este nome).
-    """
-    if not client_id or not (pet_name or "").strip():
-        return (None, False)
-    try:
-        r = sync_redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            password=REDIS_PASSWORD or None,
-            decode_responses=True,
-        )
-        v = r.get(_pet_size_gate_key(company_id, client_id, pet_name))
-        r.close()
-        return (v, True)
-    except Exception as e:
-        logger.warning("pet_size_gate get falhou: %s", e)
-        return (None, False)
-
-
-def _pet_size_gate_delete(company_id: int, client_id: str, pet_name: str) -> None:
-    if not client_id or not (pet_name or "").strip():
-        return
-    try:
-        r = sync_redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            password=REDIS_PASSWORD or None,
-            decode_responses=True,
-        )
-        r.delete(_pet_size_gate_key(company_id, client_id, pet_name))
-        r.close()
-    except Exception as e:
-        logger.warning("pet_size_gate delete falhou: %s", e)
-
-
 def _norm_comp(s: str) -> str:
     """Lowercase + strip accents for robust comparisons."""
     s = unicodedata.normalize("NFD", (s or "").strip().lower())
     return "".join(c for c in s if unicodedata.category(c) != "Mn")
 
 
-# Nome não pode ser espécie, placeholder numérico ou parecer raça (evita cadastros "gato", "buldog", "cachorro 2").
+# Nome não pode ser espécie, placeholder numérico ou parecer raça.
 _SPECIES_OR_GENERIC_NAMES = frozenset(
     _norm_comp(x)
     for x in (
-        "gato",
-        "gata",
-        "gatinho",
-        "gatinha",
-        "cachorro",
-        "cachorra",
-        "cachorrinho",
-        "cachorrinha",
-        "cão",
-        "cadela",
-        "dog",
-        "cat",
-        "pet",
-        "animal",
-        "bicho",
-        "filhote",
-        "filhota",
-        "canino",
-        "felino",
+        "gato", "gata", "gatinho", "gatinha",
+        "cachorro", "cachorra", "cachorrinho", "cachorrinha",
+        "cão", "cadela", "dog", "cat", "pet", "animal", "bicho",
+        "filhote", "filhota", "canino", "felino",
     )
 )
 
-# Raça não pode ser só a espécie (evita LLM passar breed="gato" com species="gato").
 _BREED_CANNOT_BE_SPECIES_WORD = frozenset(
     _norm_comp(x)
     for x in (
-        "gato",
-        "gata",
-        "gatinho",
-        "gatinha",
-        "cachorro",
-        "cachorra",
-        "cachorrinho",
-        "cachorrinha",
-        "cão",
-        "cadela",
-        "dog",
-        "cat",
-        "felino",
-        "canino",
+        "gato", "gata", "gatinho", "gatinha",
+        "cachorro", "cachorra", "cachorrinho", "cachorrinha",
+        "cão", "cadela", "dog", "cat", "felino", "canino",
     )
 )
 
@@ -163,77 +67,42 @@ _PLACEHOLDER_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Frases ou tokens que o modelo costuma usar como "nome" mas são raça/tipo.
 _FULL_BREED_PHRASES = frozenset(
     _norm_comp(x)
     for x in (
-        "bull terrier",
-        "golden retriever",
-        "labrador retriever",
-        "yorkshire terrier",
-        "border collie",
-        "cocker spaniel",
-        "bichon frise",
-        "cavalier king charles",
-        "basset hound",
-        "great dane",
-        "são bernardo",
-        "sao bernardo",
-        "saint bernard",
-        "american bully",
-        "french bulldog",
-        "bulldog francês",
-        "bulldog frances",
-        "pastor alemão",
-        "pastor alemao",
-        "german shepherd",
-        "pit bull",
-        "shih tzu",
-        "chow chow",
-        "bichon frisé",
-        "lhasa apso",
+        "bull terrier", "golden retriever", "labrador retriever",
+        "yorkshire terrier", "border collie", "cocker spaniel",
+        "bichon frise", "cavalier king charles", "basset hound",
+        "great dane", "são bernardo", "sao bernardo", "saint bernard",
+        "american bully", "french bulldog", "bulldog francês",
+        "bulldog frances", "pastor alemão", "pastor alemao",
+        "german shepherd", "pit bull", "shih tzu", "chow chow",
+        "bichon frisé", "lhasa apso",
     )
 )
 
 _SINGLE_TOKEN_BREEDS = frozenset(
     _norm_comp(x)
     for x in (
-        "bulldog",
-        "buldog",
-        "buldogue",
-        "labrador",
-        "poodle",
-        "beagle",
-        "dachshund",
-        "husky",
-        "pug",
-        "rottweiler",
-        "chihuahua",
-        "dobermann",
-        "doberman",
-        "boxer",
-        "collie",
-        "maltês",
-        "maltese",
-        "pitbull",
-        "shiba",
-        "akita",
-        "dálmata",
-        "dalmatian",
-        "schnauzer",
-        "persa",
-        "siamês",
-        "siames",
-        "siamese",
-        "angorá",
-        "angora",
-        "srd",
-        "golden",
-        "yorkshire",
-        "lhasa",
-        "lab",
+        "bulldog", "buldog", "buldogue", "labrador", "poodle",
+        "beagle", "dachshund", "husky", "pug", "rottweiler",
+        "chihuahua", "dobermann", "doberman", "boxer", "collie",
+        "maltês", "maltese", "pitbull", "shiba", "akita",
+        "dálmata", "dalmatian", "schnauzer", "persa", "siamês",
+        "siames", "siamese", "angorá", "angora", "srd", "golden",
+        "yorkshire", "lhasa", "lab",
     )
 )
+
+SIZE_MAP = {
+    "pequeno": "P", "médio": "M", "medio": "M",
+    "grande": "G", "gigante": "GG", "extra grande": "GG",
+    "P": "P", "M": "M", "G": "G", "GG": "GG",
+    "small": "P", "medium": "M", "large": "G",
+    "p": "P", "m": "M", "g": "G", "gg": "GG",
+}
+
+SIZE_LABEL = {"P": "pequeno", "M": "médio", "G": "grande", "GG": "extra grande"}
 
 
 def _pet_display_name_error(name: str) -> str | None:
@@ -260,97 +129,10 @@ def _pet_display_name_error(name: str) -> str | None:
     return None
 
 
-def _price_key_from_db_size(size_db: str) -> str | None:
-    return {"P": "small", "M": "medium", "G": "large", "GG": "xlarge"}.get(size_db)
-
-
-def _porte_label_for_key(price_key: str | None) -> str | None:
-    if not price_key:
-        return None
-    return {
-        "small": "pequeno",
-        "medium": "médio",
-        "large": "grande",
-        "xlarge": "extra grande",
-        "extra_large": "extra grande",
-    }.get(price_key)
-
-
-def _services_pricing_snapshot(cur, company_id: int, size_db: str) -> str:
-    """Mesma lógica do sales_prompt, para a tool devolver preços na mesma mensagem após set_pet_size."""
-    pk = _price_key_from_db_size(size_db)
-    plab = _porte_label_for_key(pk)
-    cur.execute(
-        """
-        SELECT name, description, duration_min, price, price_by_size
-        FROM petshop_services
-        WHERE company_id = %s AND is_active = TRUE
-        ORDER BY name
-        """,
-        (company_id,),
-    )
-    lines: list[str] = []
-    for row in cur.fetchall():
-        s = dict(row)
-        if s.get("price_by_size"):
-            sz = s["price_by_size"]
-            if pk:
-                val = sz.get(pk)
-                price = (
-                    f"R${val} (porte {plab})"
-                    if val is not None
-                    else "consultar (preço por porte)"
-                )
-            else:
-                price = "preço conforme porte"
-        elif s.get("price"):
-            price = f"R${s['price']}"
-        else:
-            price = "consultar"
-        desc = f" — {s['description']}" if s.get("description") else ""
-        lines.append(f"  • {s['name']}: {price} ({s.get('duration_min', '?')} min){desc}")
-
-    cur.execute(
-        """
-        SELECT hotel_enabled, hotel_daily_rate, hotel_checkin_time, hotel_checkout_time,
-               daycare_enabled, daycare_daily_rate, daycare_checkin_time, daycare_checkout_time
-        FROM petshop_lodging_config
-        WHERE company_id = %s
-        """,
-        (company_id,),
-    )
-    lc = cur.fetchone()
-    if lc:
-        lodging_config = dict(lc)
-        for field in (
-            "hotel_checkin_time",
-            "hotel_checkout_time",
-            "daycare_checkin_time",
-            "daycare_checkout_time",
-        ):
-            t = lodging_config.get(field)
-            lodging_config[field] = str(t)[:5] if t else None
-        if lodging_config.get("hotel_enabled"):
-            rate = lodging_config.get("hotel_daily_rate")
-            rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
-            cin = (lodging_config.get("hotel_checkin_time") or "")[:5]
-            cout = (lodging_config.get("hotel_checkout_time") or "")[:5]
-            hours_str = f" (check-in {cin}, check-out {cout})" if cin and cout else ""
-            lines.append(
-                f"  • Hotel para pets: {rate_str}{hours_str} — hospedagem noturna com acompanhamento"
-            )
-        if lodging_config.get("daycare_enabled"):
-            rate = lodging_config.get("daycare_daily_rate")
-            rate_str = f"R${float(rate):.2f}/dia" if rate else "consultar"
-            cin = (lodging_config.get("daycare_checkin_time") or "")[:5]
-            cout = (lodging_config.get("daycare_checkout_time") or "")[:5]
-            hours_str = f" (entrada {cin}, saída {cout})" if cin and cout else ""
-            lines.append(
-                f"  • Creche diurna: {rate_str}{hours_str} — cuidado diurno enquanto você trabalha. "
-                f"No cadastro, a data de fim do período é o dia seguinte ao último dia na creche (fim exclusivo)."
-            )
-
-    return "\n".join(lines) if lines else "  nenhum cadastrado"
+def _normalize_size(size: str) -> str | None:
+    """Normaliza porte para P/M/G/GG. Retorna None se inválido."""
+    val = (size or "").strip()
+    return SIZE_MAP.get(val) or SIZE_MAP.get(val.lower()) or SIZE_MAP.get(val.upper())
 
 
 def _merge_upcoming_appointment_rows(rows: list) -> list:
@@ -480,18 +262,19 @@ def build_client_tools(company_id: int, client_id: str) -> list:
 
     def create_pet(name: str, species: str, breed: str, size: str) -> dict:
         """
-        Cadastra um novo pet para o cliente.
-        Regras curtas:
-        - exige nome, espécie, raça e porte
-        - chame set_pet_size antes, com o mesmo nome e porte
-        - não invente dados nem use raça como nome
-        - use só cachorro ou gato em species
-        - ao orientar o cliente sobre porte, use a referência por peso: P até 7 kg; M 7,1–15 kg; G 15,1–25 kg; GG acima de 25 kg
+        Cadastra um novo pet ou atualiza o porte de um pet existente sem porte.
+
+        Regras:
+        - Exige nome, espécie, raça e porte
+        - Não invente dados nem use raça como nome
+        - Use só 'cachorro' ou 'gato' em species
+        - Porte: P (até 7 kg), M (7-15 kg), G (15-25 kg), GG (acima de 25 kg)
+        - Se o pet já existe MAS sem porte definido, atualiza o porte
 
         Args:
             name: Apelido real do pet
             species: 'cachorro' ou 'gato'
-            breed: Raça real, ou "Sem raça definida" só se o cliente disser
+            breed: Raça real, ou 'Sem raça definida' só se o cliente disser
             size: Porte confirmado ('P', 'M', 'G' ou 'GG')
         """
         missing = []
@@ -500,17 +283,18 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         if not species or not species.strip():
             missing.append("espécie (cachorro ou gato)")
         if not breed or not breed.strip():
-            missing.append("raça (ou Sem raça definida se não souber)")
+            missing.append("raça (ou 'Sem raça definida' se não souber)")
         if not size or not size.strip():
-            missing.append("porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))")
+            missing.append("porte (P, M, G ou GG)")
 
         if missing:
             return {
                 "success": False,
                 "missing_fields": missing,
-                "message": f"Faltam dados obrigatórios: {', '.join(missing)}. Pergunte ao cliente antes de cadastrar.",
+                "message": f"Faltam dados: {', '.join(missing)}. Pergunte ao cliente.",
             }
 
+        # Normalize breed
         breed_raw = breed.strip()
         breed_l = breed_raw.lower()
         if breed_l in ("srd", "sem raça definida", "sem raca definida"):
@@ -518,111 +302,88 @@ def build_client_tools(company_id: int, client_id: str) -> list:
         else:
             breed_for_db = breed_raw
 
+        # Validate name
         name_err = _pet_display_name_error(name)
         if name_err:
-            return {
-                "success": False,
-                "name_is_breed": True,
-                "message": name_err,
-            }
+            return {"success": False, "name_is_breed": True, "message": name_err}
 
         if breed_l not in ("srd", "sem raça definida", "sem raca definida") and _norm_comp(
             name
         ) == _norm_comp(breed_raw):
             return {
                 "success": False,
-                "message": (
-                    "Nome e raça não podem ser iguais. "
-                    "Pergunte o nome ou apelido que o dono usa no dia a dia."
-                ),
+                "message": "Nome e raça não podem ser iguais. Pergunte o nome ou apelido real.",
             }
 
+        # Validate species
         species_norm = species.lower().strip()
-        size_norm = size.lower().strip()
-
         if species_norm not in ("cachorro", "gato"):
-            return {
-                "success": False,
-                "message": "Espécie inválida. Use 'cachorro' ou 'gato'.",
-            }
+            return {"success": False, "message": "Espécie inválida. Use 'cachorro' ou 'gato'."}
 
+        # Validate breed
         if breed_l not in ("srd", "sem raça definida", "sem raca definida"):
             bn = _norm_comp(breed_raw)
             if bn in _BREED_CANNOT_BE_SPECIES_WORD or bn == _norm_comp(species_norm):
                 return {
                     "success": False,
                     "message": (
-                        "A raça precisa descrever o animal (ex.: Persa, Siames, Labrador, SRD), "
-                        "não pode ser só 'gato' ou 'cachorro'. Pergunte de forma natural; "
-                        "se o cliente não souber a raça, confirme e use 'Sem raça definida'."
+                        "A raça precisa descrever o animal (ex.: Persa, Labrador, SRD), "
+                        "não pode ser só 'gato' ou 'cachorro'. Se não souber, use 'Sem raça definida'."
                     ),
                 }
 
-        size_map = {
-            "pequeno": "P",
-            "médio": "M",
-            "medio": "M",
-            "grande": "G",
-            "gigante": "GG",
-            "extra grande": "GG",
-            "P": "P",
-            "M": "M",
-            "G": "G",
-            "GG": "GG",
-            "small": "P",
-            "medium": "M",
-            "large": "G",
-        }
-        size_db = size_map.get(size_norm) or size_map.get(size_norm.upper())
+        # Validate size
+        size_db = _normalize_size(size)
         if not size_db:
             return {
                 "success": False,
-                "missing_fields": ["porte (pequeno (P), médio (M), grande (G) ou extra grande (GG))"],
-                "message": (
-                    "Porte inválido. Pergunte qual porte se encaixa melhor. "
-                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
-                ),
+                "missing_fields": ["porte (P, M, G ou GG)"],
+                "message": f"Porte inválido. Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}",
             }
 
         name_key = (name or "").strip()
-        if client_id:
-            gated, redis_ok = _pet_size_gate_get(company_id, client_id, name_key)
-            if redis_ok:
-                if gated is None:
-                    return {
-                        "success": False,
-                        "porte_nao_confirmado": True,
-                        "message": (
-                            "Porte ainda não foi confirmado via set_pet_size para este nome. "
-                            "Pergunte ao cliente o porte, chame set_pet_size com o mesmo nome do pet, "
-                            "depois create_pet com o mesmo porte — não assuma P/M/G/GG."
-                        ),
-                    }
-                if gated != size_db:
-                    return {
-                        "success": False,
-                        "message": (
-                            f"O porte em create_pet ({size_db}) difere do confirmado em set_pet_size ({gated}). "
-                            "Use o mesmo valor ou chame set_pet_size de novo se o cliente corrigir."
-                        ),
-                    }
 
         with get_connection() as conn:
             cur = conn.cursor()
+
+            # Check if pet already exists
             cur.execute(
                 """
-                SELECT id FROM petshop_pets
+                SELECT id, name, size FROM petshop_pets
                 WHERE company_id = %s AND client_id = %s
                   AND LOWER(name) = LOWER(%s) AND is_active = TRUE
             """,
                 (company_id, client_id, name_key),
             )
-            if cur.fetchone():
+            existing = cur.fetchone()
+
+            if existing:
+                existing = dict(existing)
+                # Pet exists but missing size → update it
+                if not existing.get("size") or existing["size"].strip() in ("", "?"):
+                    cur.execute(
+                        """
+                        UPDATE petshop_pets SET size = %s
+                        WHERE id = %s AND company_id = %s
+                        RETURNING id, name
+                    """,
+                        (size_db, existing["id"], company_id),
+                    )
+                    cache_invalidate_client_pets(company_id, str(client_id))
+                    size_label = SIZE_LABEL.get(size_db, size_db)
+                    return {
+                        "success": True,
+                        "pet_id": str(existing["id"]),
+                        "pet_updated": True,
+                        "message": f"Porte de {existing['name']} atualizado para {size_label}.",
+                    }
+                # Pet exists with size already set
                 return {
                     "success": False,
                     "message": f"Já existe um pet chamado {name_key} cadastrado.",
                 }
 
+            # Create new pet
             cur.execute(
                 """
                 INSERT INTO petshop_pets (company_id, client_id, name, species, breed, size)
@@ -633,6 +394,7 @@ def build_client_tools(company_id: int, client_id: str) -> list:
             )
             pet_id = cur.fetchone()["id"]
 
+            # Auto-advance stage
             if client_id:
                 cur.execute(
                     """
@@ -643,161 +405,58 @@ def build_client_tools(company_id: int, client_id: str) -> list:
                     (client_id, company_id),
                 )
 
-        _pet_size_gate_delete(company_id, client_id, name_key)
-
         cache_invalidate_client_pets(company_id, str(client_id))
         return {
             "success": True,
             "pet_id": str(pet_id),
-            "message": f"{name_key} cadastrado com sucesso!",
+            "message": f"{name_key} cadastrado!",
         }
 
-    def set_pet_size(pet_name: str, size: str) -> dict:
+    def update_pet_size(pet_name: str, size: str) -> dict:
         """
-        Confirma e registra o porte do pet informado pelo cliente.
-        Use esta tool SEMPRE que o cliente informar o porte — tanto para pets já cadastrados quanto para pets ainda não cadastrados.
-
-        - Se o pet já existe no banco (nome **igual** ao cadastro, sem diferenciar maiúsculas) → atualiza o porte
-        - Se o pet ainda não foi cadastrado → retorna o porte confirmado para uso em create_pet e nos preços (gate Redis); **não** atualiza outro pet por nome diferente
-
-        O porte confirmado por esta tool define o preço dos serviços.
-        NUNCA deduza o porte pela raça — sempre pergunte ao cliente primeiro.
-        Ao explicar portes, pode orientar com: P até 7 kg; M 7,1–15 kg; G 15,1–25 kg; GG acima de 25 kg.
+        Atualiza o porte de um pet já cadastrado.
+        Use quando o pet existe em get_client_pets mas o porte está vazio ou precisa ser corrigido.
 
         Args:
-            pet_name: Nome/apelido do pet (NÃO use raça como nome — veja instruções em create_pet)
-            size: Porte informado pelo cliente — 'P', 'M', 'G' ou 'GG'
+            pet_name: Nome do pet (como retornado por get_client_pets)
+            size: Novo porte ('P', 'M', 'G' ou 'GG')
         """
         if not pet_name or not pet_name.strip():
-            return {
-                "success": False,
-                "message": "Informe o nome do pet para confirmar o porte (o mesmo nome que usará em create_pet).",
-            }
+            return {"success": False, "message": "Informe o nome do pet."}
 
-        if not size or not size.strip():
-            return {
-                "success": False,
-                "message": (
-                    "Porte não informado. Pergunte o porte ao cliente. "
-                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
-                ),
-            }
-
-        size_map = {
-            "pequeno": "P",
-            "médio": "M",
-            "medio": "M",
-            "grande": "G",
-            "gigante": "GG",
-            "extra grande": "GG",
-            "P": "P",
-            "M": "M",
-            "G": "G",
-            "GG": "GG",
-            "small": "P",
-            "medium": "M",
-            "large": "G",
-        }
-        size_norm_val = size.lower().strip()
-        size_db = size_map.get(size_norm_val) or size_map.get(size_norm_val.upper())
+        size_db = _normalize_size(size)
         if not size_db:
             return {
                 "success": False,
-                "message": (
-                    "Porte inválido. Pergunte qual porte se encaixa melhor. "
-                    f"Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}"
-                ),
+                "message": f"Porte inválido. Referência: {PET_SIZE_WEIGHT_REFERENCE_PT}",
             }
 
-        size_label = {"P": "pequeno", "M": "médio", "G": "grande", "GG": "extra grande"}.get(size_db, size)
-
-        updated = None
-        services_pricing_for_reply = ""
-        with get_connection() as conn:
-            cur = conn.cursor()
-            if client_id and pet_name and pet_name.strip():
-                cur.execute(
-                    """
-                    UPDATE petshop_pets
-                    SET size = %s
-                    WHERE company_id = %s AND client_id = %s
-                      AND LOWER(name) = LOWER(%s) AND is_active = TRUE
-                    RETURNING id, name
-                """,
-                    (size_db, company_id, client_id, pet_name),
-                )
-                updated = cur.fetchone()
-            services_pricing_for_reply = _services_pricing_snapshot(cur, company_id, size_db)
-
-        if not updated and pet_name and pet_name.strip():
-            pn_err = _pet_display_name_error(pet_name)
-            if pn_err:
-                return {"success": False, "message": pn_err}
-
-        base_out = {
-            "success": True,
-            "size": size_db,
-            "size_label": size_label,
-            "services_pricing_for_reply": services_pricing_for_reply,
-        }
-        if client_id and pet_name and pet_name.strip():
-            _pet_size_gate_set(company_id, client_id, pet_name.strip(), size_db)
-
-        if updated:
-            cache_invalidate_client_pets(company_id, str(client_id))
-            return {
-                **base_out,
-                "pet_updated": True,
-                "message": f"Porte de {updated['name']} confirmado como {size_label}!",
-            }
-        return {
-            **base_out,
-            "pet_updated": False,
-            "message": f"Porte confirmado: {size_label}. Use este porte ao cadastrar o pet e para calcular preços.",
-        }
-
-    VALID_STAGES = {"initial", "onboarding", "pet_registered", "booking", "completed"}
-
-    def advance_stage(conversation_stage: str) -> dict:
-        """
-        Avança o estágio da conversa do cliente.
-        Chamar após o cliente completar uma etapa do fluxo.
-
-        Args:
-            conversation_stage: Novo estágio — valores válidos: initial, onboarding, pet_registered, booking, completed
-        """
-        if not conversation_stage:
-            return {"success": False, "message": "conversation_stage é obrigatório."}
-
-        if conversation_stage not in VALID_STAGES:
-            logger.warning(
-                "advance_stage chamado com estágio inválido=%r", conversation_stage
-            )
-            return {
-                "success": False,
-                "message": f"Estágio inválido: '{conversation_stage}'. Valores permitidos: {', '.join(sorted(VALID_STAGES))}.",
-            }
-
-        logger.info(
-            "advance_stage | client_id=%s | stage=%s", client_id, conversation_stage
-        )
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
-                UPDATE clients
-                SET conversation_stage = %s, updated_at = NOW()
-                WHERE id = %s AND company_id = %s
-                RETURNING conversation_stage
+                UPDATE petshop_pets
+                SET size = %s
+                WHERE company_id = %s AND client_id = %s
+                  AND LOWER(name) = LOWER(%s) AND is_active = TRUE
+                RETURNING id, name
             """,
-                (conversation_stage, client_id, company_id),
+                (size_db, company_id, client_id, pet_name.strip()),
             )
             updated = cur.fetchone()
 
         if not updated:
-            return {"success": False, "message": "Cliente não encontrado."}
+            return {"success": False, "message": f"Pet '{pet_name}' não encontrado no cadastro."}
 
-        return {"success": True, "conversation_stage": updated["conversation_stage"]}
+        cache_invalidate_client_pets(company_id, str(client_id))
+        size_label = SIZE_LABEL.get(size_db, size_db)
+        return {
+            "success": True,
+            "pet_id": str(updated["id"]),
+            "size": size_db,
+            "size_label": size_label,
+            "message": f"Porte de {updated['name']} atualizado para {size_label}.",
+        }
 
     def get_upcoming_appointments() -> list:
         """Retorna os próximos agendamentos confirmados ou pendentes do cliente."""
@@ -806,7 +465,6 @@ def build_client_tools(company_id: int, client_id: str) -> list:
     return [
         get_client_pets,
         create_pet,
-        set_pet_size,
-        advance_stage,
+        update_pet_size,
         get_upcoming_appointments,
     ]

@@ -107,7 +107,7 @@ def _guardrail_pet_registration(
             "Nome, espécie, raça e porte já constam nas mensagens do cliente (ou no foco do roteador).",
             "NÃO peça de novo os quatro dados nem reinicie o cadastro.",
             "Envie **apenas** um resumo numa linha (nome, cachorro/gato, raça, porte) e pergunte se confirma.",
-            "Só após 'sim' / confirmação explícita: set_pet_size (se aplicável) e create_pet.",
+            "Só após 'sim' / confirmação explícita: create_pet com os mesmos dados do resumo.",
         ]
         return specialist_input + "\n".join(lines)
 
@@ -549,11 +549,16 @@ def _appointment_created_without_confirmation(
         )
         return False
 
-    waits = _router_awaits_booking_confirmation(router_ctx)
-    if waits and _confirmation_found_in_history(history, current_user_message):
+    # Se o usuário confirmou explicitamente, não reprocessar mesmo sem flag de espera
+    if _confirmation_found_in_history(history, current_user_message):
+        logger.debug(
+            "GUARDRAIL pós | create/reschedule sem success mas confirmação encontrada no histórico — não reprocessar"
+        )
         return False
 
-    # Sem flag de espera mas tentativa de escrita sem sucesso — pode ser reprocesso útil
+    waits = _router_awaits_booking_confirmation(router_ctx)
+
+    # Sem flag de espera e sem confirmação — pode ser reprocesso útil
     if not waits:
         logger.debug(
             "GUARDRAIL pós | create/reschedule sem awaiting_confirmation/stage — sem success=true"
@@ -584,6 +589,13 @@ def _reply_claims_booking_success(reply: str) -> bool:
     if re.search(
         r"\b(falta\s+(eu\s+)?gravar|ainda\s+não\s+gravei|não\s+gravei\s+ainda|"
         r"só\s+falta\s+eu\s+gravar|posso\s+(já\s+)?confirmar\s+agora\s+no\s+sistema)\b",
+        normalized,
+    ):
+        return False
+    # Resposta informando dia fechado — NÃO é afirmação de sucesso
+    if re.search(
+        r"\b(está fechado|esta fechado|fica fechado|não abre|nao abre|não funciona|nao funciona|"
+        r"petshop.*fechado|fechado.*(?:sábado|sabado|domingo))\b",
         normalized,
     ):
         return False
