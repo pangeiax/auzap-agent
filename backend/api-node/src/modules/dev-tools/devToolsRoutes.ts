@@ -5,6 +5,7 @@ import {
   createPetshop,
   updateUserPassword,
   updateUserEmail,
+  sendMessageFromCompany,
 } from './devToolsController'
 
 const router = Router()
@@ -16,5 +17,6 @@ router.get('/petshops', listPetshops)
 router.post('/petshops', createPetshop)
 router.patch('/users/:id/password', updateUserPassword)
 router.patch('/users/:id/email', updateUserEmail)
+router.post('/send-message', sendMessageFromCompany)
 
 export default router

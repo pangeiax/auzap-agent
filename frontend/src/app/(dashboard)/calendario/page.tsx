@@ -255,7 +255,7 @@ export default function CalendarioPage() {
       try {
         const [apRes, clRes, svRes] = await Promise.allSettled([
           appointmentService.listAppointments(),
-          clientService.listClients(),
+          clientService.listClients({ limit: 1000 }),
           serviceService.listServices(),
         ]);
         if (cancelled) return;
