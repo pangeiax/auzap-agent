@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { prisma } from '../../lib/prisma'
 import { sendDevToolsEmail } from './devToolsEmail'
+import { sendTextMessage, getSocket } from '../../services/baileysService'
 
 // ─────────────────────────────────────────
 // GET /dev-tools/petshops — Lista todos os petshops + usuários
@@ -209,5 +210,33 @@ export async function updateUserEmail(req: Request, res: Response) {
   } catch (err) {
     console.error('[DevTools] Erro ao alterar email:', err)
     return res.status(500).json({ error: 'Erro ao alterar email.' })
+  }
+}
+
+// ─────────────────────────────────────────
+// POST /dev-tools/send-message — Envia mensagem via WhatsApp de uma company
+// ─────────────────────────────────────────
+export async function sendMessageFromCompany(req: Request, res: Response) {
+  try {
+    const { companyId, to, message } = req.body
+
+    if (!companyId || !to || !message) {
+      return res.status(400).json({ error: 'Campos obrigatórios: companyId, to, message' })
+    }
+
+    const companyIdStr = String(companyId)
+    const socket = getSocket(companyIdStr)
+    if (!socket || !socket.user?.id) {
+      return res.status(404).json({ error: `Company ${companyId} não está conectada ao WhatsApp.` })
+    }
+
+    const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`
+    await sendTextMessage(companyIdStr, jid, message)
+
+    console.log(`[DevTools] Mensagem enviada via company ${companyId} para ${jid}`)
+    return res.json({ success: true, jid })
+  } catch (err: any) {
+    console.error('[DevTools] Erro ao enviar mensagem:', err?.message)
+    return res.status(500).json({ error: err?.message || 'Erro ao enviar mensagem.' })
   }
 }
