@@ -866,38 +866,21 @@ function CustomerDetails({
                 <h3 className="text-sm font-medium text-[#727B8E] dark:text-[#8a94a6]">
                   Histórico de agendamentos
                 </h3>
-                <button
-                  type="button"
-                  disabled={sendingReminders}
-                  onClick={async () => {
-                    if (!customer) return;
-                    setSendingReminders(true);
-                    try {
-                      const res = await appointmentService.sendReminders(customer.id);
-                      if (res.total === 0) {
-                        alert("Nenhum agendamento para amanhã neste cliente.");
-                      } else if (res.sent > 0) {
-                        alert(
-                          `Lembrete enviado! ${res.total} agendamento(s) de amanhã.`
-                        );
-                      } else {
-                        alert("Falha ao enviar. Verifique se o WhatsApp está conectado.");
-                      }
-                    } catch {
-                      alert("Erro ao enviar lembrete. Verifique se o WhatsApp está conectado.");
-                    } finally {
-                      setSendingReminders(false);
-                    }
-                  }}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#1E62EC] text-white hover:bg-[#1E62EC]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {sendingReminders ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Send className="h-3.5 w-3.5" />
-                  )}
-                  {sendingReminders ? "Enviando..." : "Enviar Lembrete"}
-                </button>
+                {onSendReminder && (
+                  <button
+                    type="button"
+                    disabled={sendingReminder}
+                    onClick={() => customer && onSendReminder(customer.id)}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#1E62EC] text-white hover:bg-[#1E62EC]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {sendingReminder ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                    {sendingReminder ? "Enviando..." : "Enviar Lembrete"}
+                  </button>
+                )}
               </div>
               {loadingAppointments ? (
                 <div className="flex h-32 items-center justify-center">
@@ -1837,6 +1820,39 @@ export default function ClientesPage() {
     }
   };
 
+  const [sendingReminder, setSendingReminder] = useState(false);
+
+  const handleSendReminder = async (clientId: string) => {
+    if (sendingReminder) return;
+    setSendingReminder(true);
+    try {
+      const res = await appointmentService.sendReminders(clientId);
+      if (res.total === 0) {
+        toast.info(
+          "Nenhum agendamento futuro",
+          "Este cliente não tem agendamentos próximos para lembrar.",
+        );
+      } else if (res.sent > 0) {
+        toast.success(
+          "Lembrete enviado!",
+          `${res.total} agendamento(s) futuro(s) notificado(s) via WhatsApp.`,
+        );
+      } else {
+        toast.error(
+          "Falha no envio",
+          "Não foi possível enviar o lembrete. Verifique se o WhatsApp está conectado.",
+        );
+      }
+    } catch {
+      toast.error(
+        "WhatsApp desconectado",
+        "Não foi possível enviar o lembrete. Conecte o WhatsApp e tente novamente.",
+      );
+    } finally {
+      setSendingReminder(false);
+    }
+  };
+
   const handleSavePet = useCallback(
     async (petData: Omit<Pet, "id" | "customerId">, petId?: string) => {
       if (!selectedCustomer) return;
@@ -2064,6 +2080,8 @@ export default function ClientesPage() {
             setSyncTargetClientId("");
             setSyncModalSourceId(id);
           }}
+          onSendReminder={handleSendReminder}
+          sendingReminder={sendingReminder}
         />
       </AnimatePresence>
 

@@ -344,29 +344,41 @@ function ChatArea({
         conversationId={conversation.id}
       />
 
-      <div
-        ref={messagesContainerRef}
-        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6"
-      >
+      <div className="relative min-h-0 flex-1">
+        {scrollDate && (
+          <div className="absolute top-2 left-0 right-0 z-10 flex justify-center pointer-events-none">
+            <span className="px-3 py-1 rounded-lg bg-[#0F172A]/70 dark:bg-[#2A2B2F]/90 text-xs text-white/90 backdrop-blur-sm shadow-sm">
+              {scrollDate}
+            </span>
+          </div>
+        )}
+        <div
+          ref={messagesContainerRef}
+          className="flex h-full flex-col gap-4 overflow-y-auto p-4 sm:p-6"
+        >
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1E62EC] border-t-transparent" />
           </div>
         ) : (
-          <AnimatePresence mode="popLayout">
-            {messages.map((msg) => (
-              <motion.div
-                key={msg.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-              >
-                <ChatBubble {...msg} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
+          <>
+            <AnimatePresence mode="popLayout">
+              {messages.map((msg) => (
+                <motion.div
+                  key={msg.id}
+                  data-msg-date={msg.rawDate || ""}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChatBubble {...msg} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </>
         )}
+        </div>
       </div>
 
       {isRecording && (

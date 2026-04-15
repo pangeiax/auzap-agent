@@ -3,6 +3,7 @@ export interface ChatMessage {
   variant: 'sent' | 'received'
   message: string
   time: string
+  rawDate?: string
   isRead?: boolean
   isAudio?: boolean
   audioDuration?: string

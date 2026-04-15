@@ -4,8 +4,9 @@
  * ════════════════════════════════════════════════════════════════
  *
  * O que faz:
- *   Busca agendamentos de AMANHÃ de um cliente específico
- *   e envia um lembrete via WhatsApp.
+ *   Busca agendamentos FUTUROS de um cliente específico,
+ *   calcula quantos dias faltam, e envia um lembrete
+ *   personalizado via WhatsApp.
  *
  * Quando roda:
  *   Sob demanda — disparado pelo endpoint POST /appointments/send-reminders
@@ -17,11 +18,17 @@
 import { prisma } from '../lib/prisma'
 import { sendTextMessage } from '../services/baileysService'
 
-// ─── Helper: data de amanhã no fuso BRT ────────────────────────
-function tomorrowBR(): string {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  return d.toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+// ─── Helper: data de hoje no fuso BRT (yyyy-mm-dd) ─────────────
+function todayBR(): string {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+}
+
+// ─── Helper: calcula dias entre hoje e uma data ────────────────
+function daysUntil(scheduledDate: Date): number {
+  const today = new Date(todayBR() + 'T12:00:00Z')
+  const target = new Date(scheduledDate)
+  target.setUTCHours(12, 0, 0, 0)
+  return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 }
 
 // ─── Helper: formata horário "14:30" a partir de um Date ───────
@@ -35,23 +42,46 @@ function formatTime(time: Date | null | undefined): string {
   })
 }
 
+// ─── Helper: formata data "16/04" a partir de um Date ──────────
+function formatDate(date: Date): string {
+  return new Date(date).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  })
+}
+
+// ─── Helper: frase de encerramento baseada nos dias ────────────
+function closingPhrase(days: number, multipleAppointments: boolean): string {
+  if (multipleAppointments) {
+    return 'Estamos preparando tudo para receber vocês! 🐾'
+  }
+  if (days === 1) {
+    return 'Já é amanhã! Estamos te esperando 🐾'
+  }
+  if (days <= 3) {
+    return `Faltam só ${days} dias, estamos ansiosos para receber vocês! 🐾`
+  }
+  return 'Anotado na agenda? Estamos preparando tudo para receber vocês! 🐾'
+}
+
 // ─── Função principal (por cliente) ────────────────────────────
 export async function runReminderForClient(companyId: number, clientId: string): Promise<{
   sent: number
   total: number
   results: { appointmentId: string; service: string; success: boolean; error?: string }[]
 }> {
-  const tomorrow = tomorrowBR()
-  console.log(`[FollowUp:Reminder] Company ${companyId}, Client ${clientId} — verificando agendamentos para ${tomorrow}...`)
+  const today = todayBR()
+  console.log(`[FollowUp:Reminder] Company ${companyId}, Client ${clientId} — buscando agendamentos futuros...`)
 
   const results: { appointmentId: string; service: string; success: boolean; error?: string }[] = []
 
-  // LEITURA: busca TODOS os agendamentos de amanhã do cliente (exceto cancelados)
+  // LEITURA: busca TODOS os agendamentos futuros do cliente (a partir de amanhã, exceto cancelados)
   const appointments = await prisma.petshopAppointment.findMany({
     where: {
       companyId,
       clientId,
-      scheduledDate: new Date(tomorrow + 'T12:00:00Z'),
+      scheduledDate: { gt: new Date(today + 'T12:00:00Z') },
       status: { not: 'cancelled' },
     },
     include: {
@@ -59,10 +89,11 @@ export async function runReminderForClient(companyId: number, clientId: string):
       pet: { select: { name: true } },
       service: { select: { name: true } },
     },
+    orderBy: { scheduledDate: 'asc' },
   })
 
   if (appointments.length === 0) {
-    console.log(`[FollowUp:Reminder] Nenhum agendamento para amanhã.`)
+    console.log(`[FollowUp:Reminder] Nenhum agendamento futuro encontrado.`)
     return { sent: 0, total: 0, results }
   }
 
@@ -75,22 +106,36 @@ export async function runReminderForClient(companyId: number, clientId: string):
   const companyIdStr = String(companyId)
   const jid = phone.includes('@') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`
 
-  // Monta uma mensagem única com todos os agendamentos do cliente
+  // Calcula dias para cada agendamento
+  const allDays = appointments.map((apt) => daysUntil(apt.scheduledDate!))
+  const minDays = Math.min(...allDays)
+  const hasMultiple = appointments.length > 1
+
+  // Monta a mensagem
   const lines = [
     `Olá, ${clientName}! Tudo bem? 🐾`,
     '',
-    'Passando para lembrar dos seus agendamentos de amanhã:',
+    'Passando para lembrar dos seus agendamentos:',
     '',
   ]
 
   for (const apt of appointments) {
+    const days = daysUntil(apt.scheduledDate!)
     const petName = apt.pet?.name || 'seu pet'
     const serviceName = apt.service?.name || 'atendimento'
     const horario = formatTime(apt.startTime)
-    lines.push(`- ${petName}: ${serviceName}${horario ? ` às ${horario}` : ''}`)
+
+    if (days === 1) {
+      lines.push(`- ${petName}: ${serviceName} amanhã${horario ? ` às ${horario}` : ''}`)
+    } else {
+      lines.push(`- ${petName}: ${serviceName} em ${formatDate(apt.scheduledDate!)}${horario ? ` às ${horario}` : ''}`)
+    }
   }
 
-  lines.push('', 'Qualquer dúvida, é só chamar por aqui!', '', 'Até amanhã! 😊')
+  lines.push('')
+  lines.push(closingPhrase(minDays, hasMultiple))
+  lines.push('')
+  lines.push('Qualquer dúvida é só chamar por aqui. Até lá! 😊')
 
   const message = lines.join('\n')
   let sent = 0
