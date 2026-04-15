@@ -553,7 +553,7 @@ function CustomerDetails({
   }>({});
   const [savingPet, setSavingPet] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sendingReminders, setSendingReminders] = useState(false);
+  
 
   if (!customer) {
     return (
