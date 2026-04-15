@@ -1162,7 +1162,12 @@ function WhatsAppContent({
         if (statusCheckIntervalRef.current) {
           clearInterval(statusCheckIntervalRef.current);
         }
+      } else if (data.status === "reconnecting" || data.status === "connecting") {
+        // Reconectando — não mostrar como desconectado para evitar gerar QR desnecessário
+        setConnectionStatus("connecting");
+        setLastConnected((data as any).last_connected ?? null);
       } else {
+        setConnectionStatus("disconnected");
         setLastConnected((data as any).last_connected ?? null);
       }
     } catch (error) {

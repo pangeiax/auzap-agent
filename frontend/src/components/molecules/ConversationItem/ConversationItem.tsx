@@ -6,6 +6,7 @@ export interface ConversationItemProps {
   pets?: string
   lastMessage: string
   time: string
+  date?: string
   unreadCount?: number
   isOnline?: boolean
   isSelected?: boolean
@@ -28,6 +29,7 @@ export function ConversationItem({
   pets,
   lastMessage,
   time,
+  date,
   unreadCount = 0,
   isOnline = false,
   isSelected = false,
@@ -76,7 +78,12 @@ export function ConversationItem({
               </span>
             )}
           </div>
-          <span className="flex-shrink-0 text-xs text-[#727B8E] dark:text-[#8a94a6]">{time}</span>
+          <div className="flex flex-shrink-0 flex-col items-end">
+            {date && (
+              <span className="text-[10px] text-[#727B8E]/70 dark:text-[#8a94a6]/70">{date}</span>
+            )}
+            <span className="text-xs text-[#727B8E] dark:text-[#8a94a6]">{time}</span>
+          </div>
         </div>
 
         {pets && (

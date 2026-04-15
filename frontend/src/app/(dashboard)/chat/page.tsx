@@ -38,6 +38,9 @@ function mapApiConversation(conv: Conversation): MockConversation {
     /[a-z]/i.test(manual.toString());
   const displayPhone = shouldFallback ? "Numero nao identificado" : manual!;
 
+  const lastDate = conv.last_message_at ? new Date(conv.last_message_at) : null;
+  const isValidDate = lastDate && !isNaN(lastDate.getTime());
+
   return {
     id: conversationId,
     name: conv.client_name || "Cliente",
@@ -45,11 +48,11 @@ function mapApiConversation(conv: Conversation): MockConversation {
     whatsappPhone: conv.client_phone || "",
     pets: "",
     lastMessage: `${conv.message_count ?? 0} mensagens`,
-    time: conv.last_message_at
-      ? new Date(conv.last_message_at).toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+    time: isValidDate
+      ? lastDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+      : "",
+    date: isValidDate
+      ? lastDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
       : "",
     unreadCount: 0,
     isAiPaused: conv.ai_paused ?? conv.is_ai_paused ?? false,
@@ -60,15 +63,19 @@ function mapApiConversation(conv: Conversation): MockConversation {
 
 function mapApiMessage(msg: any): MockMessage {
   const isIncoming = msg.role === "user";
+  const raw = msg.createdAt || msg.created_at;
+  const date = raw ? new Date(raw) : null;
+  const time =
+    date && !isNaN(date.getTime())
+      ? date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+      : "";
   return {
     id: msg.id,
     variant: isIncoming ? "received" : "sent",
     message: msg.content || "",
-    time: new Date(msg.created_at).toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    time,
     isRead: true,
+    senderRole: msg.role ?? "assistant",
   };
 }
 
@@ -509,12 +516,18 @@ function ChatPageContent() {
 
     if (selectedConversation.whatsappPhone) {
       try {
-        await whatsappService.sendMessage({
-          to: selectedConversation.whatsappPhone,
-          message,
-        });
+        await Promise.all([
+          whatsappService.sendMessage({
+            to: selectedConversation.whatsappPhone,
+            message,
+          }),
+          conversationService.sendMessage(selectedId, {
+            message,
+            sender: "staff",
+          }),
+        ]);
       } catch (err) {
-        console.error("[Chat] Failed to send via WhatsApp:", err);
+        console.error("[Chat] Failed to send message:", err);
       }
     }
 

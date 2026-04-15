@@ -10,7 +10,7 @@ import path from 'path'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 import { prisma } from '../lib/prisma'
-import { handleIncomingMessage } from '../modules/webhook/messageHandle'
+import { handleIncomingMessage, handleOutgoingMessage } from '../modules/webhook/messageHandle'
 
 // ─────────────────────────────────────────
 // Mapa de sockets ativos em memória
@@ -99,14 +99,31 @@ export async function startBaileysSession(
     }
 
     if (connection === 'close') {
+      // Verifica novamente se este socket ainda é o ativo (pode ter mudado durante async)
+      if (activeSockets.get(companyIdStr) !== socket) return
+
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut
 
-      console.log(`[Baileys][company:${companyIdStr}] Desconectado. Reconectar: ${shouldReconnect}`)
+      console.log(`[Baileys][company:${companyIdStr}] Desconectado (code: ${statusCode}). Reconectar: ${shouldReconnect}`)
       clearTypingIntervalsForCompany(companyIdStr)
 
       if (shouldReconnect) {
-        await upsertSession(companyId, 'reconnecting')
+        // Se o socket já estava autenticado (tem user.id), o close pode ser transitório
+        // (ex: erro de init queries). Nesse caso, reconectar sem mudar status para "reconnecting"
+        const wasAuthenticated = !!socket.user?.id
+        if (!wasAuthenticated) {
+          await upsertSession(companyId, 'reconnecting')
+        } else {
+          console.log(`[Baileys][company:${companyIdStr}] Close transitório (socket autenticado). Reconectando sem mudar status.`)
+        }
+        // Remove listeners do socket antigo mas não chama .end() (evita loop de close events)
+        try {
+          socket.ev.removeAllListeners('connection.update')
+          socket.ev.removeAllListeners('creds.update')
+          socket.ev.removeAllListeners('messages.upsert')
+        } catch {}
+        activeSockets.delete(companyIdStr)
         setTimeout(() => startBaileysSession(companyIdStr), 5000)
       } else {
         await upsertSession(companyId, 'disconnected')
@@ -119,7 +136,9 @@ export async function startBaileysSession(
       const jid = socket.user?.id || ''
       const phone = jid.split(':')[0]
       console.log(`[Baileys][company:${companyIdStr}] Conectado como ${phone}`)
-      await upsertSession(companyId, 'connected', phone)
+      await upsertSession(companyId, 'connected', phone).catch(err =>
+        console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar status connected:`, err)
+      )
     }
   })
 
@@ -134,7 +153,17 @@ export async function startBaileysSession(
     if (activeSockets.get(companyIdStr) !== socket) return
 
     for (const msg of messages) {
-      if (msg.key.fromMe || !msg.message) continue
+      if (!msg.message) continue
+
+      if (msg.key.fromMe) {
+        // Mensagem enviada pelo próprio número (WhatsApp direto, celular, etc.)
+        try {
+          await handleOutgoingMessage(companyId, msg)
+        } catch (err) {
+          console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar mensagem enviada:`, err)
+        }
+        continue
+      }
 
       try {
         await handleIncomingMessage(companyId, socket, msg)

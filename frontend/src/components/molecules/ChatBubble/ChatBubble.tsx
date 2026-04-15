@@ -26,6 +26,7 @@ export interface ChatBubbleProps
   isAudio?: boolean
   audioDuration?: string
   audioUrl?: string
+  senderRole?: 'user' | 'assistant' | 'staff'
 }
 
 function CheckIcon({ className }: { className?: string }) {
@@ -198,6 +199,7 @@ export function ChatBubble({
   isAudio = false,
   audioDuration,
   audioUrl,
+  senderRole,
   className,
   ...props
 }: ChatBubbleProps) {
@@ -210,6 +212,18 @@ export function ChatBubble({
         isSent ? 'items-end' : 'items-start'
       )}
     >
+      {isSent && senderRole && (
+        <span
+          className={cn(
+            'rounded px-1.5 py-0.5 text-[10px] font-semibold',
+            senderRole === 'assistant'
+              ? 'bg-[#1E62EC]/10 text-[#1E62EC] dark:bg-[#1E62EC]/20 dark:text-[#5b9aff]'
+              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+          )}
+        >
+          {senderRole === 'assistant' ? 'IA' : 'Humano'}
+        </span>
+      )}
       <div className={cn(chatBubbleVariants({ variant, className }))} {...props}>
         {isAudio && audioDuration ? (
           <AudioPlayer duration={audioDuration} isSent={isSent} audioUrl={audioUrl} />

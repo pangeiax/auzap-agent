@@ -115,10 +115,11 @@ export async function sendMessage(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const conversationId = req.params.conversationId!
-    const { role, content } = req.body
+    const role = req.body.role || req.body.sender || 'assistant'
+    const content = req.body.content || req.body.message
 
-    if (!role || !content) {
-      return res.status(400).json({ error: 'role and content are required' })
+    if (!content) {
+      return res.status(400).json({ error: 'content (or message) is required' })
     }
 
     const conversation = await prisma.agentConversation.findUnique({

@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
+import { WhatsAppStatusProvider } from "@/contexts/WhatsAppStatusContext";
 import { useAuthContext } from "@/contexts";
 import { AuthLayout } from "@/components/templates/AuthLayout";
 
@@ -43,7 +44,11 @@ function ProtectedRoutes() {
     return <Navigate to="/login" replace />;
   }
 
-  return <Outlet />;
+  return (
+    <WhatsAppStatusProvider>
+      <Outlet />
+    </WhatsAppStatusProvider>
+  );
 }
 
 function AppRoutes() {
