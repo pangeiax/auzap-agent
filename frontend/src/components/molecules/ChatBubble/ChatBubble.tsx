@@ -221,7 +221,7 @@ export function ChatBubble({
               : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
           )}
         >
-          {senderRole === 'assistant' ? 'IA' : 'Humano'}
+          {senderRole === 'assistant' ? 'IA' : 'Staff'}
         </span>
       )}
       <div className={cn(chatBubbleVariants({ variant, className }))} {...props}>
