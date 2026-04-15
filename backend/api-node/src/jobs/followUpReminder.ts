@@ -4,37 +4,18 @@
  * ════════════════════════════════════════════════════════════════
  *
  * O que faz:
- *   Busca agendamentos de AMANHÃ que ainda não foram confirmados
- *   e envia um lembrete via WhatsApp para o cliente.
+ *   Busca agendamentos de AMANHÃ de um cliente específico
+ *   e envia um lembrete via WhatsApp.
  *
  * Quando roda:
- *   A cada 30 minutos (via setInterval)
+ *   Sob demanda — disparado pelo endpoint POST /appointments/send-reminders
  *
  * Banco de dados:
  *   SOMENTE LEITURA — não altera nenhum registro
- *
- * Anti-duplicação:
- *   Usa um Set em memória com a data do dia. Se o appointment já
- *   recebeu lembrete hoje, não envia de novo. O Set reseta
- *   automaticamente quando o dia muda.
  */
 
 import { prisma } from '../lib/prisma'
 import { sendTextMessage } from '../services/baileysService'
-
-// ─── Controle anti-duplicação ──────────────────────────────────
-// Armazena IDs de agendamentos que já receberam lembrete HOJE.
-// Quando o dia muda, o Set é limpo automaticamente.
-let sentToday = new Set<string>()
-let lastResetDate = ''
-
-function resetIfNewDay(): void {
-  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
-  if (today !== lastResetDate) {
-    sentToday = new Set()
-    lastResetDate = today
-  }
-}
 
 // ─── Helper: data de amanhã no fuso BRT ────────────────────────
 function tomorrowBR(): string {
@@ -54,86 +35,80 @@ function formatTime(time: Date | null | undefined): string {
   })
 }
 
-// ─── Intervalo ─────────────────────────────────────────────────
-const THIRTY_MINUTES = 30 * 60 * 1000
-
-// ─── Função principal ──────────────────────────────────────────
-async function run(): Promise<void> {
-  resetIfNewDay()
-
+// ─── Função principal (por cliente) ────────────────────────────
+export async function runReminderForClient(companyId: number, clientId: string): Promise<{
+  sent: number
+  total: number
+  results: { appointmentId: string; service: string; success: boolean; error?: string }[]
+}> {
   const tomorrow = tomorrowBR()
-  console.log(`[FollowUp:Reminder] Verificando agendamentos para ${tomorrow}...`)
+  console.log(`[FollowUp:Reminder] Company ${companyId}, Client ${clientId} — verificando agendamentos para ${tomorrow}...`)
+
+  const results: { appointmentId: string; service: string; success: boolean; error?: string }[] = []
+
+  // LEITURA: busca TODOS os agendamentos de amanhã do cliente (exceto cancelados)
+  const appointments = await prisma.petshopAppointment.findMany({
+    where: {
+      companyId,
+      clientId,
+      scheduledDate: new Date(tomorrow + 'T12:00:00Z'),
+      status: { not: 'cancelled' },
+    },
+    include: {
+      client: { select: { phone: true, name: true } },
+      pet: { select: { name: true } },
+      service: { select: { name: true } },
+    },
+  })
+
+  if (appointments.length === 0) {
+    console.log(`[FollowUp:Reminder] Nenhum agendamento para amanhã.`)
+    return { sent: 0, total: 0, results }
+  }
+
+  const phone = appointments[0].client?.phone
+  if (!phone) {
+    return { sent: 0, total: appointments.length, results: [{ appointmentId: '', service: '', success: false, error: 'Cliente sem telefone' }] }
+  }
+
+  const clientName = appointments[0].client?.name || 'Cliente'
+  const companyIdStr = String(companyId)
+  const jid = phone.includes('@') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`
+
+  // Monta uma mensagem única com todos os agendamentos do cliente
+  const lines = [
+    `Olá, ${clientName}! Tudo bem? 🐾`,
+    '',
+    'Passando para lembrar dos seus agendamentos de amanhã:',
+    '',
+  ]
+
+  for (const apt of appointments) {
+    const petName = apt.pet?.name || 'seu pet'
+    const serviceName = apt.service?.name || 'atendimento'
+    const horario = formatTime(apt.startTime)
+    lines.push(`- ${petName}: ${serviceName}${horario ? ` às ${horario}` : ''}`)
+  }
+
+  lines.push('', 'Qualquer dúvida, é só chamar por aqui!', '', 'Até amanhã! 😊')
+
+  const message = lines.join('\n')
+  let sent = 0
 
   try {
-    // LEITURA: busca agendamentos de amanhã não confirmados e não cancelados
-    const appointments = await prisma.petshopAppointment.findMany({
-      where: {
-        scheduledDate: new Date(tomorrow + 'T12:00:00Z'),
-        confirmed: false,
-        status: { not: 'cancelled' },
-      },
-      include: {
-        client: { select: { phone: true, name: true } },
-        pet: { select: { name: true } },
-        service: { select: { name: true } },
-        saasCompany: { select: { id: true } },
-      },
-    })
-
-    if (appointments.length === 0) {
-      console.log('[FollowUp:Reminder] Nenhum agendamento pendente para amanhã.')
-      return
-    }
-
-    let sent = 0
-
+    await sendTextMessage(companyIdStr, jid, message)
+    sent = 1
     for (const apt of appointments) {
-      // Anti-duplicação: pula se já enviou hoje
-      if (sentToday.has(apt.id)) continue
-
-      const phone = apt.client?.phone
-      if (!phone) continue
-
-      const clientName = apt.client?.name || 'Cliente'
-      const petName = apt.pet?.name || 'seu pet'
-      const serviceName = apt.service?.name || 'atendimento'
-      const horario = formatTime(apt.startTime)
-      const companyId = String(apt.saasCompany.id)
-
-      // Monta o JID (identificador do WhatsApp)
-      const jid = phone.includes('@') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`
-
-      // Monta a mensagem personalizada
-      const message = [
-        `Olá, ${clientName}! Tudo bem? 🐾`,
-        '',
-        `Passando para lembrar que ${petName} tem ${serviceName} marcado para amanhã${horario ? ` às ${horario}` : ''}.`,
-        '',
-        'Podemos confirmar sua presença? Responda *SIM* para confirmar ou entre em contato caso precise reagendar.',
-        '',
-        'Obrigado! 😊',
-      ].join('\n')
-
-      try {
-        await sendTextMessage(companyId, jid, message)
-        sentToday.add(apt.id)
-        sent++
-        // Delay entre mensagens para não sobrecarregar (450ms como no campaigns)
-        await new Promise((r) => setTimeout(r, 450))
-      } catch (err) {
-        console.error(`[FollowUp:Reminder] Erro ao enviar para ${phone}:`, err)
-      }
+      results.push({ appointmentId: apt.id, service: apt.service?.name || '', success: true })
     }
-
-    console.log(`[FollowUp:Reminder] ${sent} lembrete(s) enviado(s) de ${appointments.length} agendamento(s).`)
-  } catch (err) {
-    console.error('[FollowUp:Reminder] Erro geral:', err)
+  } catch (err: any) {
+    const errorMsg = err?.message ? String(err.message) : String(err)
+    for (const apt of appointments) {
+      results.push({ appointmentId: apt.id, service: apt.service?.name || '', success: false, error: errorMsg })
+    }
+    console.error(`[FollowUp:Reminder] Erro ao enviar para ${phone}:`, errorMsg)
   }
-}
 
-// ─── Exporta o starter ─────────────────────────────────────────
-export function startFollowUpReminder(): void {
-  run()
-  setInterval(run, THIRTY_MINUTES)
-  console.log('[FollowUp:Reminder] Ativo — verifica a cada 30 min')
+  console.log(`[FollowUp:Reminder] ${sent ? 'Lembrete enviado' : 'Falha no envio'} para ${clientName} (${appointments.length} agendamento(s)).`)
+  return { sent, total: appointments.length, results }
 }

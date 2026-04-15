@@ -169,4 +169,13 @@ export const appointmentService = {
     )
     return response.data
   },
+
+  async sendReminders(clientId: string): Promise<{
+    sent: number
+    total: number
+    results: { appointmentId: string; service: string; success: boolean; error?: string }[]
+  }> {
+    const response = await api.post('/appointments/send-reminders', { clientId })
+    return response.data
+  },
 }

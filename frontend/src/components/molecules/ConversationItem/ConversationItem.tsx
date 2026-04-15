@@ -76,7 +76,7 @@ export function ConversationItem({
               </span>
             )}
           </div>
-          <span className="flex-shrink-0 text-xs text-[#727B8E] dark:text-[#8a94a6]">{time}</span>
+          <span className="flex-shrink-0 text-xs text-[#727B8E] dark:text-[#8a94a6] text-right whitespace-pre-line">{time}</span>
         </div>
 
         {pets && (

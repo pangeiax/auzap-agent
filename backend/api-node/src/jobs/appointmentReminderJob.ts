@@ -1,15 +1,19 @@
 /**
- * Orquestrador: apenas importa e inicia os 3 follow-ups.
- * Cada follow-up vive no seu próprio arquivo com lógica independente.
+ * Orquestrador de follow-ups.
+ *
+ * Atualmente apenas o lembrete de agendamento está ativo,
+ * e funciona sob demanda (endpoint), não automático.
+ *
+ * Os outros dois follow-ups estão desativados por enquanto.
  */
 
-import { startFollowUpReminder } from './followUpReminder'
-import { startFollowUpPostService } from './followUpPostService'
-import { startFollowUpReactivation } from './followUpReactivation'
+// import { startFollowUpPostService } from './followUpPostService'     // DESATIVADO
+// import { startFollowUpReactivation } from './followUpReactivation'   // DESATIVADO
 
 export function startAppointmentReminderJob(): void {
-  console.log('[Jobs] Iniciando follow-ups...')
-  startFollowUpReminder()
-  startFollowUpPostService()
-  startFollowUpReactivation()
+  console.log('[Jobs] Follow-ups carregados (lembrete de agendamento disponível via endpoint)')
+
+  // DESATIVADOS — descomentar quando quiser ativar:
+  // startFollowUpPostService()
+  // startFollowUpReactivation()
 }

@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma'
 import { isUuidString } from '../../lib/uuidValidation'
 import { cancelPetshopAppointment, extractDoublePairPartnerAppointmentId } from './appointmentCancelCore'
 import { createManualScheduleAppointment } from './manualScheduleCore'
+import { runReminderForClient } from '../../jobs/followUpReminder'
 
 // Combina scheduledDate (Date) + schedule.startTime (Time) em ISO string com offset Brasília
 // startTime @db.Time é armazenado em UTC, mas representa horário local (BRT = UTC-3)
@@ -503,5 +504,23 @@ export async function getAvailableDates(req: Request, res: Response) {
   } catch (error) {
     console.error('Error getting available dates:', error)
     res.status(500).json({ error: 'Failed to get available dates' })
+  }
+}
+
+// ─── POST /appointments/send-reminders ─────────────────────────
+// Dispara follow-up de lembrete para agendamentos de amanhã de um cliente específico.
+// Body: { clientId: string }
+export async function sendReminders(req: Request, res: Response) {
+  try {
+    const companyId = req.user!.companyId
+    const { clientId } = req.body
+    if (!clientId) {
+      return res.status(400).json({ error: 'clientId é obrigatório' })
+    }
+    const result = await runReminderForClient(companyId, clientId)
+    res.json(result)
+  } catch (error: any) {
+    console.error('[sendReminders] Erro:', error)
+    res.status(500).json({ error: error?.message || 'Erro ao enviar lembretes' })
   }
 }

@@ -16,6 +16,7 @@ import {
   Loader2,
   Eye,
   Link2,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { isValidCpfDigits, maskCpfInput, normalizeCpfDigits } from "@/lib/cpf";
@@ -552,6 +553,7 @@ function CustomerDetails({
   }>({});
   const [savingPet, setSavingPet] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sendingReminders, setSendingReminders] = useState(false);
 
   if (!customer) {
     return (
@@ -864,6 +866,38 @@ function CustomerDetails({
                 <h3 className="text-sm font-medium text-[#727B8E] dark:text-[#8a94a6]">
                   Histórico de agendamentos
                 </h3>
+                <button
+                  type="button"
+                  disabled={sendingReminders}
+                  onClick={async () => {
+                    if (!customer) return;
+                    setSendingReminders(true);
+                    try {
+                      const res = await appointmentService.sendReminders(customer.id);
+                      if (res.total === 0) {
+                        alert("Nenhum agendamento para amanhã neste cliente.");
+                      } else if (res.sent > 0) {
+                        alert(
+                          `Lembrete enviado! ${res.total} agendamento(s) de amanhã.`
+                        );
+                      } else {
+                        alert("Falha ao enviar. Verifique se o WhatsApp está conectado.");
+                      }
+                    } catch {
+                      alert("Erro ao enviar lembrete. Verifique se o WhatsApp está conectado.");
+                    } finally {
+                      setSendingReminders(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#1E62EC] text-white hover:bg-[#1E62EC]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {sendingReminders ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  {sendingReminders ? "Enviando..." : "Enviar Lembrete"}
+                </button>
               </div>
               {loadingAppointments ? (
                 <div className="flex h-32 items-center justify-center">

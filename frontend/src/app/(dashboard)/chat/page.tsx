@@ -46,10 +46,13 @@ function mapApiConversation(conv: Conversation): MockConversation {
     pets: "",
     lastMessage: `${conv.message_count ?? 0} mensagens`,
     time: conv.last_message_at
-      ? new Date(conv.last_message_at).toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+      ? (() => {
+        const d = new Date(conv.last_message_at);
+        if (isNaN(d.getTime())) return "";
+        const date = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+        const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        return `${date}\n${time}`;
+      })()
       : "",
     unreadCount: 0,
     isAiPaused: conv.ai_paused ?? conv.is_ai_paused ?? false,
@@ -58,16 +61,20 @@ function mapApiConversation(conv: Conversation): MockConversation {
   };
 }
 
+function formatMessageTime(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 function mapApiMessage(msg: any): MockMessage {
   const isIncoming = msg.role === "user";
   return {
     id: msg.id,
     variant: isIncoming ? "received" : "sent",
     message: msg.content || "",
-    time: new Date(msg.created_at).toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    time: formatMessageTime(msg.createdAt ?? msg.created_at),
     isRead: true,
   };
 }
