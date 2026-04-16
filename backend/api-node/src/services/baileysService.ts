@@ -157,6 +157,10 @@ export async function sendTextMessage(
   if (!socket) {
     throw new Error(`[Baileys] Nenhum socket ativo para company ${companyIdStr}`)
   }
+  if (!socket.user) {
+    console.error(`[Baileys][company:${companyIdStr}] Socket existe mas user é undefined — sessão não autenticada. JID tentado: ${jid}`)
+    throw new Error(`[Baileys] Sessão da company ${companyIdStr} não está autenticada (socket.user undefined). Reconecte o WhatsApp.`)
+  }
 
   const MAX_RETRIES = 2
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {

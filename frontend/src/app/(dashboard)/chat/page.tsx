@@ -68,13 +68,22 @@ function formatMessageTime(raw: string | null | undefined): string {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatMessageDate(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 function mapApiMessage(msg: any): MockMessage {
   const isIncoming = msg.role === "user";
+  const rawTs = msg.createdAt ?? msg.created_at;
   return {
     id: msg.id,
     variant: isIncoming ? "received" : "sent",
     message: msg.content || "",
-    time: formatMessageTime(msg.createdAt ?? msg.created_at),
+    time: formatMessageTime(rawTs),
+    rawDate: formatMessageDate(rawTs),
     isRead: true,
   };
 }
@@ -282,19 +291,26 @@ function ChatArea({
   loading?: boolean;
 }) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const scrollDateRef = useRef<HTMLDivElement>(null);
+  const scrollDateTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isAutoScrolling = useRef(false);
 
   useEffect(() => {
     if (messagesContainerRef.current) {
+      isAutoScrolling.current = true;
       messagesContainerRef.current.scrollTop =
         messagesContainerRef.current.scrollHeight;
+      setTimeout(() => { isAutoScrolling.current = false; }, 100);
     }
   }, [messages]);
 
   useEffect(() => {
     const handleResize = () => {
       if (messagesContainerRef.current) {
+        isAutoScrolling.current = true;
         messagesContainerRef.current.scrollTop =
           messagesContainerRef.current.scrollHeight;
+        setTimeout(() => { isAutoScrolling.current = false; }, 100);
       }
     };
 
@@ -302,6 +318,56 @@ function ChatArea({
     return () =>
       window.visualViewport?.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    const label = scrollDateRef.current;
+    if (!container || !label) return;
+
+    const showLabel = (text: string) => {
+      const span = label.querySelector("span");
+      if (span) span.textContent = text;
+      label.style.opacity = "1";
+    };
+
+    const hideLabel = () => {
+      label.style.opacity = "0";
+    };
+
+    const handleScroll = () => {
+      if (isAutoScrolling.current) return;
+
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+      if (isAtBottom) {
+        hideLabel();
+        return;
+      }
+
+      const bubbles = container.querySelectorAll("[data-msg-date]");
+      let visibleDate: string | null = null;
+
+      for (const bubble of bubbles) {
+        const rect = bubble.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        if (rect.top >= containerRect.top - 20) {
+          visibleDate = bubble.getAttribute("data-msg-date");
+          break;
+        }
+      }
+
+      if (visibleDate) {
+        showLabel(visibleDate);
+        if (scrollDateTimeout.current) clearTimeout(scrollDateTimeout.current);
+        scrollDateTimeout.current = setTimeout(hideLabel, 1500);
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      if (scrollDateTimeout.current) clearTimeout(scrollDateTimeout.current);
+    };
+  }, [messages]);
 
   const formatRecordingTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -344,14 +410,15 @@ function ChatArea({
         conversationId={conversation.id}
       />
 
-      <div className="relative min-h-0 flex-1">
-        {scrollDate && (
-          <div className="absolute top-2 left-0 right-0 z-10 flex justify-center pointer-events-none">
-            <span className="px-3 py-1 rounded-lg bg-[#0F172A]/70 dark:bg-[#2A2B2F]/90 text-xs text-white/90 backdrop-blur-sm shadow-sm">
-              {scrollDate}
-            </span>
-          </div>
-        )}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div
+          ref={scrollDateRef}
+          style={{ opacity: 0 }}
+          className="absolute top-2 left-0 right-0 z-10 flex justify-center pointer-events-none transition-opacity duration-300"
+        >
+          <span className="px-3 py-1 rounded-lg bg-[#0F172A]/70 dark:bg-[#2A2B2F]/90 text-xs text-white/90 backdrop-blur-sm shadow-sm">
+          </span>
+        </div>
         <div
           ref={messagesContainerRef}
           className="flex h-full flex-col gap-4 overflow-y-auto p-4 sm:p-6"
@@ -361,22 +428,28 @@ function ChatArea({
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1E62EC] border-t-transparent" />
           </div>
         ) : (
-          <>
-            <AnimatePresence mode="popLayout">
-              {messages.map((msg) => (
-                <motion.div
-                  key={msg.id}
-                  data-msg-date={msg.rawDate || ""}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <ChatBubble {...msg} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </>
+          <AnimatePresence mode="popLayout">
+            {messages.map((msg) => (
+              <motion.div
+                key={msg.id}
+                data-msg-date={msg.rawDate || ""}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ChatBubble
+                  message={msg.message}
+                  time={msg.time}
+                  variant={msg.variant}
+                  isRead={msg.isRead}
+                  isAudio={msg.isAudio}
+                  audioDuration={msg.audioDuration}
+                  audioUrl={msg.audioUrl}
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         )}
         </div>
       </div>

@@ -104,10 +104,21 @@ export async function runReminderForClient(companyId: number, clientId: string):
 
   const clientName = appointments[0].client?.name || 'Cliente'
   const companyIdStr = String(companyId)
-  const jid = phone.includes('@') ? phone : `${phone.replace(/\D/g, '')}@s.whatsapp.net`
+
+  // Monta o JID: usa o phone do cliente + sufixo correto
+  // Se o phone já tem @lid ou @s.whatsapp.net, usa direto
+  // Se não tem @, adiciona @s.whatsapp.net
+  let jid: string
+  if (phone.includes('@')) {
+    jid = phone
+  } else {
+    jid = `${phone}@s.whatsapp.net`
+  }
+
+  console.log(`[FollowUp:Reminder] JID: ${jid} | phone original: ${phone}`)
 
   // Calcula dias para cada agendamento
-  const allDays = appointments.map((apt) => daysUntil(apt.scheduledDate!))
+  const allDays = appointments.map((apt: { scheduledDate: Date | null }) => daysUntil(apt.scheduledDate!))
   const minDays = Math.min(...allDays)
   const hasMultiple = appointments.length > 1
 

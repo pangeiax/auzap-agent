@@ -520,6 +520,8 @@ function CustomerDetails({
   loadingAppointments,
   loadingConversations,
   onRequestSyncWhatsApp,
+  onSendReminder,
+  sendingReminder,
 }: {
   customer: Customer | null;
   onBack: () => void;
@@ -542,6 +544,8 @@ function CustomerDetails({
   loadingAppointments?: boolean;
   loadingConversations?: boolean;
   onRequestSyncWhatsApp?: (customerId: string) => void;
+  onSendReminder?: (clientId: string) => void;
+  sendingReminder?: boolean;
 }) {
   const [petModalOpen, setPetModalOpen] = useState(false);
   const [editingPet, setEditingPet] = useState<Pet | null>(null);
