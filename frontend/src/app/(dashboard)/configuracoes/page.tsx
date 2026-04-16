@@ -1162,7 +1162,14 @@ function WhatsAppContent({
         if (statusCheckIntervalRef.current) {
           clearInterval(statusCheckIntervalRef.current);
         }
+      } else if (data.status === "reconnecting" || data.status === "connecting") {
+        // Se já estamos mostrando QR, não sobrescrever — aguardar "connected" ou expiração
+        setConnectionStatus((prev) => (prev === "qr" ? "qr" : "connecting"));
+        setLastConnected((data as any).last_connected ?? null);
       } else {
+        // "disconnected" — se estamos em QR, pode ser transitório (restart 515), manter QR
+        // O QR tem botão "Cancelar" para o usuário sair manualmente se quiser
+        setConnectionStatus((prev) => (prev === "qr" ? "qr" : "disconnected"));
         setLastConnected((data as any).last_connected ?? null);
       }
     } catch (error) {
@@ -1373,9 +1380,15 @@ function WhatsAppContent({
             <h4 className="mb-2 text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
               Conectando...
             </h4>
-            <p className="text-center text-sm text-[#727B8E] dark:text-[#8a94a6]">
+            <p className="mb-6 text-center text-sm text-[#727B8E] dark:text-[#8a94a6]">
               Estamos estabelecendo a conexão com seu WhatsApp
             </p>
+            <Button
+              variant="outline"
+              onClick={() => setConnectionStatus("disconnected")}
+            >
+              Cancelar
+            </Button>
           </div>
         )}
       </section>

@@ -48,7 +48,7 @@ export interface ConversationAnalysis {
 
 export interface SendMessageRequest {
   message: string
-  sender?: 'user' | 'assistant'
+  sender?: 'user' | 'assistant' | 'staff'
   metadata?: Record<string, unknown>
 }
 

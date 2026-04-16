@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import QRCode from 'qrcode'
-import { startBaileysSession, disconnectSession, sendTextMessage } from '../../services/baileysService'
+import { startBaileysSession, disconnectSession, sendTextMessage, getSocket } from '../../services/baileysService'
+import { markMessageAsSaved } from '../webhook/messageHandle'
 import { prisma } from '../../lib/prisma'
 
 // ─────────────────────────────────────────
@@ -114,8 +115,29 @@ export async function getMyStatus(req: Request, res: Response) {
     return res.json({ status: 'disconnected', phone: null })
   }
 
+  // Reconciliar: corrige divergência entre estado do banco e socket real
+  let status = session.status
+  const socket = getSocket(String(companyId))
+
+  if (socket?.user?.id && (status === 'reconnecting' || status === 'connecting')) {
+    status = 'connected'
+    // Corrige o banco em background
+    prisma.whatsappSession.update({
+      where: { companyId },
+      data: { status: 'connected' },
+    }).catch(() => {})
+  } else if (!socket && (status === 'connected' || status === 'reconnecting')) {
+    // Sem socket ativo mas banco diz conectado/reconectando — marcar como desconectado
+    // Nota: 'connecting' não entra aqui pois pode ser reconexão em andamento (ex: restart 515)
+    status = 'disconnected'
+    prisma.whatsappSession.update({
+      where: { companyId },
+      data: { status: 'disconnected' },
+    }).catch(() => {})
+  }
+
   return res.json({
-    status: session.status,
+    status,
     phone: session.phoneNumber,
     last_connected: session.connectedAt?.toISOString() ?? null,
   })
@@ -128,11 +150,21 @@ export async function getQRCode(req: Request, res: Response) {
   const company = await prisma.saasCompany.findUnique({ where: { id: companyId } })
   if (!company) return res.status(404).json({ error: 'Company não encontrada' })
 
+  // Verificar se já está conectado via socket ativo OU banco
+  const socket = getSocket(String(companyId))
   const existing = await prisma.whatsappSession.findUnique({ where: { companyId } })
-  if (existing?.status === 'connected') {
+
+  if (socket?.user?.id || existing?.status === 'connected') {
+    // Corrige status se necessário
+    if (existing && existing.status !== 'connected' && socket?.user?.id) {
+      await prisma.whatsappSession.update({
+        where: { companyId },
+        data: { status: 'connected' },
+      })
+    }
     return res.status(409).json({
       error: 'Sessão WhatsApp já está ativa.',
-      phone: existing.phoneNumber,
+      phone: existing?.phoneNumber ?? socket?.user?.id?.split(':')[0],
     })
   }
 
@@ -194,6 +226,7 @@ export async function sendMessage(req: Request, res: Response) {
 
   try {
     const jid = to.includes('@') ? to : `${to.replace(/\D/g, '')}@s.whatsapp.net`
+    markMessageAsSaved(companyId, jid, message)
     await sendTextMessage(String(companyId), jid, message)
     return res.json({ success: true })
   } catch (err) {

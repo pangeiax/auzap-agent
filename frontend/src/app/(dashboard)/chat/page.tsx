@@ -38,6 +38,9 @@ function mapApiConversation(conv: Conversation): MockConversation {
     /[a-z]/i.test(manual.toString());
   const displayPhone = shouldFallback ? "Numero nao identificado" : manual!;
 
+  const lastDate = conv.last_message_at ? new Date(conv.last_message_at) : null;
+  const isValidDate = lastDate && !isNaN(lastDate.getTime());
+
   return {
     id: conversationId,
     name: conv.client_name || "Cliente",
@@ -85,6 +88,7 @@ function mapApiMessage(msg: any): MockMessage {
     time: formatMessageTime(rawTs),
     rawDate: formatMessageDate(rawTs),
     isRead: true,
+    senderRole: msg.role ?? "assistant",
   };
 }
 
@@ -601,12 +605,18 @@ function ChatPageContent() {
 
     if (selectedConversation.whatsappPhone) {
       try {
-        await whatsappService.sendMessage({
-          to: selectedConversation.whatsappPhone,
-          message,
-        });
+        await Promise.all([
+          whatsappService.sendMessage({
+            to: selectedConversation.whatsappPhone,
+            message,
+          }),
+          conversationService.sendMessage(selectedId, {
+            message,
+            sender: "staff",
+          }),
+        ]);
       } catch (err) {
-        console.error("[Chat] Failed to send via WhatsApp:", err);
+        console.error("[Chat] Failed to send message:", err);
       }
     }
 

@@ -1,5 +1,4 @@
 import { Link, useLocation } from "react-router-dom";
-import { useState, useEffect } from "react";
 import {
   Home,
   MessageSquare,
@@ -14,35 +13,10 @@ import {
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { cn } from "@/lib/cn";
 import { useTheme } from "@/contexts/ThemeContext";
-import { whatsappService } from "@/services";
+import { useWhatsAppStatus } from "@/contexts/WhatsAppStatusContext";
 
 function WhatsAppStatusDot() {
-  const [status, setStatus] = useState<
-    "connected" | "disconnected" | "loading"
-  >("loading");
-  const [lastConnected, setLastConnected] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const check = async () => {
-      try {
-        const data = await whatsappService.getStatus();
-        if (cancelled) return;
-        setStatus(data.status === "connected" ? "connected" : "disconnected");
-        setLastConnected((data as any).last_connected ?? null);
-      } catch {
-        if (!cancelled) setStatus("disconnected");
-      }
-    };
-
-    check();
-    const interval = setInterval(check, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+  const { status, lastConnected } = useWhatsAppStatus();
 
   const isConnected = status === "connected";
   const isLoading = status === "loading";
@@ -102,6 +76,7 @@ interface TopNavProps {
 export function TopNav({ linked = true, onMenuClick }: TopNavProps) {
   const { pathname } = useLocation();
   const { theme, toggleTheme } = useTheme();
+
 
   return (
     <Tooltip.Provider delayDuration={200}>

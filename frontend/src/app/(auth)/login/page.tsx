@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { Wrench } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -126,6 +127,18 @@ export default function LoginPage() {
         open={showForgotPassword}
         onClose={() => setShowForgotPassword(false)}
       />
+
+      {/* Dev Tools — só aparece se localStorage "dev-tool" estiver setado */}
+      {typeof window !== "undefined" && !!localStorage.getItem("dev-tool") && (
+        <button
+          type="button"
+          onClick={() => navigate("/dev-tools")}
+          className="fixed bottom-4 right-4 flex h-10 w-10 items-center justify-center rounded-full border border-[#727B8E]/20 bg-white/80 text-[#727B8E] shadow-sm backdrop-blur-sm transition-colors hover:bg-[#1E62EC] hover:text-white dark:border-[#40485A] dark:bg-[#1A1B1D]/80"
+          title="Dev Tools"
+        >
+          <Wrench size={18} />
+        </button>
+      )}
     </>
   );
 }

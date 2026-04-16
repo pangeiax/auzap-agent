@@ -6,6 +6,7 @@ export interface ConversationItemProps {
   pets?: string
   lastMessage: string
   time: string
+  date?: string
   unreadCount?: number
   isOnline?: boolean
   isSelected?: boolean
@@ -28,6 +29,7 @@ export function ConversationItem({
   pets,
   lastMessage,
   time,
+  date,
   unreadCount = 0,
   isOnline = false,
   isSelected = false,

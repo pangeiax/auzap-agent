@@ -385,7 +385,7 @@ model PetshopAppointment {
   saasCompany SaasCompany      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   pet         PetshopPet       @relation(fields: [petId], references: [id], onDelete: Cascade)
-  service     PetshopService   @relation(fields: [serviceId], references: [id])
+  service     PetshopService   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   slot        PetshopSlot?     @relation(fields: [slotId], references: [id])
   schedule    PetshopSchedule? @relation(fields: [scheduleId], references: [id])
   staff       PetshopStaff?    @relation(fields: [staffId], references: [id])

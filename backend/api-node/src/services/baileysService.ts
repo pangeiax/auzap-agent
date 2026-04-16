@@ -10,7 +10,7 @@ import path from 'path'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
 import { prisma } from '../lib/prisma'
-import { handleIncomingMessage } from '../modules/webhook/messageHandle'
+import { handleIncomingMessage, handleOutgoingMessage } from '../modules/webhook/messageHandle'
 
 // ─────────────────────────────────────────
 // Mapa de sockets ativos em memória
@@ -99,19 +99,40 @@ export async function startBaileysSession(
     }
 
     if (connection === 'close') {
-      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+      // Verifica novamente se este socket ainda é o ativo (pode ter mudado durante async)
+      if (activeSockets.get(companyIdStr) !== socket) return
 
-      console.log(`[Baileys][company:${companyIdStr}] Desconectado. Reconectar: ${shouldReconnect}`)
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
+      const wasAuthenticated = !!socket.user?.id
+      // 515 = stream restart (normal após pairing ou reconexão) — sempre reconectar
+      const isRestartRequired = statusCode === 515 || statusCode === DisconnectReason.restartRequired
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && (wasAuthenticated || isRestartRequired)
+
+      console.log(`[Baileys][company:${companyIdStr}] Desconectado (code: ${statusCode}). Autenticado: ${wasAuthenticated}. Restart: ${isRestartRequired}. Reconectar: ${shouldReconnect}`)
       clearTypingIntervalsForCompany(companyIdStr)
 
       if (shouldReconnect) {
-        await upsertSession(companyId, 'reconnecting')
-        setTimeout(() => startBaileysSession(companyIdStr), 5000)
-      } else {
+        // Socket autenticado ou restart necessário — reconecta
+        console.log(`[Baileys][company:${companyIdStr}] Reconectando (${isRestartRequired ? 'restart required' : 'close transitório'})...`)
+        // Remove listeners do socket antigo mas não chama .end() (evita loop de close events)
+        try {
+          socket.ev.removeAllListeners('connection.update')
+          socket.ev.removeAllListeners('creds.update')
+          socket.ev.removeAllListeners('messages.upsert')
+        } catch {}
+        activeSockets.delete(companyIdStr)
+        setTimeout(() => startBaileysSession(companyIdStr), isRestartRequired ? 1000 : 5000)
+      } else if (statusCode === DisconnectReason.loggedOut) {
+        // Logout explícito — limpa sessão
+        console.log(`[Baileys][company:${companyIdStr}] Logout. Removendo sessão.`)
         await upsertSession(companyId, 'disconnected')
         cleanupExistingSocket(companyIdStr)
         fs.rmSync(sessionDir, { recursive: true, force: true })
+      } else {
+        // Não autenticado (QR expirou, etc.) — para de reconectar
+        console.log(`[Baileys][company:${companyIdStr}] Sessão não autenticada. Parando reconexão.`)
+        await upsertSession(companyId, 'disconnected')
+        cleanupExistingSocket(companyIdStr)
       }
     }
 
@@ -119,7 +140,9 @@ export async function startBaileysSession(
       const jid = socket.user?.id || ''
       const phone = jid.split(':')[0]
       console.log(`[Baileys][company:${companyIdStr}] Conectado como ${phone}`)
-      await upsertSession(companyId, 'connected', phone)
+      await upsertSession(companyId, 'connected', phone).catch(err =>
+        console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar status connected:`, err)
+      )
     }
   })
 
@@ -128,13 +151,45 @@ export async function startBaileysSession(
 
   // ── Evento: mensagens recebidas ───────────
   socket.ev.on('messages.upsert', async ({ messages, type }: any) => {
-    if (type !== 'notify') return
-
     // Ignora eventos de sockets que já foram substituídos
     if (activeSockets.get(companyIdStr) !== socket) return
 
+    const now = Math.floor(Date.now() / 1000)
+
     for (const msg of messages) {
-      if (msg.key.fromMe || !msg.message) continue
+      if (!msg.message) continue
+
+      if (msg.key.fromMe) {
+        // Mensagem enviada pelo próprio número (WhatsApp direto, celular, etc.)
+        // Aceita qualquer type (notify, append, etc.) para capturar mensagens staff
+        // Mas aplica filtro de timestamp para evitar duplicatas na reconexão
+        const fromMeTimestamp = typeof msg.messageTimestamp === 'number'
+          ? msg.messageTimestamp
+          : Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0)
+
+        if (fromMeTimestamp > 0 && (now - fromMeTimestamp) > 60) {
+          continue
+        }
+
+        try {
+          await handleOutgoingMessage(companyId, msg)
+        } catch (err) {
+          console.error(`[Baileys][company:${companyIdStr}] Erro ao salvar mensagem enviada:`, err)
+        }
+        continue
+      }
+
+      // Mensagens recebidas: apenas type 'notify' (ignora histórico/append)
+      if (type !== 'notify') continue
+
+      // Ignora mensagens antigas (offline/histórico) — evita duplicatas na reconexão
+      const msgTimestamp = typeof msg.messageTimestamp === 'number'
+        ? msg.messageTimestamp
+        : Number(msg.messageTimestamp?.low ?? msg.messageTimestamp ?? 0)
+
+      if (msgTimestamp > 0 && (now - msgTimestamp) > 60) {
+        continue
+      }
 
       try {
         await handleIncomingMessage(companyId, socket, msg)
