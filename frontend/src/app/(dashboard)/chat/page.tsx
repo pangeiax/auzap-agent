@@ -263,6 +263,7 @@ function ChatArea({
   messages,
   isAiActive,
   onToggleAi,
+  togglingAi,
   onSendMessage,
   isRecording,
   onStartRecording,
@@ -274,6 +275,7 @@ function ChatArea({
   messages: MockMessage[];
   isAiActive: boolean;
   onToggleAi: () => void;
+  togglingAi: boolean;
   onSendMessage: (message: string) => void;
   isRecording: boolean;
   onStartRecording: () => void;
@@ -340,6 +342,7 @@ function ChatArea({
         pets={conversation.pets}
         isAiActive={isAiActive}
         onToggleAi={onToggleAi}
+        togglingAi={togglingAi}
         clientId={conversation.clientId}
         conversationId={conversation.id}
       />
@@ -404,6 +407,7 @@ function ChatPageContent() {
     {},
   );
   const [isAiActive, setIsAiActive] = useState(true);
+  const [togglingAi, setTogglingAi] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [loadingConversations, setLoadingConversations] = useState(false);
@@ -565,10 +569,12 @@ function ChatPageContent() {
   };
 
   const handleToggleAi = async () => {
+    if (togglingAi) return;
     const newState = !isAiActive;
     setIsAiActive(newState);
 
     if (useRealApi && selectedConversation) {
+      setTogglingAi(true);
       try {
         await toggleAI(
           selectedId!,
@@ -582,6 +588,8 @@ function ChatPageContent() {
         );
       } catch {
         setIsAiActive(!newState);
+      } finally {
+        setTogglingAi(false);
       }
     }
   };
@@ -724,6 +732,7 @@ function ChatPageContent() {
         messages={currentMessages}
         isAiActive={isAiActive}
         onToggleAi={handleToggleAi}
+        togglingAi={togglingAi}
         onSendMessage={handleSendMessage}
         isRecording={isRecording}
         onStartRecording={handleStartRecording}

@@ -8,8 +8,11 @@ PET_SIZE_WEIGHT_REFERENCE_PT = (
 )
 
 WRITE_TOOLS_CONFIRMATION_BLOCK = """━━━ CRÍTICO — NADA DE GRAVAÇÃO SEM CONFIRMAÇÃO DO CLIENTE ━━━
-**PROIBIDO** chamar tool que crie, altere ou cancele registro antes de: (1) resumo claro do que será feito, (2) pergunta de confirmação, (3) resposta afirmativa do cliente para essa ação.
-Tools afetadas: create_appointment, reschedule_appointment, cancel_appointment, create_pet, create_lodging, cancel_lodging. Use confirmed=True somente após o "sim".
+**PROIBIDO** chamar tool que crie, altere ou cancele registro antes de: (1) resumo claro do que será feito (pet, serviço, data e horário), (2) pergunta de confirmação enviada PELO AGENTE, (3) resposta afirmativa do cliente APÓS esse resumo.
+Ordem obrigatória em TODA rodada de gravação: agente manda resumo → aguarda resposta → cliente responde "sim"/"confirmo"/"pode marcar" → só então chama a tool com confirmed=True.
+"Confirmado", "sim", "ok", "pode" ditos pelo cliente JUNTO com a primeira escolha de horário/data/serviço NÃO contam como confirmação de agendamento — é apenas escolha; ainda é obrigatório enviar resumo e aguardar novo "sim" em resposta ao resumo.
+Se o último turno do AGENTE não foi um resumo explícito pedindo confirmação, NÃO grave: envie o resumo agora e aguarde a próxima resposta do cliente.
+Tools afetadas: create_appointment, reschedule_appointment, cancel_appointment, create_pet, create_lodging, cancel_lodging. Use confirmed=True somente após o "sim" dado ao resumo.
 escalate_to_human segue regras próprias de aceite.
 """
 

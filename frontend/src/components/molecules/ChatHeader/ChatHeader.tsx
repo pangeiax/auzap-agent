@@ -7,6 +7,7 @@ export interface ChatHeaderProps {
   pets?: string
   isAiActive?: boolean
   onToggleAi?: () => void
+  togglingAi?: boolean
   className?: string
   clientId?: string
   conversationId?: string
@@ -48,6 +49,7 @@ export function ChatHeader({
   pets,
   isAiActive = true,
   onToggleAi,
+  togglingAi = false,
   className,
   clientId,
   conversationId,
@@ -85,16 +87,28 @@ export function ChatHeader({
         <button
           type="button"
           onClick={onToggleAi}
+          disabled={togglingAi}
+          aria-busy={togglingAi}
           className={cn(
             'flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1.5 text-xs font-medium transition-colors sm:px-3',
             isAiActive
               ? 'bg-[#1E62EC] dark:bg-[#2172e5] text-white'
-              : 'bg-[#F4F6F9] dark:bg-[#212225] text-[#727B8E] dark:text-[#8a94a6]'
+              : 'bg-[#F4F6F9] dark:bg-[#212225] text-[#727B8E] dark:text-[#8a94a6]',
+            togglingAi && 'cursor-not-allowed opacity-60'
           )}
-          title={isAiActive ? 'IA Ativa' : 'IA Inativa'}
+          title={togglingAi ? 'Atualizando…' : isAiActive ? 'IA Ativa' : 'IA Inativa'}
         >
-          <SparklesIcon className="h-4 w-4" />
-          <span className="hidden sm:inline">IA {isAiActive ? 'Ativa' : 'Inativa'}</span>
+          {togglingAi ? (
+            <span
+              className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+              aria-hidden="true"
+            />
+          ) : (
+            <SparklesIcon className="h-4 w-4" />
+          )}
+          <span className="hidden sm:inline">
+            {togglingAi ? 'Atualizando…' : `IA ${isAiActive ? 'Ativa' : 'Inativa'}`}
+          </span>
         </button>
       </div>
     </div>

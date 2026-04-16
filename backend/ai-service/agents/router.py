@@ -827,7 +827,7 @@ async def run_router(
         previous_agent = last_entry.get("agent_used") if last_entry else None
 
     # Guardrails de pré-processamento
-    specialist_input = apply_guardrails(
+    specialist_input = await apply_guardrails(
         specialist_input=base_input,
         context=context,
         router_ctx=router_ctx,

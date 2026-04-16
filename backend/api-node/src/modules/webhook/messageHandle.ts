@@ -444,8 +444,7 @@ async function processMessage(
       },
     })
     console.log(`[Handler][company:${companyId}] Novo cliente criado: ${phone} (${pushName ?? 'sem nome'})`)
-  } else if (!realPhone || !client.manualPhone) {
-    // Update normal (sem senderPn ou já tratado acima)
+  } else {
     await prisma.client.update({
       where: { id: client.id },
       data: {

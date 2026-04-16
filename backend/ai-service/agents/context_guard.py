@@ -9,9 +9,14 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import os
 import re
 import unicodedata
 from difflib import SequenceMatcher
+
+from openai import AsyncOpenAI
+
+from config import resolve_model_for_company
 
 logger = logging.getLogger("ai-service.context_guard")
 
@@ -20,7 +25,7 @@ logger = logging.getLogger("ai-service.context_guard")
 # PRÉ-PROCESSAMENTO — chamado antes de specialist.run()
 # ═══════════════════════════════════════════════════════════════════════════
 
-def apply_guardrails(
+async def apply_guardrails(
     specialist_input: str,
     context: dict,
     router_ctx: dict,
@@ -38,7 +43,7 @@ def apply_guardrails(
 
     # Guardrail: cadastro de pet
     if stage == "PET_REGISTRATION" and agent == "onboarding_agent":
-        specialist_input = _guardrail_pet_registration(
+        specialist_input = await _guardrail_pet_registration(
             specialist_input,
             context,
             history,
@@ -55,7 +60,7 @@ def apply_guardrails(
         # e o mini-modelo se perde se não vir "o que já foi dito" no prompt.
         req = set(router_ctx.get("required_tools") or [])
         if "pets" in req and not (context.get("pets") or []):
-            specialist_input = _guardrail_pet_registration(
+            specialist_input = await _guardrail_pet_registration(
                 specialist_input,
                 context,
                 history,
@@ -76,7 +81,7 @@ def apply_guardrails(
     return specialist_input
 
 
-def _guardrail_pet_registration(
+async def _guardrail_pet_registration(
     specialist_input: str,
     context: dict,
     history: list,
@@ -87,8 +92,11 @@ def _guardrail_pet_registration(
     Informa ao agente exatamente quais campos do pet ainda faltam.
     Evita que o modelo pergunte o mesmo campo duas vezes.
     """
-    collected = _extract_pet_fields_from_history(
-        history, router_ctx, current_user_message=current_user_message
+    collected = await _extract_pet_fields_from_history(
+        history,
+        router_ctx,
+        current_user_message=current_user_message,
+        company_id=context.get("company_id"),
     )
     all_fields = ["porte", "nome", "espécie", "raça"]
     missing = [f for f in all_fields if f not in collected]
@@ -1219,17 +1227,114 @@ def _extract_pet_name_from_user_messages(history: list) -> bool:
     return False
 
 
-def _extract_pet_fields_from_history(
+_PET_FIELDS_EXTRACTOR_PROMPT = (
+    "Você é um classificador de cadastro de pet em um petshop. Dada a CONVERSA entre atendente e "
+    "cliente, identifique quais dos 4 campos do pet o cliente já forneceu em ALGUM momento (mensagem "
+    "atual, anteriores, ou confirmando algo sugerido pelo atendente):\n"
+    "- nome: apelido do pet (ex.: 'Kira', 'Joca', 'Thor', 'Mel').\n"
+    "- especie: cachorro/cão ou gato. Se a raça mencionada determina espécie, considere confirmado.\n"
+    "- raca: raça específica (pastor alemão, shih tzu, pitbull, poodle, SRD/sem raça definida, vira-lata, "
+    "etc.). Uma raça conhecida implica espécie automaticamente.\n"
+    "- porte: pequeno/P, médio/M, grande/G, gigante/GG, OU peso em kg que implique porte (ex.: '5kg' → P, "
+    "'12kg' → M). Aceite em qualquer formato: 'porte P', 'P (até 7kg)', 'é pequeno', 'tem 5kg', 'GG'.\n"
+    "REGRAS:\n"
+    "• Só marque TRUE se o CLIENTE forneceu OU confirmou explicitamente. Atendente perguntar/sugerir "
+    "sozinho NÃO conta.\n"
+    "• Aceite rótulos em texto livre ('Nome: Kira', 'Porte: P', 'Raça: SRD').\n"
+    "• Se a última pergunta da atendente foi 'confirma?' e o cliente respondeu 'sim/confirmo/isso', "
+    "considere confirmados os campos resumidos nessa pergunta.\n"
+    "Responda APENAS JSON: {\"nome\":bool,\"especie\":bool,\"raca\":bool,\"porte\":bool}."
+)
+
+
+async def _llm_extract_pet_fields(
+    history: list,
+    current_user_message: str,
+    router_ctx: dict | None,
+    company_id: int | None,
+) -> set | None:
+    """Extração LLM dos campos do pet. Retorna None se falhar (caller usa fallback regex)."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    base_model = os.getenv("OPENAI_PET_FIELDS_MODEL", "gpt-4o-mini")
+    model = resolve_model_for_company(base_model, company_id)
+    client = AsyncOpenAI(api_key=api_key)
+
+    msgs = _history_with_current_user(history, current_user_message)[-12:]
+    lines: list[str] = []
+    for m in msgs:
+        role = "Cliente" if m.get("role") == "user" else "Atendente"
+        content = (m.get("content") or "").strip()
+        if content:
+            lines.append(f"{role}: {content[:300]}")
+    if not lines:
+        return set()
+    active_pet = (router_ctx or {}).get("active_pet") or ""
+    user_prompt = (
+        (f"PET EM FOCO (do roteador): {active_pet}\n\n" if active_pet else "")
+        + "CONVERSA:\n"
+        + "\n".join(lines)
+    )
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _PET_FIELDS_EXTRACTOR_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            max_completion_tokens=60,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        data = json.loads(raw) if raw else {}
+        collected: set = set()
+        if data.get("nome"):
+            collected.add("nome")
+        if data.get("especie"):
+            collected.add("espécie")
+        if data.get("raca"):
+            collected.add("raça")
+            collected.add("espécie")
+        if data.get("porte"):
+            collected.add("porte")
+        return collected
+    except Exception:
+        logger.exception(
+            "GUARDRAIL pet_registration | LLM extractor falhou — usando fallback regex"
+        )
+        return None
+
+
+async def _extract_pet_fields_from_history(
+    history: list,
+    router_ctx: dict | None = None,
+    current_user_message: str = "",
+    company_id: int | None = None,
+) -> set:
+    """
+    Detecta quais campos do pet já foram fornecidos. Estratégia: LLM primeiro (entende
+    «porte P», «5kg», «SRD», «shih tzu»), fallback para regex se o LLM falhar (rede fora,
+    chave ausente, resposta inválida). O fallback mantém o anti-loop mesmo sem LLM.
+    """
+    collected_llm = await _llm_extract_pet_fields(
+        history, current_user_message, router_ctx, company_id
+    )
+    if collected_llm is not None:
+        return collected_llm
+    return _extract_pet_fields_regex_fallback(
+        history, router_ctx=router_ctx, current_user_message=current_user_message
+    )
+
+
+def _extract_pet_fields_regex_fallback(
     history: list,
     router_ctx: dict | None = None,
     current_user_message: str = "",
 ) -> set:
     """
-    Lê o histórico (e o contexto do roteador) e detecta quais campos do pet já foram fornecidos.
-
-    Em /run o Redis já gravou a mensagem atual, mas a lista `history` costuma ser a capturada
-    *antes* desse save — sem incluir `current_user_message` o extrator ignora o turno atual
-    (ex.: «É o Léo, um pastor alemão grande») e só vê nome vindo do active_pet do router.
+    Fallback heurístico (regex) usado quando o extrator LLM falha.
+    Mantém compatibilidade com o comportamento pré-LLM.
     """
     collected = set()
     user_text, assistant_text = _pet_conversation_texts(history, current_user_message)
@@ -1241,8 +1346,19 @@ def _extract_pet_fields_from_history(
     ):
         collected.add("nome")
 
-    # Porte
-    if re.search(r"\b(pequen\w*|médi\w*|medio|grand\w*|gg|extra\s*grand\w*)\b", user_text):
+    # Porte — aceita palavras por extenso (pequeno/médio/grande/gigante) OU os códigos
+    # de letra P/M/G/GG em contexto de porte ("porte P", "porte: M", "tamanho GG",
+    # "é P", "G.") — exige marcador claro de porte para não confundir com iniciais
+    # aleatórias de nomes/raças. Também aceita peso com "kg" (ex.: "5kg", "10 kg").
+    if (
+        re.search(r"\b(pequen\w*|médi\w*|medio|grand\w*|gigante|extra\s*grand\w*)\b", user_text)
+        or re.search(
+            r"(?:\bporte\b|\btamanho\b|\bé\b|\beh\b|\bsou\b|[:.]|^|\n)\s*(p|m|g|gg)\b",
+            user_text,
+            re.IGNORECASE,
+        )
+        or re.search(r"\b\d{1,2}(?:[.,]\d+)?\s*kg\b", user_text, re.IGNORECASE)
+    ):
         collected.add("porte")
 
     # Espécie — pelo texto do cliente

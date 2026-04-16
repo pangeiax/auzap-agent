@@ -18,6 +18,7 @@ from config import resolve_model_for_company
 from db import get_connection
 from memory.redis_memory import (
     clear_identity_migration_phase,
+    get_history,
     get_identity_migration_data,
     get_identity_migration_phase,
     set_identity_migration_phase,
@@ -68,6 +69,74 @@ WELCOME_MESSAGE = (
     "Se você é cliente novo: seja bem-vindo(a)! Vamos fazer seu cadastro agora? É rapidinho! 🐾"
 )
 
+_WELCOME_CONTEXTUAL_PROMPT = (
+    "Você é atendente humana de petshop no WhatsApp. Gere UMA mensagem curta (máx 3 linhas) que:\n"
+    "1) Reconheça o que o cliente acabou de pedir/perguntar (use o HISTÓRICO e a mensagem atual).\n"
+    "2) Explique de forma educada e natural que para avançar (agendar, consultar histórico, etc.) "
+    "precisamos fazer um cadastro rápido — se for cliente antigo, avise que é por causa da migração de plataforma.\n"
+    "3) Convide a iniciar o cadastro agora (sem ainda pedir os campos — só o convite).\n"
+    "Regras: nunca diga que é IA/bot; não invente preços, horários nem detalhes de serviço; sem markdown; "
+    "no máximo 1 emoji; tom caloroso e informal brasileiro; sem repetir exatamente a resposta anterior da atendente."
+)
+
+
+async def _build_contextual_welcome(
+    company_id: int, client_phone: str, user_message: str
+) -> str | None:
+    """
+    Gera welcome contextual via LLM quando já existe histórico (ex.: cliente fez FAQ
+    antes). Retorna None se não houver histórico suficiente ou se ocorrer erro — caller
+    deve cair de volta no WELCOME_MESSAGE estático.
+    """
+    try:
+        history = await get_history(company_id, client_phone)
+    except Exception:
+        logger.exception("identity_migration | falha ao ler histórico para welcome contextual")
+        return None
+
+    # Considera apenas turnos anteriores à mensagem atual (get_history já inclui a
+    # mensagem recém-salva). Sem trocas prévias = primeiro contato real → estático.
+    prior = [m for m in history if (m.get("content") or "").strip() != (user_message or "").strip()]
+    has_prior_assistant = any(m.get("role") == "assistant" for m in prior)
+    if not has_prior_assistant:
+        return None
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    base_model = os.getenv("OPENAI_IDENTITY_WELCOME_MODEL", "gpt-4o-mini")
+    model = resolve_model_for_company(base_model, company_id)
+    client_llm = AsyncOpenAI(api_key=api_key)
+
+    tail = prior[-8:]
+    history_text = "\n".join(
+        f"{('Cliente' if m.get('role') == 'user' else 'Atendente')}: {(m.get('content') or '').strip()}"
+        for m in tail
+        if (m.get("content") or "").strip()
+    )
+    user_prompt = (
+        f"HISTÓRICO RECENTE:\n{history_text}\n\n"
+        f"MENSAGEM ATUAL DO CLIENTE:\n{user_message.strip()}\n\n"
+        "Gere a mensagem de convite ao cadastro seguindo as regras."
+    )
+    try:
+        resp = await client_llm.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _WELCOME_CONTEXTUAL_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_completion_tokens=220,
+        )
+        reply = (resp.choices[0].message.content or "").strip()
+        if not reply:
+            return None
+        return reply
+    except Exception:
+        logger.exception("identity_migration | welcome contextual LLM falhou")
+        return None
+
 ASK_DETAILS_MESSAGE = (
     "Me passa os dados assim (pode copiar, preencher e enviar):\n\n"
     "Nome completo:\n"
@@ -78,23 +147,6 @@ ASK_DETAILS_MESSAGE = (
     "É importante que o telefone seja diferente do CPF.\n\n"
     "(Sobre o pet: se você já for cliente, a gente localiza pelos seus dados; se for novo, "
     "cadastramos o pet no passo seguinte.)"
-)
-
-REFUSE_MARKERS = (
-    "não quero",
-    "nao quero",
-    "prefiro não",
-    "prefiro nao",
-    "não vou",
-    "nao vou",
-    "sem cadastro",
-    "não obrigado",
-    "nao obrigado",
-    "dispenso",
-    "não preciso",
-    "nao preciso",
-    "cancela",
-    "desisto",
 )
 
 IN_SERVICE_MARKERS = (
@@ -117,6 +169,215 @@ IN_SERVICE_MARKERS = (
     "como está o pet",
     "como ta o pet",
 )
+
+_REGISTRATION_LABEL_RE = re.compile(
+    r"(?:^|\n)\s*(?:nome\s*completo|e-?mail|telefone|cpf)\s*:",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_registration_block(msg: str) -> bool:
+    """True se a mensagem parece um bloco preenchido do cadastro (labels, email, CPF)."""
+    if not msg:
+        return False
+    if _REGISTRATION_LABEL_RE.search(msg):
+        return True
+    if "@" in msg and re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", msg):
+        return True
+    # 11 dígitos seguidos (CPF corrido) — não é padrão de pergunta de FAQ.
+    if re.search(r"(?<!\d)\d{11}(?!\d)", _digits_only(msg) or msg):
+        return True
+    return False
+
+
+_FIRST_INTENT_PROMPT = (
+    "Você classifica a mensagem de um possível cliente de petshop no WhatsApp em UMA das categorias:\n"
+    "\n"
+    "- \"faq\": pergunta sobre INFORMAÇÃO PÚBLICA da loja (preço/valor, endereço, localização, CEP, como "
+    "chegar, horário de funcionamento, telefone/contato, catálogo de serviços, quais espécies atendem, "
+    "formas de pagamento, se tem hotel/creche/banho/tosa, políticas gerais). IMPORTANTE: continua sendo "
+    "FAQ mesmo quando o cliente menciona espécie/raça/idade/porte do pet apenas como CONTEXTO da pergunta "
+    "(\"quanto é o banho pro meu shih tzu?\", \"atende gato?\", \"tem hotel pra porte grande?\", "
+    "\"quanto custa a tosa de um poodle médio?\"). Se a pergunta pode ser respondida sem consultar dados "
+    "do cliente no sistema, é FAQ.\n"
+    "\n"
+    "- \"cadastro\": pedido de AÇÃO que exige identificar o cliente OU conversar sobre o próprio pet de "
+    "forma específica, SEM contexto de FAQ em andamento. Inclui:\n"
+    "  • pedir para AGENDAR, REMARCAR, CANCELAR, confirmar horário;\n"
+    "  • consultar histórico/agendamentos existentes;\n"
+    "  • falar sobre saúde/comportamento/problema do próprio pet (\"meu pet está passando mal\", "
+    "\"ele não come\");\n"
+    "  • enviar dados pessoais (nome, CPF, e-mail, telefone);\n"
+    "  • reclamar sobre atendimento anterior;\n"
+    "  • pedir falar com humano sobre assunto de petshop;\n"
+    "  • saudação simples (\"oi\", \"bom dia\") sem pergunta pública E sem contexto prévio;\n"
+    "  • mensagens ambíguas ou vazias de alguém que pode ser cliente, SEM contexto prévio.\n"
+    "\n"
+    "- \"escalate\": use SOMENTE com ALTA CONFIANÇA quando a mensagem é INEQUIVOCAMENTE fora do escopo do "
+    "petshop. Restrito a:\n"
+    "  (a) propaganda/oferta B2B para o petshop (venda de software, marketing digital, SEO, parceria "
+    "comercial, fornecedor de produto/serviço, representante comercial se apresentando);\n"
+    "  (b) cobrança de aluguel/IPTU/boleto que não é de produto/serviço do petshop;\n"
+    "  (c) prestador de serviço contratado pelo petshop falando do próprio trabalho (pintor, encanador, "
+    "eletricista, pedreiro, técnico, dedetização, entregador de material de obra);\n"
+    "  (d) golpe/spam/link malicioso explícito, roleplay ofensivo, assunto religioso/político, assunto "
+    "pessoal sem nenhuma relação com pets/petshop.\n"
+    "\n"
+    "REGRAS DE DESEMPATE (OBRIGATÓRIO — nessa ordem):\n"
+    "1. Se há \"CONTEXTO — ÚLTIMA MENSAGEM DA ATENDENTE\" no input e a atendente estava em tópico de FAQ "
+    "(informando/pedindo detalhes sobre preço, horário, endereço, catálogo de serviços, porte do pet para "
+    "cotação), a resposta curta do cliente (porte P/M/G/GG, pequeno/médio/grande, sim/não, nome do serviço, "
+    "números, idade, raça, um emoji) é CONTINUAÇÃO do FAQ → classifique como \"faq\".\n"
+    "2. Se há CONTEXTO e a atendente estava em tópico de cadastro/agendamento específico (pediu nome, CPF, "
+    "confirmação de horário), a resposta continua como \"cadastro\".\n"
+    "3. Sem CONTEXTO: Se a mensagem contém uma pergunta sobre PREÇO, HORÁRIO, ENDEREÇO, SERVIÇOS → SEMPRE "
+    "\"faq\", mesmo que mencione dados do pet ou do cliente no meio.\n"
+    "4. Mensagens CURTAS (1-3 palavras, emojis, saudação, sim/não, porte, números) NUNCA são \"escalate\".\n"
+    "5. Em qualquer dúvida, prefira \"cadastro\" a \"escalate\".\n"
+    "\n"
+    "Responda APENAS JSON: {\"intent\":\"faq\"} ou {\"intent\":\"cadastro\"} ou {\"intent\":\"escalate\"}."
+)
+
+
+async def _recent_assistant_context(
+    company_id: int, client_phone: str, current_msg: str
+) -> str | None:
+    """Última mensagem da atendente no histórico (exclui a atual do cliente). None se não houver."""
+    try:
+        history = await get_history(company_id, client_phone)
+    except Exception:
+        return None
+    cur = (current_msg or "").strip()
+    for m in reversed(history or []):
+        if m.get("role") != "assistant":
+            continue
+        content = (m.get("content") or "").strip()
+        if not content or content == cur:
+            continue
+        return content[:400]
+    return None
+
+
+
+
+async def _classify_first_intent(
+    msg: str,
+    company_id: int | None,
+    client_phone: str | None = None,
+) -> str:
+    """Retorna 'faq', 'cadastro' ou 'escalate'. Em erro/dúvida, fallback='cadastro'."""
+    t = (msg or "").strip()
+    if not t or len(t) > 400:
+        return "cadastro"
+    # Mensagens muito curtas (≤3 palavras) nunca escalam — são respostas curtas a
+    # perguntas do atendente, ambíguas demais para disparar escalonamento humano.
+    # Ainda podem ir pro LLM para decidir faq vs cadastro, mas escalate vira cadastro.
+    too_short_for_escalate = len(t.split()) <= 3
+    # Bloco de cadastro preenchido deve seguir o fluxo de cadastro, não ir para FAQ/escalate.
+    if _looks_like_registration_block(t):
+        return "cadastro"
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "cadastro"
+    base_model = os.getenv("OPENAI_INTENT_CLASSIFY_MODEL", "gpt-4o-mini")
+    model = resolve_model_for_company(base_model, company_id)
+    client = AsyncOpenAI(api_key=api_key)
+
+    last_assistant: str | None = None
+    if company_id is not None and client_phone:
+        last_assistant = await _recent_assistant_context(company_id, client_phone, t)
+
+    user_blocks: list[str] = []
+    if last_assistant:
+        user_blocks.append(
+            "CONTEXTO — ÚLTIMA MENSAGEM DA ATENDENTE (conversa em andamento):\n"
+            + last_assistant
+        )
+    user_blocks.append("MENSAGEM ATUAL DO CLIENTE:\n" + t)
+    user_content = "\n\n".join(user_blocks)
+
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _FIRST_INTENT_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            response_format={"type": "json_object"},
+            max_completion_tokens=20,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        data = json.loads(raw)
+        intent = str(data.get("intent", "")).strip().lower()
+        if intent == "escalate" and too_short_for_escalate:
+            # Rede de segurança: mensagem curta nunca escala, mesmo que o LLM erre.
+            return "cadastro"
+        if intent in ("faq", "escalate"):
+            return intent
+        return "cadastro"
+    except Exception:
+        logger.exception(
+            "identity_migration | classificador de intent falhou — fallback=cadastro"
+        )
+        return "cadastro"
+
+
+async def _is_faq_only(msg: str, company_id: int | None) -> bool:
+    """Wrapper de compat — True quando o classificador responde 'faq'."""
+    return (await _classify_first_intent(msg, company_id)) == "faq"
+
+
+_CONSENT_CLASSIFIER_PROMPT = (
+    "O atendente acabou de pedir ao cliente se ele concorda em fazer um cadastro rápido (nome, e-mail, "
+    "telefone, CPF). Classifique a RESPOSTA do cliente em UMA categoria:\n"
+    "- \"accept\": aceita claramente o cadastro (sim, ok, pode, vamos, quero, claro, beleza, bora, "
+    "com certeza, combinado, manda aí, pode mandar, perfeito).\n"
+    "- \"refuse\": recusa claramente (não, não quero, prefiro não, dispenso, não preciso, cancela, desisto, "
+    "sem cadastro, não vou, de jeito nenhum).\n"
+    "- \"reluctant\": demonstra RELUTÂNCIA, objeção, desconfiança ou desconforto em fazer o cadastro, "
+    "sem ser uma recusa direta. Exemplos: \"tenho que me cadastrar mesmo?\", \"por que vocês precisam do "
+    "meu CPF?\", \"pra que tantos dados?\", \"não tem outro jeito?\", \"é seguro?\", \"acho invasivo\", "
+    "\"não gosto de passar esses dados\", \"já sou cliente, por que preciso cadastrar de novo?\" expressando "
+    "incômodo, questionamentos sobre a necessidade do cadastro, exigência de falar com humano por causa "
+    "do cadastro.\n"
+    "- \"clarify\": mensagem ambígua, off-topic, saudação, pergunta sobre a loja (preço/horário/endereço), "
+    "pedido de serviço sem responder ao consentimento, ou qualquer coisa que não se encaixe acima.\n"
+    "Responda APENAS JSON: {\"intent\":\"accept\"|\"refuse\"|\"reluctant\"|\"clarify\"}."
+)
+
+
+async def _classify_consent_llm(msg: str, company_id: int | None) -> str:
+    """Retorna 'accept', 'refuse', 'reluctant' ou 'clarify'. Erro → fallback='clarify' (reask)."""
+    t = (msg or "").strip()
+    if not t:
+        return "clarify"
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "clarify"
+    base_model = os.getenv("OPENAI_CONSENT_CLASSIFY_MODEL", "gpt-4o-mini")
+    model = resolve_model_for_company(base_model, company_id)
+    client = AsyncOpenAI(api_key=api_key)
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _CONSENT_CLASSIFIER_PROMPT},
+                {"role": "user", "content": t},
+            ],
+            response_format={"type": "json_object"},
+            max_completion_tokens=20,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        data = json.loads(raw)
+        intent = str(data.get("intent", "")).strip().lower()
+        if intent in ("accept", "refuse", "reluctant", "clarify"):
+            return intent
+        return "clarify"
+    except Exception:
+        logger.exception(
+            "identity_migration | classificador de consent falhou — fallback=clarify"
+        )
+        return "clarify"
 
 
 def _digits_only(s: str) -> str:
@@ -258,34 +519,6 @@ def _resolve_identity_phone(phone_raw: str, user_message: str, cpf: str) -> tupl
     if n2:
         return n2, raw2.strip() if raw2.strip() else n2
     return "", ""
-
-
-def _consent_classify(msg: str) -> str | None:
-    t = (msg or "").strip().lower()
-    if any(m in t for m in REFUSE_MARKERS):
-        return "refuse"
-    if t in ("não", "nao", "n"):
-        return "refuse"
-    accept_starts = (
-        "sim",
-        "claro",
-        "pode",
-        "vamos",
-        "quero",
-        "beleza",
-        "ok",
-        "isso",
-        "bora",
-        "ajuda",
-        "com certeza",
-        "pode ser",
-    )
-    for a in accept_starts:
-        if t == a or t.startswith(a + " ") or t.startswith(a + ","):
-            return "accept"
-    if "sim" in t and len(t) < 50:
-        return "accept"
-    return None
 
 
 def _in_service_message(msg: str) -> bool:
@@ -594,14 +827,63 @@ async def try_handle_identity_migration(
         )
         return None
 
+    # Antes de qualquer resposta fixa, classifica a intenção da mensagem em
+    # {faq, cadastro, escalate}. Isso permite:
+    #   • FAQ → bypass para o router (FAQ agent responde preço/endereço/horário).
+    #   • escalate → mensagens completamente fora do escopo (B2B, oferta de serviço,
+    #     cobrança de aluguel, prestador contratado tipo pintor/encanador, spam)
+    #     vão direto para humano, antes mesmo da boas-vindas de recadastro.
+    if phase in (None, "awaiting_consent"):
+        intent = await _classify_first_intent(
+            user_message, company_id, client_phone
+        )
+        if intent == "escalate":
+            _run_escalate(
+                company_id,
+                str(client_id),
+                "Mensagem fora do escopo do petshop (B2B, oferta/cobrança, prestador de serviços contratado ou assunto não relacionado).",
+                user_message,
+            )
+            await _redis_clear_best_effort(company_id, client_phone)
+            logger.info(
+                "identity_migration | escalate pré-cadastro | company_id=%s | phone=%s",
+                company_id,
+                client_phone,
+            )
+            return {
+                "reply": "Obrigada pelo contato! Vou encaminhar para alguém da equipe te responder por aqui.",
+                "router_ctx": {
+                    "agent": "escalation_agent",
+                    "stage": "WELCOME",
+                    "required_tools": ["none"],
+                },
+                "agent_used": "identity_migration",
+                "stage": "IDENTITY_ESCALATED_PRE_WELCOME",
+            }
+        if intent == "faq":
+            logger.info(
+                "identity_migration | FAQ detectado — bypass do recadastro | company_id=%s | phone=%s",
+                company_id,
+                client_phone,
+            )
+            return None
+
     # Primeiro contato do fluxo: sempre boas-vindas (ignora conteúdo da 1ª msg curta).
     if phase is None:
         if not await _redis_set_or_abort(
             company_id, client_phone, "awaiting_consent"
         ):
             return None
+        contextual = await _build_contextual_welcome(company_id, client_phone, user_message)
+        reply = contextual or WELCOME_MESSAGE
+        if contextual:
+            logger.info(
+                "identity_migration | welcome contextual gerado | company_id=%s | phone=%s",
+                company_id,
+                client_phone,
+            )
         return {
-            "reply": WELCOME_MESSAGE,
+            "reply": reply,
             "router_ctx": None,
             "agent_used": "identity_migration",
             "stage": "IDENTITY_WELCOME",
@@ -612,14 +894,14 @@ async def try_handle_identity_migration(
         return None
 
     if phase == "awaiting_consent":
-        cls = _consent_classify(user_message)
-        if cls == "refuse":
-            _run_escalate(
-                company_id,
-                str(client_id),
-                "Cliente recusou o recadastro na migração de plataforma.",
-                user_message,
+        cls = await _classify_consent_llm(user_message, company_id)
+        if cls in ("refuse", "reluctant"):
+            summary = (
+                "Cliente recusou o recadastro na migração de plataforma."
+                if cls == "refuse"
+                else "Cliente demonstrou relutância/objeção ao recadastro (questionou necessidade ou desconforto com os dados)."
             )
+            _run_escalate(company_id, str(client_id), summary, user_message)
             await _redis_clear_best_effort(company_id, client_phone)
             return {
                 "reply": "Sem problema! Vou pedir para alguém da equipe te atender por aqui em breve.",
@@ -629,7 +911,7 @@ async def try_handle_identity_migration(
                     "required_tools": ["none"],
                 },
                 "agent_used": "identity_migration",
-                "stage": "IDENTITY_REFUSED",
+                "stage": "IDENTITY_REFUSED" if cls == "refuse" else "IDENTITY_RELUCTANT",
             }
         if cls == "accept":
             if not await _redis_set_or_abort(

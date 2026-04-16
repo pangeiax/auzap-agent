@@ -86,8 +86,11 @@ _BK_PASSO3 = """PASSO 3 — DATA E HORÁRIO
 
 _BK_PASSO4 = """PASSO 4 — CONFIRMAÇÃO
 • Resumo + confirmação explícita ANTES de create/reschedule/cancel. Sem success=true → PROIBIDO "marquei"/"confirmado".
+• Ordem obrigatória: (1) agente envia resumo (pet + serviço + data + horário) perguntando "posso confirmar?"; (2) cliente responde "sim"; (3) só então create/reschedule/cancel com confirmed=True.
+• Cliente escolhendo horário pela PRIMEIRA vez não é confirmação — mesmo que diga "confirmado", "sim", "pode ser" na mesma mensagem em que escolhe o horário. Ainda é obrigatório enviar o resumo e aguardar nova resposta afirmativa.
+• Regra prática: se a sua última mensagem NÃO foi um resumo terminando com pergunta de confirmação, o próximo passo SEMPRE é mandar o resumo — nunca chamar a tool de gravação.
 • "Remarcado" só se reschedule veio com rescheduled=true. Primeiro create → "marcado"/"agendado".
-• Novo agendamento: get_upcoming se precisar checar conflito. Após "sim" → get_available_times de novo → create_appointment(confirmed=True).
+• Novo agendamento: get_upcoming se precisar checar conflito. Após "sim" ao resumo → get_available_times de novo → create_appointment(confirmed=True).
 • Remarcar: só reschedule_appointment — nunca create para trocar horário.
 • Mensagem ao cliente = campos do JSON da tool (pet_name, service_name, start_time, etc.), não só histórico."""
 
