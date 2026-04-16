@@ -155,6 +155,32 @@ def _is_valid_normalized_br_phone(phone_norm: str) -> bool:
     return bool(_normalize_br_phone(phone_norm))
 
 
+# DDDs válidos no Brasil. Usado pra distinguir "11 dígitos que parecem celular"
+# de "11 dígitos que são CPF inválido" — sem essa validação, qualquer número de
+# 11 dígitos passa como telefone e um CPF errado acaba reclassificado como phone.
+_VALID_BR_DDDS = frozenset({
+    "11", "12", "13", "14", "15", "16", "17", "18", "19",
+    "21", "22", "24", "27", "28",
+    "31", "32", "33", "34", "35", "37", "38",
+    "41", "42", "43", "44", "45", "46", "47", "48", "49",
+    "51", "53", "54", "55",
+    "61", "62", "63", "64", "65", "66", "67", "68", "69",
+    "71", "73", "74", "75", "77", "79",
+    "81", "82", "83", "84", "85", "86", "87", "88", "89",
+    "91", "92", "93", "94", "95", "96", "97", "98", "99",
+})
+
+
+def _looks_like_br_mobile(digits: str) -> bool:
+    """True se o número bate com padrão de celular BR: DDD válido + 9 inicial após DDD."""
+    d = _digits_only(digits)
+    if d.startswith("55") and len(d) == 13:
+        d = d[2:]
+    if len(d) != 11:
+        return False
+    return d[:2] in _VALID_BR_DDDS and d[2] == "9"
+
+
 def _phone_norm_collides_with_cpf(phone_norm: str, cpf: str) -> bool:
     """Evita salvar o CPF (ou 55+CPF) como telefone."""
     if len(cpf) != 11 or not phone_norm:
@@ -652,11 +678,20 @@ async def try_handle_identity_migration(
         new_email = (extracted.get("email") or "").strip() or None
         new_phone_raw = str(extracted.get("phone_raw") or "")
 
-        # Se o LLM colocou o telefone no campo CPF (CPF inválido mas parece telefone), corrigir
-        if new_cpf and not _valid_cpf(new_cpf) and _is_valid_normalized_br_phone(_normalize_br_phone(new_cpf)):
+        # Marca tentativa de CPF inválido ANTES do reroute. Se o usuário mandou 11
+        # dígitos que o LLM classificou como CPF mas os dígitos verificadores não
+        # batem, queremos avisar especificamente em vez de só dizer "falta CPF".
+        cpf_invalid_this_turn = bool(new_cpf) and not _valid_cpf(new_cpf)
+
+        # Reroute ⬇️: só reclassifica CPF inválido como telefone se o número bater
+        # com padrão real de celular BR (DDD válido + 9 inicial após DDD). Antes
+        # qualquer 11 dígitos passava, o que silenciosamente transformava CPFs
+        # digitados errado em phone_raw — o usuário ficava preso sem feedback.
+        if new_cpf and not _valid_cpf(new_cpf) and _looks_like_br_mobile(new_cpf):
             if not new_phone_raw:
                 new_phone_raw = new_cpf
             new_cpf = ""
+            cpf_invalid_this_turn = False  # o número era telefone, não CPF errado
 
         # Guard anti-placeholder: rejeita "nomes" que são palavras do prompt ou lixo genérico
         _NAME_BLOCKLIST = {
@@ -687,21 +722,26 @@ async def try_handle_identity_migration(
             phone_norm = prev_partial["phone_norm"]
             manual_display = prev_partial.get("manual_display", "")
 
+        # CPF inválido ≠ CPF faltando. Quando o usuário tentou mandar CPF mas os
+        # dígitos não batem, a mensagem de "CPF" entra como aviso dedicado; nos
+        # outros campos, só listamos o que realmente está faltando pra evitar
+        # pedir tudo de novo.
+        cpf_ok = bool(cpf) and _valid_cpf(cpf)
         missing = []
         if not full_name:
             missing.append("nome completo")
-        if not cpf or not _valid_cpf(cpf):
-            missing.append("CPF válido")
         if not email:
             missing.append("e-mail")
         if not phone_norm:
             missing.append("telefone com DDD")
+        if not cpf_ok and not cpf_invalid_this_turn:
+            missing.append("CPF")
 
-        if missing:
+        if missing or not cpf_ok:
             # Salva dados parciais no Redis para acumular entre mensagens
             partial = {
                 "full_name": full_name,
-                "cpf": cpf if (cpf and _valid_cpf(cpf)) else "",
+                "cpf": cpf if cpf_ok else "",
                 "email": email or "",
                 "phone_raw": phone_raw,
                 "phone_norm": phone_norm,
@@ -709,16 +749,30 @@ async def try_handle_identity_migration(
             }
             await _redis_set_or_abort(company_id, client_phone, "awaiting_details", partial)
 
-            missing_str = ", ".join(missing)
-            incomplete_replies = [
-                f"Só faltou: {missing_str}. Pode me enviar?",
-                f"Ainda preciso de: {missing_str}. Manda pra mim?",
-                f"Falta só: {missing_str}. Pode completar?",
-                f"Recebi parte dos dados! Ainda preciso de: {missing_str}.",
-                f"Quase pronto! Me envia só: {missing_str}.",
-            ]
+            if cpf_invalid_this_turn and not missing:
+                reply = (
+                    "O CPF que você enviou não parece válido (os dígitos verificadores não batem). "
+                    "Pode conferir e me mandar só o CPF corrigido?"
+                )
+            elif cpf_invalid_this_turn:
+                missing_str = ", ".join(missing)
+                reply = (
+                    f"O CPF que você enviou não parece válido (dígitos verificadores não batem) "
+                    f"e ainda falta: {missing_str}. Me manda só esses dados, não precisa repetir o resto."
+                )
+            else:
+                missing_str = ", ".join(missing)
+                incomplete_replies = [
+                    f"Só falta {missing_str}. Pode me enviar só isso?",
+                    f"Ainda preciso de {missing_str}. Manda só esse dado, não precisa repetir o resto.",
+                    f"Falta só {missing_str}. Pode completar?",
+                    f"Recebi o resto! Agora só preciso de {missing_str}.",
+                    f"Quase pronto! Me envia só {missing_str}.",
+                ]
+                reply = random.choice(incomplete_replies)
+
             return {
-                "reply": random.choice(incomplete_replies),
+                "reply": reply,
                 "router_ctx": None,
                 "agent_used": "identity_migration",
                 "stage": "IDENTITY_INCOMPLETE",

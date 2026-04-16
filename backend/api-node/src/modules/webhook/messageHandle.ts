@@ -212,6 +212,16 @@ export async function handleIncomingMessage(
   senderPn?: string | null
 ): Promise<void> {
   const jid = msg.key.remoteJid!
+
+  // A IA só atende conversas 1-a-1 (@s.whatsapp.net ou @lid). Qualquer outro
+  // canal — grupo (@g.us), broadcast/status (@broadcast), canal/newsletter
+  // (@newsletter) — é ignorado silenciosamente. Whitelist em vez de blocklist
+  // pra que sufixos novos do WhatsApp não vazem por default.
+  if (!jid || !(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid'))) {
+    console.log(`[Handler][company:${companyId}] Ignorando JID fora de DM: ${jid}`)
+    return
+  }
+
   const phone = getClientIdentifierFromJid(jid)
   const pushName = msg.pushName || null
   const key = `${companyId}:${phone}`
