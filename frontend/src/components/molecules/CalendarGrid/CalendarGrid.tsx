@@ -22,6 +22,11 @@ export interface CalendarEvent {
   notes?: string;
   /** Nome do profissional responsável */
   staffName?: string;
+  /** IDs necessários para o fluxo de edição do agendamento */
+  clientId?: string;
+  petId?: string;
+  serviceId?: string;
+  staffId?: string;
 }
 
 interface CalendarGridProps {

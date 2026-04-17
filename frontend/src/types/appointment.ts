@@ -62,6 +62,11 @@ export interface AppointmentSchedule {
 
 export interface AppointmentUpdate {
   scheduled_at?: string
+  scheduled_date?: string
+  start_time?: string
+  end_time?: string
+  service_id?: string | number
+  staff_id?: string
   price?: number
   status?: string
   payment_method?: string

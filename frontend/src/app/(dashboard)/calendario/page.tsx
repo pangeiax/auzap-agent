@@ -103,6 +103,10 @@ function appointmentToCalendarEvent(a: Appointment): CalendarEvent {
       extractPairedAppointmentId(a.notes) ?? undefined,
     notes: notesForDisplay(a.notes) || undefined,
     staffName: a.staff_name || undefined,
+    clientId: a.client_id || undefined,
+    petId: a.pet_id || undefined,
+    serviceId: a.service_id !== undefined ? String(a.service_id) : undefined,
+    staffId: a.staff_id || undefined,
   };
 }
 
@@ -303,6 +307,7 @@ export default function CalendarioPage() {
   }, [toast]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [formData, setFormData] =
     useState<NewAppointmentForm>(initialFormState);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
@@ -641,6 +646,7 @@ export default function CalendarioPage() {
   );
 
   const handleOpenModal = () => {
+    setEditingEventId(null);
     if (selectedDate) {
       const isoDate = formatDateKey(selectedDate);
       setFormData({
@@ -653,8 +659,30 @@ export default function CalendarioPage() {
     setIsModalOpen(true);
   };
 
+  // Abre o modal em modo edição com os campos pré-preenchidos a partir do evento do calendário
+  const handleOpenEdit = (event: CalendarEvent) => {
+    setIsPreviewOpen(false);
+    setSelectedEvent(null);
+    setEditingEventId(event.id);
+    setFormData({
+      clientId: event.clientId ?? "",
+      petId: event.petId ?? "",
+      date: dateFromISO(event.date),
+      time: event.time ?? "",
+      staffId: event.staffId ?? "",
+      staffName: event.staffName ?? "",
+      startTime: event.time ?? "",
+      endTime: event.timeEnd ?? "",
+      serviceId: event.serviceId ?? "",
+      status: event.status,
+      notes: event.notes ?? "",
+    });
+    setIsModalOpen(true);
+  };
+
   const handleCloseModal = () => {
     setIsModalOpen(false);
+    setEditingEventId(null);
     setFormData(initialFormState);
     setFormErrors({});
     setShowNewClientForm(false);
@@ -879,6 +907,34 @@ export default function CalendarioPage() {
       const selectedPet = clientPets.find((p) => p.id === formData.petId);
       const scheduledAt = `${dateISO}T${formData.startTime}:00`;
 
+      if (editingEventId) {
+        // Modo edição: manda data, horário, serviço, profissional, status e notas
+        await appointmentService.updateAppointment(editingEventId, {
+          scheduled_date: dateISO,
+          scheduled_at: scheduledAt,
+          start_time: formData.startTime,
+          end_time: formData.endTime || undefined,
+          service_id: formData.serviceId,
+          staff_id: formData.staffId || undefined,
+          status: appointmentStatusToApi(normalizeStatus(formData.status)),
+          notes: formData.notes || undefined,
+        });
+
+        const refreshed = await appointmentService.listAppointments();
+        setEvents(refreshed.map(appointmentToCalendarEvent));
+        handleCloseModal();
+
+        const [y, m, d] = dateISO.split("-").map(Number);
+        availabilityCache.current.clear();
+        setCurrentDate(new Date(y, m - 1, 1));
+        setSelectedDate(new Date(y, m - 1, d));
+        toast.success(
+          "Agendamento atualizado",
+          "As alterações foram salvas com sucesso.",
+        );
+        return;
+      }
+
       await appointmentService.scheduleAppointment({
         client_id: formData.clientId,
         pet_id: formData.petId,
@@ -911,12 +967,12 @@ export default function CalendarioPage() {
         `${selectedPet?.name ?? "O pet"} foi agendado para ${formData.startTime} com ${formData.staffName}.`,
       );
     } catch (error) {
-      console.error("Erro ao criar agendamento:", error);
+      console.error(editingEventId ? "Erro ao atualizar agendamento:" : "Erro ao criar agendamento:", error);
       toast.error(
-        "Erro ao criar agendamento",
+        editingEventId ? "Erro ao atualizar agendamento" : "Erro ao criar agendamento",
         (error as any)?.response?.data?.detail ||
           (error as any)?.response?.data?.error ||
-          "Não foi possível criar o agendamento.",
+          (editingEventId ? "Não foi possível atualizar o agendamento." : "Não foi possível criar o agendamento."),
       );
     } finally {
       setIsSubmitting(false);
@@ -1029,9 +1085,9 @@ export default function CalendarioPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
-        title="Novo agendamento"
+        title={editingEventId ? "Editar agendamento" : "Novo agendamento"}
         onSubmit={handleSubmit}
-        submitText="Agendar"
+        submitText={editingEventId ? "Salvar" : "Agendar"}
         cancelText="Cancelar"
         isLoading={isSubmitting}
         className="max-w-[480px]"
@@ -1543,6 +1599,16 @@ export default function CalendarioPage() {
                   </p>
                 </div>
               ) : null}
+            </div>
+
+            <div className="flex justify-end border-t border-[#727B8E]/15 pt-4 dark:border-[#40485A]">
+              <button
+                type="button"
+                onClick={() => handleOpenEdit(selectedEvent)}
+                className="inline-flex items-center justify-center rounded-lg bg-[#3C6BD0] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#335CB8] focus:outline-none focus:ring-2 focus:ring-[#3C6BD0] focus:ring-offset-2 dark:focus:ring-offset-[#1a1b1e]"
+              >
+                Editar agendamento
+              </button>
             </div>
           </div>
         )}

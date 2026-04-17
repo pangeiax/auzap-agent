@@ -295,18 +295,66 @@ export async function updateAppointment(req: Request, res: Response) {
   try {
     const companyId = req.user!.companyId
     const id = req.params.id!
-    const { status, notes, scheduled_at, schedule_id } = req.body
+    const {
+      status,
+      notes,
+      scheduled_at,
+      scheduled_date,
+      start_time,
+      end_time,
+      schedule_id,
+      service_id,
+      staff_id,
+    } = req.body
 
     const existing = await prisma.petshopAppointment.findUnique({ where: { id } })
     if (!existing || existing.companyId !== companyId) {
       return res.status(404).json({ error: 'Appointment not found' })
     }
 
+    // Valida serviço (se fornecido) — precisa existir e pertencer à company
+    if (service_id !== undefined && service_id !== null) {
+      const service = await prisma.petshopService.findFirst({
+        where: { id: Number(service_id), companyId },
+        select: { id: true },
+      })
+      if (!service) return res.status(404).json({ error: 'Serviço não encontrado.' })
+    }
+
+    // Valida profissional (se fornecido) — precisa existir e pertencer à company
+    if (staff_id !== undefined && staff_id !== null) {
+      const staff = await prisma.petshopStaff.findFirst({
+        where: { id: String(staff_id), companyId },
+        select: { id: true },
+      })
+      if (!staff) return res.status(404).json({ error: 'Profissional não encontrado.' })
+    }
+
     const data: any = {}
     if (status !== undefined) data.status = status
     if (notes !== undefined) data.notes = notes
-    if (scheduled_at !== undefined) data.scheduledDate = new Date(scheduled_at)
     if (schedule_id !== undefined) data.scheduleId = Number(schedule_id)
+    if (service_id !== undefined) data.serviceId = Number(service_id)
+    if (staff_id !== undefined) data.staffId = String(staff_id)
+
+    // Data do agendamento:
+    //   - Preferir `scheduled_date` (yyyy-mm-dd) quando presente — padrão novo, igual ao POST /schedule
+    //   - Cair em `scheduled_at` (ISO completo) como compat retroativa
+    if (scheduled_date !== undefined) {
+      data.scheduledDate = new Date(scheduled_date + 'T12:00:00Z')
+    } else if (scheduled_at !== undefined) {
+      const isoDate = String(scheduled_at).slice(0, 10)
+      data.scheduledDate = new Date(isoDate + 'T12:00:00Z')
+    }
+
+    // Horários (campos separados @db.Time no schema)
+    if (start_time !== undefined) {
+      data.startTime = new Date(`1970-01-01T${start_time}:00`)
+    }
+    if (end_time !== undefined) {
+      data.endTime = new Date(`1970-01-01T${end_time}:00`)
+    }
+
     data.updatedAt = new Date()
 
     const updated = await prisma.petshopAppointment.update({
