@@ -308,6 +308,17 @@ export function getSocket(companyIdStr: string) {
   return activeSockets.get(companyIdStr)
 }
 
+// Verifica se a sessão WhatsApp está realmente conectada e pronta para enviar.
+// Retorna true somente quando socket existe, está autenticado (user.id) e o WS está OPEN.
+export function isSessionConnected(companyIdStr: string): boolean {
+  const socket = activeSockets.get(companyIdStr)
+  if (!socket) return false
+  if (!socket.user?.id) return false
+  const readyState = (socket as any)?.ws?.readyState
+  // WebSocket.OPEN === 1. Se o driver não expuser readyState, aceita o par socket+user como pronto.
+  return readyState === undefined || readyState === 1
+}
+
 // ─────────────────────────────────────────
 // Desconecta sessão
 // ─────────────────────────────────────────

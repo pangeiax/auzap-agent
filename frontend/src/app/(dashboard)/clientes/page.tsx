@@ -870,21 +870,6 @@ function CustomerDetails({
                 <h3 className="text-sm font-medium text-[#727B8E] dark:text-[#8a94a6]">
                   Histórico de agendamentos
                 </h3>
-                {onSendReminder && (
-                  <button
-                    type="button"
-                    disabled={sendingReminder}
-                    onClick={() => customer && onSendReminder(customer.id)}
-                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#1E62EC] text-white hover:bg-[#1E62EC]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {sendingReminder ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Send className="h-3.5 w-3.5" />
-                    )}
-                    {sendingReminder ? "Enviando..." : "Enviar Lembrete"}
-                  </button>
-                )}
               </div>
               {loadingAppointments ? (
                 <div className="flex h-32 items-center justify-center">

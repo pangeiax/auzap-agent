@@ -4,12 +4,12 @@
  * ════════════════════════════════════════════════════════════════
  *
  * O que faz:
- *   Busca agendamentos FUTUROS de um cliente específico,
- *   calcula quantos dias faltam, e envia um lembrete
- *   personalizado via WhatsApp.
+ *   Envia lembretes via WhatsApp para clientes com agendamento
+ *   no dia seguinte.
  *
  * Quando roda:
- *   Sob demanda — disparado pelo endpoint POST /appointments/send-reminders
+ *   Automaticamente todos os dias às 12:00 BRT (15:00 UTC).
+ *   Também pode ser disparado manualmente pelo endpoint.
  *
  * Banco de dados:
  *   SOMENTE LEITURA — não altera nenhum registro
@@ -17,6 +17,7 @@
 
 import { prisma } from '../lib/prisma'
 import { sendTextMessage } from '../services/baileysService'
+import { enqueueReminder, markDailyScheduled } from './reminderQueue'
 
 // ─── Helper: data de hoje no fuso BRT (yyyy-mm-dd) ─────────────
 function todayBR(): string {
@@ -167,4 +168,72 @@ export async function runReminderForClient(companyId: number, clientId: string):
 
   console.log(`[FollowUp:Reminder] ${sent ? 'Lembrete enviado' : 'Falha no envio'} para ${clientName} (${appointments.length} agendamento(s)).`)
   return { sent, total: appointments.length, results }
+}
+
+// ─── Função diária: enfileira na fila Redis os envios de amanhã ───
+// Cada envio é agendado com um horário específico (distribuído ao longo de 6h)
+// O worker (em reminderWorker.ts) consome essa fila e envia os lembretes
+export async function runReminderJobDaily(): Promise<void> {
+  const today = todayBR()
+  const tomorrow = new Date(today + 'T12:00:00Z')
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10)
+
+  // Deduplicação: se já rodou hoje para essa data, não roda de novo
+  const canRun = await markDailyScheduled(today)
+  if (!canRun) {
+    console.log(`[FollowUp:Reminder:Daily] Agendamento de ${today} já foi feito anteriormente. Pulando.`)
+    return
+  }
+
+  console.log(`[FollowUp:Reminder:Daily] Enfileirando lembretes para agendamentos de ${tomorrowStr}...`)
+
+  // LEITURA: busca todos os agendamentos de amanhã (todas as companies)
+  const appointments = await prisma.petshopAppointment.findMany({
+    where: {
+      scheduledDate: tomorrow,
+      status: { not: 'cancelled' },
+    },
+    select: { companyId: true, clientId: true },
+  })
+
+  if (appointments.length === 0) {
+    console.log('[FollowUp:Reminder:Daily] Nenhum cliente com agendamento amanhã.')
+    return
+  }
+
+  // Agrupa por (companyId + clientId) para não enviar lembrete duplicado
+  const unique = new Map<string, { companyId: number; clientId: string }>()
+  for (const apt of appointments) {
+    const key = `${apt.companyId}:${apt.clientId}`
+    if (!unique.has(key)) {
+      unique.set(key, { companyId: apt.companyId, clientId: apt.clientId })
+    }
+  }
+
+  const clientsArray = Array.from(unique.values())
+  const total = clientsArray.length
+
+  // Janela de envio: 6 horas (das 12:00 BRT / 15:00 UTC até 18:00 BRT / 21:00 UTC)
+  const WINDOW_MS = 6 * 60 * 60 * 1000
+  const delayBetween = total > 0 ? WINDOW_MS / total : 0
+  const startAt = Date.now()
+
+  // Enfileira cada envio no Redis com o horário calculado
+  for (let idx = 0; idx < clientsArray.length; idx++) {
+    const client = clientsArray[idx]
+    const scheduledAt = startAt + Math.round(idx * delayBetween)
+    await enqueueReminder(
+      {
+        companyId: client.companyId,
+        clientId: client.clientId,
+        retryCount: 0,
+        scheduledFor: tomorrowStr,
+      },
+      scheduledAt
+    )
+  }
+
+  const delayMinStr = Math.round(delayBetween / 1000 / 60)
+  console.log(`[FollowUp:Reminder:Daily] ${total} envio(s) enfileirado(s) no Redis (delay: ${delayMinStr} min entre cada). Último envio: em ${Math.round(((total - 1) * delayBetween) / 1000 / 60)} min.`)
 }
