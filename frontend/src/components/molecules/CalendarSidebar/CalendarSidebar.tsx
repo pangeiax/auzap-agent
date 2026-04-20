@@ -53,7 +53,9 @@ export function CalendarSidebar({
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
   const dayEvents = selectedDate
-    ? events.filter((e) => e.date === formatDateKey(selectedDate))
+    ? events
+        .filter((e) => e.date === formatDateKey(selectedDate))
+        .sort((a, b) => a.time.localeCompare(b.time))
     : [];
 
   const statusBadge: Record<string, { label: string; className: string }> = {

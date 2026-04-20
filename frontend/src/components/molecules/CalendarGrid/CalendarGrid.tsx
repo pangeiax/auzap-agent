@@ -98,7 +98,9 @@ export function CalendarGrid({
   const isToday = (d: Date) => formatDateKey(d) === formatDateKey(new Date());
 
   const getEventsForDate = (d: Date) =>
-    events.filter((e) => e.date === formatDateKey(d));
+    events
+      .filter((e) => e.date === formatDateKey(d))
+      .sort((a, b) => a.time.localeCompare(b.time));
 
   const statusDot: Record<string, string> = {
     concluido: "bg-emerald-400",
