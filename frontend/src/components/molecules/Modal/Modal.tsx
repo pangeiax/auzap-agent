@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -27,8 +27,6 @@ export function Modal({
   isLoading = false,
   className,
 }: ModalProps) {
-  const overlayRef = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isLoading) onClose()
@@ -49,12 +47,7 @@ export function Modal({
 
   const overlay = (
     <div
-      ref={overlayRef}
       className="fixed inset-0 z-50 flex items-end justify-center px-0 pb-0 pt-[max(0.5rem,env(safe-area-inset-top,0px))] backdrop-blur-sm sm:items-center sm:p-4 sm:pb-4 sm:pt-4 animate-backdrop"
-      onClick={(e) => {
-        if (isLoading) return
-        if (e.target === overlayRef.current) onClose()
-      }}
     >
       <div
         className={cn(
