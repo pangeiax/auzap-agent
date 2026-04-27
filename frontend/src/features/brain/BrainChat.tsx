@@ -204,7 +204,9 @@ export function BrainChat({ userName, assistantName = 'AuZap' }: Props) {
           />
           {dailyUsage?.enabled && dailyUsage.limit > 0 && dailyUsage.used >= 0 && (
             <p className="mx-auto mt-2 w-full max-w-[770px] text-center text-[11px] leading-tight text-[#727B8E] dark:text-[#6b7280]">
-              {Math.max(0, dailyUsage.limit - dailyUsage.used)} mensagens restantes hoje
+              {dailyUsage.limit >= 1_000_000
+                ? 'Mensagens ilimitadas'
+                : `${Math.max(0, dailyUsage.limit - dailyUsage.used)} mensagens restantes hoje`}
             </p>
           )}
         </div>

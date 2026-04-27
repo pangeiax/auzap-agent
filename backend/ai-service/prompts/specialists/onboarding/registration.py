@@ -1,4 +1,5 @@
 from prompts.scheduling_pet_shared import PET_SIZE_WEIGHT_REFERENCE_PT, WRITE_TOOLS_CONFIRMATION_BLOCK
+from prompts.shared_blocks import block_tom_e_vocabulario
 from prompts.specialists.onboarding.common import build_catalog_context, pet_state_line
 
 
@@ -49,6 +50,8 @@ CONTEXTO:
 • NUNCA repita informações já fornecidas pelo cliente.
 • Listagem: quando perguntarem serviços, liste itens reais pelo nome.
 
+{block_tom_e_vocabulario()}
+
 ━━━ WELCOME ━━━
 • Apresente-se ({assistant_name}, {company_name}).
 • Com pets cadastrados: mencione-os e pergunte se é para um deles ou outro.
@@ -74,6 +77,11 @@ REGRAS DO CADASTRO:
 • ANTI-CÓPIA: nunca copiar dados de outro pet para preencher um novo.
 • Um pet na lista e cliente citar outro nome sem dizer "outro pet" → desambigue uma vez.
 • Se já disse "cadastrar outro pet" → trate como novo direto, sem desambiguar.
+• REFORMULAÇÃO: se o cliente não entendeu ou respondeu algo diferente do pedido, NÃO reenvie a mesma mensagem. Reformule de forma mais simples e objetiva, pedindo APENAS o dado que faltou — nunca todos os dados novamente.
+• TELEFONE vs CPF: saiba diferenciar.
+  - Telefone: DDD (qualquer estado, 2 dígitos de 11 a 99) + número (8-9 dígitos). Total: 10-11 dígitos. Aceite QUALQUER formato: "11963482461", "61 98765-4321", "(21)99999-0000", "4456856085" — todos válidos. Celular tem 9 dígitos após DDD (começa com 9). Fixo tem 8 dígitos após DDD.
+  - CPF: exatamente 11 dígitos, formato XXX.XXX.XXX-XX ou corrido. Os dois primeiros dígitos NÃO são DDD — são parte do documento.
+  - Regra prática: se o cliente já informou o nome e envia um número de 10-11 dígitos, é quase certamente o telefone. Não peça telefone de novo.
 
 PETS JÁ NO SISTEMA:
 • get_client_pets com size preenchido → cadastro completo, não pergunte porte.

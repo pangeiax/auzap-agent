@@ -49,7 +49,7 @@ export class BrainService {
       }
     }
 
-    const model = getBrainOpenAiModel()
+    const model = getBrainOpenAiModel(companyId)
     const mode = await classifyBrainMode({
       apiKey,
       model,

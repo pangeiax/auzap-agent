@@ -19,6 +19,7 @@ import CalendarioPage from "@/app/(dashboard)/calendario/page";
 import PipelinePage from "@/app/(dashboard)/pipeline/page";
 import AnalyticsPage from "@/app/(dashboard)/_analytics/page";
 import HotelCrechePage from "@/app/(dashboard)/hotel-creche/page";
+import DevToolsPage from "@/app/(dashboard)/dev-tools/page";
 import NotFoundPage from "@/app/not-found";
 
 function AuthRoutesLayout() {
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="/pipeline" element={<PipelinePage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
       </Route>
+      <Route path="/dev-tools" element={<DevToolsPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );

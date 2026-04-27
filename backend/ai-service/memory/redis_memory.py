@@ -171,8 +171,26 @@ async def get_identity_migration_phase(company_id: int, client_phone: str) -> st
         await r.aclose()
 
 
+async def get_identity_migration_data(company_id: int, client_phone: str) -> dict:
+    """Retorna dados parciais acumulados do fluxo de recadastro."""
+    r = _redis_client()
+    try:
+        raw = await r.get(_identity_mig_key(company_id, client_phone))
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(data, dict):
+            return data.get("partial", {})
+        return {}
+    finally:
+        await r.aclose()
+
+
 async def set_identity_migration_phase(
-    company_id: int, client_phone: str, phase: str | None
+    company_id: int, client_phone: str, phase: str | None, partial: dict | None = None
 ) -> None:
     r = _redis_client()
     try:
@@ -180,9 +198,12 @@ async def set_identity_migration_phase(
         if not phase:
             await r.delete(key)
             return
+        payload = {"phase": phase}
+        if partial:
+            payload["partial"] = partial
         await r.set(
             key,
-            json.dumps({"phase": phase}, ensure_ascii=False),
+            json.dumps(payload, ensure_ascii=False),
             ex=IDENTITY_MIG_TTL,
         )
     finally:

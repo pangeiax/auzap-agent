@@ -8,7 +8,11 @@ import { getMaxSqlLimit } from '../schema/buildSchemaContext'
 import { sanitizeAssistantHistoryContent, sanitizeUserFacingReply } from '../sanitize'
 import type { AnalyticsBrainMessage, AnalyticsBrainResult } from '../types'
 
-function brainModel(): string {
+function brainModel(companyId?: number): string {
+  if (companyId != null) {
+    const perCompany = process.env[`OPENAI_MODEL_COMPANY_${companyId}`]?.trim()
+    if (perCompany) return perCompany
+  }
   return (
     process.env.OPENAI_SECOND_BRAIN_MODEL?.trim() ||
     process.env.OPENAI_BRAIN_MODEL?.trim() ||
@@ -66,7 +70,7 @@ export async function runAnalyticsBrainChat(params: {
     return { reply: 'O assistente não está configurado corretamente no servidor. Avise o suporte.' }
   }
 
-  const model = brainModel()
+  const model = brainModel(params.companyId)
   const maxLimit = getMaxSqlLimit()
   const { petshopName, assistantName } =
     params.companyLabels ?? (await fetchCompanyLabels(params.companyId))

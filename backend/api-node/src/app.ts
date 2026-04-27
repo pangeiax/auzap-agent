@@ -22,6 +22,7 @@ import sentimentRoutes from './modules/sentiment/sentiment.routes'
 import brainRoutes from './modules/brain/brain.routes'
 import campaignRoutes from './modules/campaigns/campaigns.routes'
 import staffRoutes from './modules/staff/staffRoutes'
+import devToolsRoutes from './modules/dev-tools/devToolsRoutes'
 
 dotenv.config()
 
@@ -62,5 +63,6 @@ app.use('/sentiment', sentimentRoutes)
 app.use('/brain', brainRoutes)
 app.use('/campaigns', campaignRoutes)
 app.use('/staff', staffRoutes)
+app.use('/dev-tools', devToolsRoutes)
 
 export default app

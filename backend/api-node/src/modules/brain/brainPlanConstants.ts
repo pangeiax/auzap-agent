@@ -75,10 +75,18 @@ const PRO_LIMITS: SecondBrainPlanLimits = {
   campaignSendMaxRecipients: SECOND_BRAIN_PRO_CAMPAIGN_SEND_MAX,
 }
 
+/** Plano Premium: ilimitado em mensagens ao assistente e destinatários por campanha. */
+const PREMIUM_LIMITS: SecondBrainPlanLimits = {
+  secondBrainEnabled: true,
+  dailyMessageLimit: Number.MAX_SAFE_INTEGER,
+  campaignSendMaxRecipients: Number.MAX_SAFE_INTEGER,
+}
+
 /** Mapeamento plan → limites. Inclua novos planos (ex.: enterprise) conforme necessário. */
 export const SECOND_BRAIN_PLAN_LIMITS_BY_SLUG: Record<string, SecondBrainPlanLimits> = {
   free: FREE_LIMITS,
   pro: PRO_LIMITS,
+  premium: PREMIUM_LIMITS,
 }
 
 export function resolveSecondBrainPlanLimits(plan: string | null | undefined): SecondBrainPlanLimits {

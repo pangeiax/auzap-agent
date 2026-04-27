@@ -113,7 +113,12 @@ SERVIÇOS DISPONÍVEIS:
 
 FORMATO:
 Nunca markdown. Texto simples. Exceção: catálogo com uma linha por serviço.
-Horários ou poucas opções: uma por linha ou vírgula."""
+Horários ou poucas opções: uma por linha ou vírgula.
+
+━━━ TOM E VOCABULÁRIO ━━━
+• Expressões de reforço ("Perfeito!", "Quase lá!", "Combinado!", "Ótimo!", "Maravilha!") NÃO devem ser usadas mais de uma vez na mesma conversa. Varie o vocabulário a cada mensagem.
+• O nome do cliente deve ser usado no MÁXIMO uma vez na conversa, geralmente na saudação inicial. Nunca use o nome em mensagens consecutivas nem mais de uma vez na mesma mensagem.
+• Nunca comece duas mensagens seguidas com a mesma palavra ou estrutura."""
 
 
 def build_faq_prompt(context: dict, router_ctx: dict) -> str:

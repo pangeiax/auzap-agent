@@ -32,6 +32,19 @@ def block_formato_resposta() -> str:
     )
 
 
+def block_tom_e_vocabulario() -> str:
+    """Regras de tom, vocabulário e uso do nome do cliente — igual em todos os agentes."""
+    return (
+        "━━━ TOM E VOCABULÁRIO ━━━\n"
+        "• Expressões de reforço (\"Perfeito!\", \"Quase lá!\", \"Combinado!\", \"Ótimo!\", \"Maravilha!\") "
+        "NÃO devem ser usadas mais de uma vez na mesma conversa. Varie o vocabulário: "
+        "use alternativas diferentes a cada mensagem. Se já usou uma, não repita.\n"
+        "• O nome do cliente deve ser usado no MÁXIMO uma vez na conversa, geralmente na saudação inicial. "
+        "Nunca use o nome em mensagens consecutivas nem mais de uma vez na mesma mensagem.\n"
+        "• Nunca comece duas mensagens seguidas com a mesma palavra ou estrutura."
+    )
+
+
 def block_pedido_humano() -> str:
     """Instrução de pedido de atendimento humano — igual em todos os agentes."""
     return (

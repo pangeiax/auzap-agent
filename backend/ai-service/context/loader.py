@@ -2,9 +2,14 @@ import logging
 
 import psycopg2
 
+from config import OPENAI_MODEL_COMPANY_OVERRIDE
 from db import get_connection
 
 logger = logging.getLogger("ai-service.context.loader")
+
+
+def _get_model_override(company_id: int) -> str | None:
+    return OPENAI_MODEL_COMPANY_OVERRIDE.get(company_id)
 
 BH_DAY_KEYS = [
     "sunday",
@@ -231,4 +236,5 @@ async def load_context(company_id: int, client_phone: str) -> dict:
             "lodging_config": lodging_dict,
             "lodging_room_types": lodging_room_types,
             "identity_flow_required": identity_flow_required,
+            "model_override": _get_model_override(company["company_id"]),
         }

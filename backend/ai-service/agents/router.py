@@ -4,7 +4,7 @@ import re
 from datetime import date as date_cls, datetime, timedelta, timezone
 from agno.agent import Agent
 from utils.openai_chat import openai_chat_for_agents
-from config import OPENAI_MODEL_ROUTER
+from config import OPENAI_MODEL_ROUTER, resolve_model
 from prompts.router import build_router_prompt
 from prompts.shared_blocks import append_global_agent_max_rules
 from agents.team.onboarding_agent import build_onboarding_agent
@@ -753,7 +753,7 @@ async def run_router(
     # ── 1. Router ────────────────────────────────
     router = Agent(
         name="Router",
-        model=openai_chat_for_agents(OPENAI_MODEL_ROUTER),
+        model=openai_chat_for_agents(resolve_model(OPENAI_MODEL_ROUTER, context)),
         instructions=append_global_agent_max_rules(build_router_prompt(context)),
     )
 
@@ -827,7 +827,7 @@ async def run_router(
         previous_agent = last_entry.get("agent_used") if last_entry else None
 
     # Guardrails de pré-processamento
-    specialist_input = apply_guardrails(
+    specialist_input = await apply_guardrails(
         specialist_input=base_input,
         context=context,
         router_ctx=router_ctx,

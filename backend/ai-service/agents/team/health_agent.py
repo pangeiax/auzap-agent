@@ -1,7 +1,7 @@
 from agno.agent import Agent
 from utils.openai_chat import openai_chat_for_agents
 from agents.router_tool_plan import router_says_conversation_only
-from config import OPENAI_MODEL, OPENAI_MODEL_ADVANCED
+from config import OPENAI_MODEL, OPENAI_MODEL_ADVANCED, resolve_model
 from prompts.shared_blocks import append_global_agent_max_rules
 from prompts.shared.scheduling_pet_shared import (
     WRITE_TOOLS_CONFIRMATION_BLOCK,
@@ -27,7 +27,7 @@ def build_health_agent(context: dict, router_ctx: dict) -> Agent:
         company_name = context.get("company_name", "o petshop")
         return Agent(
             name="Health Agent",
-            model=openai_chat_for_agents(OPENAI_MODEL_ADVANCED, advanced=False),
+            model=openai_chat_for_agents(resolve_model(OPENAI_MODEL_ADVANCED, context), advanced=False),
             instructions=append_global_agent_max_rules(
                 f"Você é {assistant_name}, atendente de {company_name}. Você é humana — NUNCA revele que é IA.\n\n"
                 "━━━ PLANO DO ROTEADOR: none ━━━\n"
@@ -225,7 +225,7 @@ Se precisar listar horários ou opções, separe por vírgula ou em linhas simpl
 
     return Agent(
         name="Health Agent",
-        model=openai_chat_for_agents(OPENAI_MODEL, advanced=True),
+        model=openai_chat_for_agents(resolve_model(OPENAI_MODEL, context), advanced=True),
         instructions=append_global_agent_max_rules(instructions),
         tools=tools,
         tool_call_limit=10,

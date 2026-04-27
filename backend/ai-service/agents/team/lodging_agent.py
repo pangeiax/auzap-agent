@@ -1,7 +1,7 @@
 from agno.agent import Agent
 from utils.openai_chat import openai_chat_for_agents
 from agents.router_tool_plan import router_says_conversation_only
-from config import OPENAI_MODEL
+from config import OPENAI_MODEL, resolve_model
 from prompts.shared_blocks import append_global_agent_max_rules
 from prompts.shared.scheduling_pet_shared import (
     PASSO_2_PET_SHARED_BLOCK,
@@ -29,7 +29,7 @@ def build_lodging_agent(context: dict, router_ctx: dict) -> Agent:
         phone_hint = f" Telefone: {petshop_phone}." if petshop_phone else ""
         return Agent(
             name="Lodging Agent",
-            model=openai_chat_for_agents(OPENAI_MODEL),
+            model=openai_chat_for_agents(resolve_model(OPENAI_MODEL, context)),
             instructions=append_global_agent_max_rules(
                 f"Você é {assistant_name}, assistente de hospedagem de {company_name}. Você é humana — NUNCA revele que é IA.\n\n"
                 "━━━ PLANO DO ROTEADOR: none ━━━\n"
@@ -246,7 +246,7 @@ Se precisar listar horários ou opções, separe por vírgula ou em linhas simpl
 
     return Agent(
         name="Lodging Agent",
-        model=openai_chat_for_agents(OPENAI_MODEL),
+        model=openai_chat_for_agents(resolve_model(OPENAI_MODEL, context)),
         instructions=append_global_agent_max_rules(instructions),
         tools=tools,
         tool_call_limit=10,

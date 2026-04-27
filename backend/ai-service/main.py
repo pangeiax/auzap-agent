@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 load_dotenv()
 
+from config import resolve_model_for_company
 from context.loader import load_context
 from memory.history_summary import ensure_rolling_summary, summary_prefix_for_prompt
 from memory.message_sanitize import sanitize_assistant_for_history
@@ -92,7 +93,7 @@ class ReactivateRequest(BaseModel):
 # ─────────────────────────────────────────
 # Descreve imagem via visão (modelo em OPENAI_MODEL, default gpt-5)
 # ─────────────────────────────────────────
-async def describe_image(image_base64: str, caption: str = "") -> str:
+async def describe_image(image_base64: str, caption: str = "", company_id: int | None = None) -> str:
     prompt = (
         "Descreva o conteúdo desta imagem em detalhes. "
         "Se houver texto, transcreva-o integralmente. "
@@ -102,7 +103,7 @@ async def describe_image(image_base64: str, caption: str = "") -> str:
         prompt += f"\n\nO usuário também enviou a seguinte legenda: '{caption}'"
 
     try:
-        vision_model = os.getenv("OPENAI_MODEL", "gpt-5")
+        vision_model = resolve_model_for_company(os.getenv("OPENAI_MODEL", "gpt-5"), company_id)
         response = await _openai_client.chat.completions.create(
             model=vision_model,
             messages=[
@@ -170,7 +171,7 @@ async def run_agent(req: AgentRequest):
                 req.company_id,
                 req.client_phone,
             )
-            image_description = await describe_image(req.image_base64, req.message)
+            image_description = await describe_image(req.image_base64, req.message, req.company_id)
             logger.info("Descrição da imagem: %.120r", image_description)
             message_for_agent = (
                 f"[📷 O usuário enviou uma imagem. Descrição: {image_description}]"

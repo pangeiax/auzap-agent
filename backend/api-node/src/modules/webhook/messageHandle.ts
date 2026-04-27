@@ -3,6 +3,7 @@ import { proto, downloadMediaMessage } from '@whiskeysockets/baileys'
 import { prisma } from '../../lib/prisma'
 import { sendTextMessage, sendTyping, clearTyping } from '../../services/baileysService'
 import { runAgent, popFromHistory } from '../../agent/AgentService'
+import { linkLidToManualIfMatch } from './senderPnMatch'
 
 const DEBOUNCE_MS = 8000
 
@@ -56,6 +57,7 @@ interface QueuedMessage {
   pushName: string | null
   socket: any
   imageBase64?: string
+  realPhone?: string | null
 }
 
 const queuedMessages = new Map<string, QueuedMessage>()
@@ -175,7 +177,8 @@ function enqueueDebounce(
   jid: string,
   phone: string,
   pushName: string | null,
-  text: string
+  text: string,
+  realPhone?: string | null
 ): void {
   const key = `${companyId}:${phone}`
   const existing = pendingMessages.get(key)
@@ -193,7 +196,7 @@ function enqueueDebounce(
     console.log(
       `[Handler][company:${companyId}] Processando mensagem consolidada de ${phone} (${parts.length} parte(s)): ${fullMessage}`
     )
-    await enqueueProcessing(companyId, socket, jid, phone, pushName, fullMessage)
+    await enqueueProcessing(companyId, socket, jid, phone, pushName, fullMessage, undefined, realPhone)
   }, DEBOUNCE_MS)
 
   pendingMessages.set(key, { timer, parts, jid, pushName })
@@ -205,12 +208,26 @@ function enqueueDebounce(
 export async function handleIncomingMessage(
   companyId: number,
   socket: any,
-  msg: proto.IWebMessageInfo
+  msg: proto.IWebMessageInfo,
+  senderPn?: string | null
 ): Promise<void> {
   const jid = msg.key.remoteJid!
+
+  // A IA só atende conversas 1-a-1 (@s.whatsapp.net ou @lid). Qualquer outro
+  // canal — grupo (@g.us), broadcast/status (@broadcast), canal/newsletter
+  // (@newsletter) — é ignorado silenciosamente. Whitelist em vez de blocklist
+  // pra que sufixos novos do WhatsApp não vazem por default.
+  if (!jid || !(jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid'))) {
+    console.log(`[Handler][company:${companyId}] Ignorando JID fora de DM: ${jid}`)
+    return
+  }
+
   const phone = getClientIdentifierFromJid(jid)
   const pushName = msg.pushName || null
   const key = `${companyId}:${phone}`
+
+  // Extrai telefone real do senderPn (ex: "5513991839119@s.whatsapp.net" → "5513991839119")
+  const realPhone = senderPn ? getClientIdentifierFromJid(senderPn) : null
 
   const isAudio = !!(msg.message?.audioMessage || msg.message?.ptvMessage)
   const isImage = !!msg.message?.imageMessage
@@ -231,7 +248,7 @@ export async function handleIncomingMessage(
       return
     }
     console.log(`[Handler][company:${companyId}] Transcrição de ${phone}: ${transcription}`)
-    enqueueDebounce(companyId, socket, jid, phone, pushName, transcription)
+    enqueueDebounce(companyId, socket, jid, phone, pushName, transcription, realPhone)
     return
   }
 
@@ -246,7 +263,7 @@ export async function handleIncomingMessage(
       const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer
       const imageBase64 = buffer.toString('base64')
       console.log(`[Handler][company:${companyId}] Imagem recebida de ${phone} (legenda: "${caption}")`)
-      await enqueueProcessing(companyId, socket, jid, phone, pushName, caption, imageBase64)
+      await enqueueProcessing(companyId, socket, jid, phone, pushName, caption, imageBase64, realPhone)
     } catch (err) {
       console.error(`[Handler][company:${companyId}] Erro ao baixar imagem:`, err)
       await sendTextMessage(
@@ -269,7 +286,7 @@ export async function handleIncomingMessage(
       console.log(`[Concurrency][company:${companyId}] ⚡ Texto de ${phone} chegou durante processamento. Resposta atual será bloqueada. Texto: "${text.substring(0, 80)}"`)
     }
     console.log(`[Handler][company:${companyId}] Mensagem de ${phone}: ${text}`)
-    enqueueDebounce(companyId, socket, jid, phone, pushName, text)
+    enqueueDebounce(companyId, socket, jid, phone, pushName, text, realPhone)
     return
   }
 
@@ -300,7 +317,8 @@ async function enqueueProcessing(
   phone: string,
   pushName: string | null,
   text: string,
-  imageBase64?: string
+  imageBase64?: string,
+  realPhone?: string | null
 ): Promise<void> {
   const key = `${companyId}:${phone}`
 
@@ -320,6 +338,7 @@ async function enqueueProcessing(
         pushName,
         socket,
         ...(imageBase64 ? { imageBase64 } : {}),
+        ...(realPhone ? { realPhone } : {}),
       })
       console.log(`[Concurrency][company:${companyId}] Primeiro batch pendente registrado para ${phone}`)
     }
@@ -333,7 +352,7 @@ async function enqueueProcessing(
   await sendTyping(String(companyId), jid)
   try {
     try {
-      await processMessage(companyId, socket, jid, phone, pushName, text, imageBase64)
+      await processMessage(companyId, socket, jid, phone, pushName, text, imageBase64, false, realPhone)
     } catch (err) {
       console.error(`[Handler][company:${companyId}] Erro ao processar mensagem de ${phone}:`, err)
     }
@@ -361,7 +380,9 @@ async function enqueueProcessing(
           phone,
           queued.pushName,
           queuedText,
-          queued.imageBase64
+          queued.imageBase64,
+          false,
+          queued.realPhone
         )
       } catch (err) {
         console.error(`[Handler][company:${companyId}] Erro ao reprocessar mensagem de ${phone}:`, err)
@@ -393,11 +414,23 @@ async function processMessage(
   pushName: string | null,
   text: string,
   imageBase64?: string,
-  skipSave: boolean = false
+  skipSave: boolean = false,
+  realPhone?: string | null
 ): Promise<void> {
   // ── 1. Busca ou cria o cliente ───────────
   let client = await prisma.client.findUnique({
     where: { companyId_phone: { companyId, phone } },
+  })
+
+  // Match por senderPn → manual_phone (cenário A1): só roda na PRIMEIRA mensagem
+  // do @lid. Se casar, o registro manual adota o @lid como phone. Sem senderPn,
+  // sem match, ou se o @lid já existe, segue fluxo normal (cadastro cuida do merge).
+  client = await linkLidToManualIfMatch({
+    companyId,
+    phone,
+    realPhone,
+    client,
+    pushName,
   })
 
   if (!client) {

@@ -5,9 +5,10 @@ const PLAN_ORDER: Record<string, number> = {
   free: 1,
   basic: 2,
   pro: 3,
+  premium: 4,
 }
 
-export function requirePlan(requiredPlan: 'free' | 'basic' | 'pro') {
+export function requirePlan(requiredPlan: 'free' | 'basic' | 'pro' | 'premium') {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = req.user?.companyId

@@ -36,8 +36,10 @@ def _chunk_size() -> int:
         return 6
 
 
-def _summary_model() -> str:
-    return (os.getenv("OPENAI_MODEL_SUMMARY") or _SUMMARY_MODEL_DEFAULT).strip()
+def _summary_model(company_id: int | None = None) -> str:
+    from config import resolve_model_for_company
+    base = (os.getenv("OPENAI_MODEL_SUMMARY") or _SUMMARY_MODEL_DEFAULT).strip()
+    return resolve_model_for_company(base, company_id)
 
 
 def _format_messages_block(messages: list[dict]) -> str:
@@ -66,7 +68,7 @@ Se houver lista enorme de serviços/preços, resuma numa linha (ex.: «viu catá
 """
 
 
-async def _llm_merge_summary(previous: str, messages: list[dict]) -> str:
+async def _llm_merge_summary(previous: str, messages: list[dict], company_id: int | None = None) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         logger.warning("history_summary | OPENAI_API_KEY ausente — pulando merge")
@@ -77,7 +79,7 @@ async def _llm_merge_summary(previous: str, messages: list[dict]) -> str:
         return previous
 
     client = AsyncOpenAI(api_key=api_key)
-    model = _summary_model()
+    model = _summary_model(company_id)
     sys_prompt = (
         "Você atualiza o resumo estruturado de um atendimento WhatsApp de petshop. "
         "Mescle o resumo anterior com as novas mensagens num único texto coerente. "
@@ -131,7 +133,7 @@ async def ensure_rolling_summary(company_id: int, client_phone: str) -> None:
             chunk_end = min(covered + chunk, start_recent)
             raw_msgs = await r.lrange(key, covered, chunk_end - 1)
             msgs = [json.loads(m) for m in raw_msgs]
-            text = await _llm_merge_summary(text, msgs)
+            text = await _llm_merge_summary(text, msgs, company_id)
             covered = chunk_end
             await set_summary_state(company_id, client_phone, text, covered)
             logger.info(
@@ -140,7 +142,7 @@ async def ensure_rolling_summary(company_id: int, client_phone: str) -> None:
                 client_phone,
                 covered,
                 start_recent,
-                _summary_model(),
+                _summary_model(company_id),
                 len(text),
             )
     finally:

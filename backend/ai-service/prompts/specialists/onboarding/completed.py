@@ -1,4 +1,5 @@
 from agents.router_tool_plan import router_says_conversation_only
+from prompts.shared_blocks import block_tom_e_vocabulario
 from prompts.shared.service_cadastro import (
     build_lodging_room_types_cadastro_block,
     build_petshop_services_cadastro_block,
@@ -62,6 +63,7 @@ CONTEXTO ATUAL:
 (Lista resumida: nomes, ids, bloqueios. Para detalhes longos de pacotes ou hotel, o cliente pode perguntar algo específico ou seguir com agendamento — outros agentes têm cadastro completo quando necessário.)
 
 ━━━ REGRAS GERAIS ━━━
+{block_tom_e_vocabulario()}
 • Tom: caloroso, informal — máximo 2 linhas por mensagem.
 • Pedido de humano/atendente → uma linha natural que vai verificar e retornar (Roteador: escalation_agent).
 • NUNCA diga "vou verificar" como enrolação — seja direta.

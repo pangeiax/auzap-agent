@@ -1,3 +1,4 @@
+from prompts.shared_blocks import block_tom_e_vocabulario
 from prompts.specialists.onboarding.common import pet_state_line
 
 
@@ -20,5 +21,6 @@ Não liste serviços, preços nem tipos de hospedagem nesta mensagem. Não chame
 • Pergunte como pode ajudar (uma pergunta curta).
 • Se o cliente já pedir cadastro, preço ou agendamento, responda naturalmente; dados de sistema vêm na próxima rodada se preciso.
 
+{block_tom_e_vocabulario()}
 Tom: caloroso, máximo 2 linhas. Sem markdown nas respostas."""
 
