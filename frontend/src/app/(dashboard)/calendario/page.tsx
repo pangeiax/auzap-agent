@@ -308,6 +308,7 @@ export default function CalendarioPage() {
   const [agendaMode, setAgendaMode] = useState<"agenda" | "hotel">("agenda");
   const [lodgingReservations, setLodgingReservations] = useState<LodgingReservation[]>([]);
   const [lodgingLoading, setLodgingLoading] = useState(false);
+  const [selectedLodging, setSelectedLodging] = useState<LodgingReservation | null>(null);
 
   // Carrega reservas de hotel/creche apenas quando o toggle vai pra "hotel" pela primeira vez.
   useEffect(() => {
@@ -960,18 +961,44 @@ export default function CalendarioPage() {
     [visibleEvents],
   );
 
-  // Estatísticas da aba Hotel/Creche — mesma lógica da página hotel-creche:
-  //   reservados = confirmadas/needs_reschedule (aguardando check-in)
-  //   hospedados = checked_in (em estadia)
-  const lodgingStats = useMemo(
-    () => ({
-      reservados: lodgingReservations.filter(
+  // Estatísticas da aba Hotel/Creche — todas escopadas ao mês visível.
+  // Quando o usuário navega entre meses, os badges acompanham — não mostra dado de outro mês.
+  //   reservados = confirmadas/needs_reschedule que tocam o mês
+  //   hospedados = checked_in que tocam o mês
+  //   concluidos = checked_out que tocam o mês
+  const lodgingStats = useMemo(() => {
+    const parseYmd = (s: string): Date => {
+      const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return new Date(NaN);
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    };
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    const touchesVisibleMonth = (r: LodgingReservation): boolean => {
+      const cin = parseYmd(r.checkin_date);
+      const cout = parseYmd(r.checkout_date);
+      // Creche: backend grava checkout_date = "dia seguinte ao último". Ajusta pra comparar.
+      const lastRealDay =
+        r.type === "daycare"
+          ? new Date(cout.getFullYear(), cout.getMonth(), cout.getDate() - 1)
+          : cout;
+      return lastRealDay >= firstDay && cin <= lastDay;
+    };
+
+    const inMonth = lodgingReservations.filter(touchesVisibleMonth);
+
+    return {
+      reservados: inMonth.filter(
         (r) => r.status === "confirmed" || r.status === "needs_reschedule",
       ).length,
-      hospedados: lodgingReservations.filter((r) => r.status === "checked_in").length,
-    }),
-    [lodgingReservations],
-  );
+      hospedados: inMonth.filter((r) => r.status === "checked_in").length,
+      concluidos: inMonth.filter((r) => r.status === "checked_out").length,
+    };
+  }, [lodgingReservations, currentDate]);
 
   const weekAppointments = useMemo(() => {
     const weekFullDates = new Set(weekDays.map((d) => d.fullDate));
@@ -1024,6 +1051,7 @@ export default function CalendarioPage() {
                 <HotelTimelineView
                   currentDate={currentDate}
                   reservations={lodgingReservations}
+                  onReservationClick={setSelectedLodging}
                 />
               )
             ) : eventsLoading ? (
@@ -1600,6 +1628,101 @@ export default function CalendarioPage() {
                   </p>
                 </div>
               ) : null}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={selectedLodging !== null}
+        onClose={() => setSelectedLodging(null)}
+        title="Detalhes da hospedagem"
+        className="max-w-[440px]"
+      >
+        {selectedLodging && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#F4F6F9] dark:bg-[#212225] text-sm font-bold text-[#727B8E] dark:text-[#8a94a6]">
+                {(selectedLodging.pet_name ?? "?").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="truncate text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  {selectedLodging.pet_name ?? "Pet sem nome"}
+                </h3>
+                <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                  {selectedLodging.type === "daycare" ? "Creche" : "Hotel"}
+                  {selectedLodging.pet_breed ? ` · ${selectedLodging.pet_breed}` : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Status</span>
+                <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                  {selectedLodging.status === "checked_in"
+                    ? "Hospedado"
+                    : selectedLodging.status === "checked_out"
+                      ? "Concluído"
+                      : selectedLodging.status === "needs_reschedule"
+                        ? "Reserva (precisa remarcar)"
+                        : "Reserva"}
+                </span>
+              </div>
+              {selectedLodging.client_name && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Tutor</span>
+                  <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedLodging.client_name}
+                  </span>
+                </div>
+              )}
+              {(() => {
+                // Só mostra telefone quando foi inserido manualmente E é um número real
+                // (descarta JID interno do WhatsApp tipo "1825...@lid").
+                const manual = selectedLodging.phone_client_manual;
+                const isRealPhone =
+                  !!manual && !manual.includes("@") && !/[a-z]/i.test(manual);
+                if (!isRealPhone) return null;
+                return (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">
+                      Telefone
+                    </span>
+                    <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                      {manual}
+                    </span>
+                  </div>
+                );
+              })()}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Período</span>
+                <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                  {(() => {
+                    const fmt = (s: string) => {
+                      const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                      return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
+                    };
+                    return `${fmt(selectedLodging.checkin_date)} → ${fmt(selectedLodging.checkout_date)}`;
+                  })()}
+                </span>
+              </div>
+              {selectedLodging.room_type_name && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Acomodação</span>
+                  <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedLodging.room_type_name}
+                  </span>
+                </div>
+              )}
+              {selectedLodging.kennel_id && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Vaga</span>
+                  <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedLodging.kennel_id}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}

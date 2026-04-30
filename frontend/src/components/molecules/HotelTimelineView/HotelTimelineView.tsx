@@ -70,18 +70,25 @@ export function HotelTimelineView({
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const totalDays = lastDay.getDate();
+  // Tirar o filtro de datas passadas
+  // "Hoje" zerado em hora local — usado pra filtrar reservas com fim já passado.
+  const todayLocal = new Date();
+  const today = new Date(todayLocal.getFullYear(), todayLocal.getMonth(), todayLocal.getDate());
 
   const days: Date[] = [];
   for (let d = 1; d <= totalDays; d++) days.push(new Date(year, month, d));
 
-  // ─── 1. Filtra reservas ativas que tocam o mês visível ──────────────
-  // Status ativos: confirmed, needs_reschedule, checked_in. Ignora cancelled, checked_out, etc.
-  // "toca o mês" = último dia real do período >= primeiro dia do mês E check-in <= último dia.
+  // ─── 1. Filtra reservas que tocam o mês visível ──────────────
+  // Regras:
+  //   1. Ignora canceladas.
+  //   2. Ignora reservas cujo último dia real já passou (lastRealDay < hoje) — independente do status.
+  //      Isso evita poluir a tela com reservas antigas que nunca tiveram check-out feito no sistema.
+  //   3. "toca o mês" = último dia real >= primeiro dia do mês E check-in <= último dia.
   //
   // Atenção ao tipo:
   //   - Hotel: checkout_date é o próprio último dia visual → usar cout.
   //   - Creche: backend grava checkout_date como "dia seguinte ao último" → último dia real = cout - 1.
-  const ACTIVE_STATUSES = new Set(["confirmed", "needs_reschedule", "checked_in"]);
+  const ACTIVE_STATUSES = new Set(["confirmed", "needs_reschedule", "checked_in", "checked_out"]);
   const relevant = reservations.filter((r) => {
     if (!ACTIVE_STATUSES.has(r.status)) return false;
     const cin = toDate(r.checkin_date);
@@ -90,6 +97,7 @@ export function HotelTimelineView({
       r.type === "daycare"
         ? new Date(cout.getFullYear(), cout.getMonth(), cout.getDate() - 1)
         : cout;
+    if (lastRealDay < today) return false; // reserva já encerrada — não mostra
     return lastRealDay >= firstDay && cin <= lastDay;
   });
 
@@ -135,21 +143,22 @@ export function HotelTimelineView({
   });
 
   const laneCount = Math.max(laneEndDays.length, 1);
-  const ROW_H = 44; // altura de cada lane em px
-  // Colunas sem largura mínima rígida — deixa o grid distribuir o mês inteiro
-  // na largura do container. Caso o container fique muito estreito (mobile),
-  // o outer tem overflow-auto e acaba gerando scroll horizontal naturalmente.
+  const ROW_H = 48; // altura de cada lane em px (um pouco maior pra mobile/touch)
+  // Largura mínima por coluna em mobile (~iPhone XR 414px). Em desktop o min é 0
+  // e as colunas dividem o espaço uniformemente. Em mobile força um piso de 36px,
+  // ativando scroll horizontal automaticamente quando não cabe (overflow-auto no wrapper).
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-[#727B8E]/10 bg-white p-3 dark:border-[#40485A] dark:bg-[#1A1B1D]">
       <div
+        className="min-w-max sm:min-w-0"
         style={{
           display: "grid",
-          gridTemplateColumns: `80px repeat(${totalDays}, minmax(0, 1fr))`,
+          gridTemplateColumns: `clamp(56px, 12vw, 80px) repeat(${totalDays}, minmax(36px, 1fr))`,
         }}
       >
         {/* ── Header: canto superior esquerdo + dias ── */}
-        <div className="sticky left-0 z-10 flex items-center justify-start border-b border-[#727B8E]/15 bg-white px-2 py-2 text-xs font-semibold uppercase tracking-wide text-[#727B8E] dark:border-[#40485A] dark:bg-[#1A1B1D] dark:text-[#8a94a6]">
+        <div className="flex items-center justify-start border-b border-[#727B8E]/15 bg-white px-2 py-2 text-xs font-semibold uppercase tracking-wide text-[#727B8E] dark:border-[#40485A] dark:bg-[#1A1B1D] dark:text-[#8a94a6]">
           Pet
         </div>
         {days.map((d) => {
@@ -194,7 +203,7 @@ export function HotelTimelineView({
         {Array.from({ length: laneCount }).map((_, laneIdx) => (
           <div
             key={`lane-label-${laneIdx}`}
-            className="sticky left-0 z-10 border-b border-[#727B8E]/5 bg-white px-2 py-1 text-[11px] text-[#727B8E] dark:border-[#40485A] dark:bg-[#1A1B1D] dark:text-[#8a94a6]"
+            className="border-b border-[#727B8E]/5 bg-white px-2 py-1 text-[11px] text-[#727B8E] dark:border-[#40485A] dark:bg-[#1A1B1D] dark:text-[#8a94a6]"
             style={{ gridRow: laneIdx + 2, height: ROW_H }}
           >
             {/* label intencionalmente vazio — pode virar número da lane se quiser */}
@@ -227,11 +236,21 @@ export function HotelTimelineView({
         {positioned.map((p) => {
           const color = colorForId(p.res.id);
           const label = `${p.res.pet_name ?? "Pet"}${p.res.pet_breed ? ` · ${p.res.pet_breed}` : ""}`;
+          // Status legível em português pra mostrar no tooltip ao passar o mouse.
+          const statusLabel =
+            p.res.status === "checked_in"
+              ? "Hospedado"
+              : p.res.status === "checked_out"
+                ? "Concluído"
+                : p.res.status === "needs_reschedule"
+                  ? "Reserva (precisa remarcar)"
+                  : "Reserva";
           const tooltip = [
-            p.res.pet_name ?? "Pet",
+            `Status: ${statusLabel}`,
+            p.res.pet_name ? `Pet: ${p.res.pet_name}` : null,
             p.res.client_name ? `Tutor: ${p.res.client_name}` : null,
-            `${p.res.checkin_date.slice(0, 10)} → ${p.res.checkout_date.slice(0, 10)}`,
-            p.res.type === "daycare" ? "Creche" : "Hotel",
+            p.res.checkin_date ? `Data da hospedagem: ${p.res.checkin_date.slice(0, 10)} → ${p.res.checkout_date.slice(0, 10)}`: null,
+            `Tipo de hospedagem: ${p.res.type === "daycare" ? "Creche" : "Hotel"}`,
           ]
             .filter(Boolean)
             .join("\n");
@@ -248,6 +267,8 @@ export function HotelTimelineView({
                 color.text,
                 p.clippedLeft && "rounded-l-none",
                 p.clippedRight && "rounded-r-none",
+                // Hospedagens já finalizadas ficam desbotadas pra dar contexto histórico sem competir visualmente com as ativas.
+                p.res.status === "checked_out" && "opacity-50",
               )}
               style={{
                 gridRow: p.lane + 2,
