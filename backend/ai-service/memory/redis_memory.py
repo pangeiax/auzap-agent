@@ -11,7 +11,7 @@ HISTORY_TTL = 60 * 60 * 24
 MAX_HISTORY_MESSAGES = 6
 ROUTER_CTX_TTL = HISTORY_TTL
 SUMMARY_TTL = HISTORY_TTL
-IDENTITY_MIG_TTL = HISTORY_TTL
+IDENTITY_PARTIAL_TTL = HISTORY_TTL
 
 
 def _redis_client():
@@ -39,7 +39,54 @@ def _summary_key(company_id: int, client_phone: str) -> str:
 
 
 def _identity_mig_key(company_id: int, client_phone: str) -> str:
+    """Chave legada do antigo fluxo de recadastro determinístico. Mantida apenas
+    para que `clear_history` continue removendo o estado de clientes que estavam
+    no meio do fluxo antigo no momento do deploy."""
     return f"identity_mig:{company_id}:{client_phone}"
+
+
+def _identity_partial_key(company_id: int, client_phone: str) -> str:
+    """Chave dos dados parciais de cadastro acumulados pelo identity_agent
+    entre turnos (nome, e-mail, telefone, CPF). Limpa após save_identity OK."""
+    return f"identity_partial:{company_id}:{client_phone}"
+
+
+async def get_identity_partial(company_id: int, client_phone: str) -> dict:
+    r = _redis_client()
+    try:
+        raw = await r.get(_identity_partial_key(company_id, client_phone))
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+    finally:
+        await r.aclose()
+
+
+async def set_identity_partial(
+    company_id: int, client_phone: str, partial: dict
+) -> None:
+    r = _redis_client()
+    try:
+        payload = json.dumps(partial or {}, ensure_ascii=False)
+        await r.set(
+            _identity_partial_key(company_id, client_phone),
+            payload,
+            ex=IDENTITY_PARTIAL_TTL,
+        )
+    finally:
+        await r.aclose()
+
+
+async def clear_identity_partial(company_id: int, client_phone: str) -> None:
+    r = _redis_client()
+    try:
+        await r.delete(_identity_partial_key(company_id, client_phone))
+    finally:
+        await r.aclose()
 
 
 async def get_summary_state(company_id: int, client_phone: str) -> dict | None:
@@ -147,72 +194,9 @@ async def clear_history(company_id: int, client_phone: str):
             _router_ctx_key(company_id, client_phone),
             _summary_key(company_id, client_phone),
             _identity_mig_key(company_id, client_phone),
+            _identity_partial_key(company_id, client_phone),
         )
     finally:
         await r.aclose()
 
 
-async def get_identity_migration_phase(company_id: int, client_phone: str) -> str | None:
-    """Fase do fluxo de recadastro: None | awaiting_consent | awaiting_details | completed."""
-    r = _redis_client()
-    try:
-        raw = await r.get(_identity_mig_key(company_id, client_phone))
-        if not raw:
-            return None
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
-        if isinstance(data, dict):
-            p = data.get("phase")
-            return str(p) if p else None
-        return None
-    finally:
-        await r.aclose()
-
-
-async def get_identity_migration_data(company_id: int, client_phone: str) -> dict:
-    """Retorna dados parciais acumulados do fluxo de recadastro."""
-    r = _redis_client()
-    try:
-        raw = await r.get(_identity_mig_key(company_id, client_phone))
-        if not raw:
-            return {}
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        if isinstance(data, dict):
-            return data.get("partial", {})
-        return {}
-    finally:
-        await r.aclose()
-
-
-async def set_identity_migration_phase(
-    company_id: int, client_phone: str, phase: str | None, partial: dict | None = None
-) -> None:
-    r = _redis_client()
-    try:
-        key = _identity_mig_key(company_id, client_phone)
-        if not phase:
-            await r.delete(key)
-            return
-        payload = {"phase": phase}
-        if partial:
-            payload["partial"] = partial
-        await r.set(
-            key,
-            json.dumps(payload, ensure_ascii=False),
-            ex=IDENTITY_MIG_TTL,
-        )
-    finally:
-        await r.aclose()
-
-
-async def clear_identity_migration_phase(company_id: int, client_phone: str) -> None:
-    r = _redis_client()
-    try:
-        await r.delete(_identity_mig_key(company_id, client_phone))
-    finally:
-        await r.aclose()

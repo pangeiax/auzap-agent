@@ -9,8 +9,14 @@ GLOBAL_AGENT_MAX_RULES = """━━━ REGRA MÁXIMA (TODOS OS AGENTES) ━━━
 
 
 def append_global_agent_max_rules(instructions: str) -> str:
-    """Acrescenta a regra máxima global ao final das instruções do agente ou do router."""
-    return (instructions or "").rstrip() + "\n\n" + GLOBAL_AGENT_MAX_RULES
+    """Acrescenta a regra máxima global + tom/vocabulário ao final das instruções
+    do agente ou do router. Detecta se o bloco de tom já está presente para
+    evitar duplicação em prompts que já o incluem manualmente (onboarding/*)."""
+    base = (instructions or "").rstrip()
+    out = base + "\n\n" + GLOBAL_AGENT_MAX_RULES
+    if "TOM E VOCABULÁRIO" not in base:
+        out += "\n\n" + block_tom_e_vocabulario()
+    return out
 
 
 def block_identity(assistant_name: str, company_name: str, client_name: str = None) -> str:
@@ -36,12 +42,20 @@ def block_tom_e_vocabulario() -> str:
     """Regras de tom, vocabulário e uso do nome do cliente — igual em todos os agentes."""
     return (
         "━━━ TOM E VOCABULÁRIO ━━━\n"
-        "• Expressões de reforço (\"Perfeito!\", \"Quase lá!\", \"Combinado!\", \"Ótimo!\", \"Maravilha!\") "
-        "NÃO devem ser usadas mais de uma vez na mesma conversa. Varie o vocabulário: "
-        "use alternativas diferentes a cada mensagem. Se já usou uma, não repita.\n"
+        "• PROIBIDO começar mensagens com prefixo de reforço seguido do nome do cliente — "
+        "padrão \"Perfeito, Igor!\", \"Ok, Igor!\", \"Combinado, Igor!\", \"Beleza, João!\", "
+        "\"Show, Maria!\", \"Tranquilo, Pedro!\". Soa robótico e repetitivo. "
+        "Comece a mensagem direto na ideia (\"Marcando o banho do Thor pra sábado às 10h.\") "
+        "ou com uma confirmação curta SEM nome (\"Marcado!\", \"Vamos lá.\", \"Anotado.\").\n"
+        "• Expressões de reforço (\"Perfeito!\", \"Quase lá!\", \"Combinado!\", \"Ótimo!\", \"Maravilha!\", "
+        "\"Beleza!\", \"Show!\", \"Tranquilo!\") NÃO devem ser usadas mais de uma vez na mesma conversa. "
+        "Varie o vocabulário ou simplesmente omita.\n"
         "• O nome do cliente deve ser usado no MÁXIMO uma vez na conversa, geralmente na saudação inicial. "
-        "Nunca use o nome em mensagens consecutivas nem mais de uma vez na mesma mensagem.\n"
-        "• Nunca comece duas mensagens seguidas com a mesma palavra ou estrutura."
+        "Nunca use o nome em mensagens consecutivas nem mais de uma vez na mesma mensagem. "
+        "Quando em dúvida, NÃO use o nome — soa mais natural.\n"
+        "• Nunca comece duas mensagens seguidas com a mesma palavra ou estrutura.\n"
+        "• Antes de enviar, releia: se sua mensagem começa com \"<reforço>, <nome>!\" ou \"<reforço>!\", "
+        "reescreva começando pela informação útil."
     )
 
 
