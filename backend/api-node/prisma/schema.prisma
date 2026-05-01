@@ -28,6 +28,7 @@ model SaasCompany {
   sessions      WhatsappSession[]
   conversations AgentConversation[]
   messages      AgentMessage[]
+  processedWhatsappMessages ProcessedWhatsappMessage[]
 
   petshopSpecialties    PetshopSpecialty[]
   petshopServices       PetshopService[]
@@ -102,10 +103,14 @@ model Client {
   id                     String    @id @default(uuid()) @db.Uuid
   companyId              Int       @map("company_id")
   sessionId              String?   @map("session_id") @db.VarChar(256)
-  phone                  String    @db.VarChar(20)
-  // Apenas visualizacao no frontend. Nao interfere no envio/recepcao de mensagens,
-  // que continuam usando `phone`.
-  manualPhone           String?   @map("manual_phone") @db.VarChar(30)
+  // Identificador WhatsApp do cliente. Para JIDs `@s.whatsapp.net` armazena
+  // somente os dígitos (ex.: `554899999999`); para JIDs `@lid` armazena o
+  // identificador completo com sufixo (ex.: `222131564593311@lid`).
+  phone                  String    @db.VarChar(64)
+  // Telefone real (E.164 brasileiro, somente dígitos), preenchido a partir do
+  // JID direto, do `senderPn` ou do mapeamento LID→PN do Baileys. É o que
+  // identifica o cliente em fluxos de cadastro / agendamento.
+  manualPhone           String?   @map("manual_phone") @db.VarChar(32)
   cpf                   String?   @map("cpf") @db.VarChar(14)
   name                   String?   @db.VarChar(255)
   companyName            String?   @map("company") @db.VarChar(255)
@@ -188,6 +193,20 @@ model AgentMessage {
   @@index([companyId], map: "idx_messages_company")
   @@index([conversationId], map: "idx_messages_conversation")
   @@map("agent_messages")
+}
+
+model ProcessedWhatsappMessage {
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         Int      @map("company_id")
+  whatsappMessageId String   @map("whatsapp_message_id") @db.VarChar(255)
+  direction         String   @db.VarChar(20)
+  processedAt       DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  saasCompany SaasCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, whatsappMessageId], map: "uq_processed_wpp_msg")
+  @@index([processedAt], map: "idx_processed_wpp_msg_at")
+  @@map("processed_whatsapp_messages")
 }
 
 // ═══════════════════════════════════════════════════════════════

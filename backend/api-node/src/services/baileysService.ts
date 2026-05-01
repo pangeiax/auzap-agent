@@ -32,6 +32,26 @@ function clearTypingIntervalsForCompany(companyIdStr: string): void {
   }
 }
 
+// Idempotência: tenta registrar a mensagem como processada.
+// Retorna true se for nova; false se já estava registrada (duplicata).
+// A unique constraint (companyId, whatsappMessageId) garante atomicidade
+// mesmo durante a janela de debounce, antes que AgentMessage seja criado.
+async function tryClaimWhatsappMessage(
+  companyId: number,
+  whatsappMessageId: string,
+  direction: 'incoming' | 'outgoing'
+): Promise<boolean> {
+  try {
+    await prisma.processedWhatsappMessage.create({
+      data: { companyId, whatsappMessageId, direction },
+    })
+    return true
+  } catch (err: any) {
+    if (err?.code === 'P2002') return false
+    throw err
+  }
+}
+
 // ─────────────────────────────────────────
 // Cleanup: fecha socket antigo e remove listeners
 // ─────────────────────────────────────────
@@ -42,6 +62,7 @@ function cleanupExistingSocket(companyIdStr: string): void {
       oldSocket.ev.removeAllListeners('connection.update')
       oldSocket.ev.removeAllListeners('creds.update')
       oldSocket.ev.removeAllListeners('messages.upsert')
+      oldSocket.ev.removeAllListeners('chats.phoneNumberShare' as any)
       oldSocket.end(undefined)
     } catch (err) {
       console.warn(`[Baileys][company:${companyIdStr}] Erro ao limpar socket antigo:`, err)
@@ -49,6 +70,63 @@ function cleanupExistingSocket(companyIdStr: string): void {
     activeSockets.delete(companyIdStr)
   }
   clearTypingIntervalsForCompany(companyIdStr)
+}
+
+// ─────────────────────────────────────────
+// Backfill assíncrono de manual_phone para clientes @lid.
+// Quando o WhatsApp revela o mapeamento LID→PN (via evento
+// `chats.phoneNumberShare` no Baileys 6.x), preenchemos retroativamente o
+// `manual_phone` de qualquer cliente daquela company armazenado com
+// `phone = lid` que ainda não tinha telefone resolvido.
+// ─────────────────────────────────────────
+function extractDigitsFromJid(jid: string): string {
+  const idx = jid.indexOf('@')
+  const head = idx >= 0 ? jid.slice(0, idx) : jid
+  return head.replace(/\D+/g, '')
+}
+
+function normalizeBrazilianPhone(digits: string): string | null {
+  const d = digits.replace(/\D+/g, '')
+  if (!d) return null
+  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) return d
+  if (d.length === 10 || d.length === 11) return `55${d}`
+  return null
+}
+
+async function backfillManualPhoneFromLidMapping(
+  companyId: number,
+  lid: string,
+  pnJid: string,
+): Promise<void> {
+  const pn = normalizeBrazilianPhone(extractDigitsFromJid(pnJid))
+  if (!pn) return
+
+  // Procura clientes desta company armazenados com este LID que ainda não
+  // tenham `manual_phone`. Tanto a forma com sufixo (`xxx@lid`) quanto sem
+  // são consideradas para acomodar dados legados.
+  const lidWithSuffix = lid.endsWith('@lid') ? lid : `${lid}@lid`
+  const lidWithoutSuffix = lid.replace(/@lid$/, '')
+
+  try {
+    const updated = await prisma.client.updateMany({
+      where: {
+        companyId,
+        manualPhone: null,
+        phone: { in: [lidWithSuffix, lidWithoutSuffix] },
+      },
+      data: { manualPhone: pn },
+    })
+    if (updated.count > 0) {
+      console.log(
+        `[Baileys][company:${companyId}] LID→PN backfill | lid=${lidWithSuffix} pn=${pn} | clientes atualizados: ${updated.count}`,
+      )
+    }
+  } catch (err) {
+    console.warn(
+      `[Baileys][company:${companyId}] Falha no backfill LID→PN (lid=${lid}, pn=${pn}):`,
+      err,
+    )
+  }
 }
 
 // ─────────────────────────────────────────
@@ -149,6 +227,29 @@ export async function startBaileysSession(
   // ── Evento: salva credenciais ─────────────
   socket.ev.on('creds.update', saveCreds)
 
+  // ── Evento: WhatsApp revela mapeamento LID → PN ──────────
+  // Disparado quando o servidor entrega o telefone real associado a um
+  // identificador `@lid`. Usamos para preencher `manual_phone` de clientes
+  // que entraram só com o LID (cenário B do desenho de identidade).
+  socket.ev.on('chats.phoneNumberShare' as any, async (payload: any) => {
+    if (activeSockets.get(companyIdStr) !== socket) return
+    if (!payload) return
+    const updates = Array.isArray(payload) ? payload : [payload]
+    for (const u of updates) {
+      const lid = u?.lid
+      const pn = u?.jid ?? u?.pn
+      if (!lid || !pn) continue
+      try {
+        await backfillManualPhoneFromLidMapping(companyId, String(lid), String(pn))
+      } catch (err) {
+        console.warn(
+          `[Baileys][company:${companyIdStr}] Erro inesperado no listener phoneNumberShare:`,
+          err,
+        )
+      }
+    }
+  })
+
   // ── Evento: mensagens recebidas ───────────
   socket.ev.on('messages.upsert', async ({ messages, type }: any) => {
     // Ignora eventos de sockets que já foram substituídos
@@ -177,6 +278,15 @@ export async function startBaileysSession(
           continue
         }
 
+        const outgoingId = msg.key?.id
+        if (outgoingId) {
+          const claimed = await tryClaimWhatsappMessage(companyId, outgoingId, 'outgoing')
+          if (!claimed) {
+            console.log(`[Baileys][company:${companyIdStr}] Mensagem outgoing ${outgoingId} já processada — ignorando duplicata`)
+            continue
+          }
+        }
+
         try {
           await handleOutgoingMessage(companyId, msg)
         } catch (err) {
@@ -197,6 +307,15 @@ export async function startBaileysSession(
         continue
       }
 
+      const incomingId = msg.key?.id
+      if (incomingId) {
+        const claimed = await tryClaimWhatsappMessage(companyId, incomingId, 'incoming')
+        if (!claimed) {
+          console.log(`[Baileys][company:${companyIdStr}] Mensagem incoming ${incomingId} já processada — ignorando duplicata`)
+          continue
+        }
+      }
+ 
       try {
         const senderPn = (msg.key as any).senderPn || null
         await handleIncomingMessage(companyId, socket, msg, senderPn)

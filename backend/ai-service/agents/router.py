@@ -14,6 +14,7 @@ from agents.team.sales_agent import build_sales_agent
 from agents.team.escalation_agent import build_escalation_agent
 from agents.team.lodging_agent import build_lodging_agent
 from agents.team.health_agent import build_health_agent
+from agents.team.identity_agent import build_identity_agent
 from agents.router_tool_plan import (
     build_router_tools_instruction_block,
     format_required_tools_for_log,
@@ -368,6 +369,7 @@ VALID_AGENTS = {
     "faq_agent",
     "sales_agent",
     "escalation_agent",
+    "identity_agent",
 }
 
 DEFAULT_ROUTER_CTX = {
@@ -398,6 +400,7 @@ DEFAULT_REQUIRED_TOOLS_BY_AGENT_STAGE = {
     ("health_agent", "SCHEDULING"): ["pets", "services", "slots"],
     ("health_agent", "AWAITING_CONFIRMATION"): ["pets", "services", "slots", "appointments"],
     ("escalation_agent", "WELCOME"): ["none"],
+    ("identity_agent", "COLLECT_IDENTITY"): ["none"],
 }
 
 
@@ -739,6 +742,200 @@ def _stabilize_booking_router_service(
     return out
 
 
+# Agentes que executam ações de escrita e exigem cadastro completo do cliente.
+# Onboarding NÃO está aqui no geral — saudação/WELCOME não exige cadastro.
+# O cadastro de pet (onboarding com stage PET_REGISTRATION) é tratado à parte
+# em `_router_ctx_demands_identity`.
+_WRITE_ACTION_AGENTS = frozenset({
+    "booking_agent",
+    "lodging_agent",
+    "health_agent",
+})
+
+
+# Palavras na mensagem do cliente que indicam INTENÇÃO DE ESCRITA real
+# (agendar, cancelar, remarcar, cadastrar pet). Sem alguma dessas, mesmo que
+# o router escolha booking/lodging/health, tratamos como leitura — assim o
+# cliente pode perguntar "quais meus agendamentos?" sem ser forçado a cadastrar.
+_WRITE_INTENT_KEYWORDS = (
+    "agendar", "agenda ", "marcar", "marca ",
+    "remarcar", "reagendar", "remarca ", "reagenda ",
+    "cancelar", "cancela ", "cancele",
+    "confirmar", "confirma ", "confirme",
+    "cadastrar pet", "cadastra pet", "cadastrar meu pet", "cadastrar o pet",
+    "registrar pet", "registra pet",
+    "novo pet", "outro pet",
+    "fazer hospedagem", "fazer hotel", "deixar o pet", "deixar meu pet",
+    "checkin", "check-in", "check in",
+)
+
+
+def _message_has_write_intent(message: str) -> bool:
+    if not message:
+        return False
+    m = message.lower()
+    return any(kw in m for kw in _WRITE_INTENT_KEYWORDS)
+
+
+def _router_ctx_demands_identity(
+    router_ctx: dict,
+    message: str = "",
+    previous_router_ctx: dict | None = None,
+) -> bool:
+    """
+    True quando o agente+stage exigem cadastro completo do cliente.
+
+    Para os agentes de escrita (booking/lodging/health), exige adicionalmente
+    que a MENSAGEM do cliente tenha keyword de write — assim consultas read-only
+    ("quais meus agendamentos?", "que horas é meu banho?") não disparam o gate
+    de cadastro. Quando há `pending_intent` (no turno atual ou no anterior),
+    considera-se write automaticamente (continuação de fluxo já iniciado).
+    """
+    agent = router_ctx.get("agent")
+    if agent in _WRITE_ACTION_AGENTS:
+        # Continuação de fluxo já gateado em turno anterior.
+        if router_ctx.get("pending_intent"):
+            return True
+        if previous_router_ctx and previous_router_ctx.get("pending_intent"):
+            return True
+        # Awaiting_confirmation = cliente vai dizer sim/não a um resumo de
+        # agendamento — também é write.
+        if router_ctx.get("awaiting_confirmation"):
+            return True
+        # Stage avançado de scheduling/awaiting → write.
+        stage = (router_ctx.get("stage") or "").upper()
+        if stage in ("SCHEDULING", "AWAITING_CONFIRMATION"):
+            return True
+        # Por fim, exige write keyword na mensagem.
+        return _message_has_write_intent(message)
+    # Cadastro de pet também precisa de cliente identificado (FK).
+    if agent == "onboarding_agent":
+        stage = (router_ctx.get("stage") or "").upper()
+        if stage == "PET_REGISTRATION":
+            return True
+    return False
+
+
+def _intent_summary_from_router_ctx(router_ctx: dict, message: str) -> str:
+    """Resumo curto da intenção pendente, pra mostrar no prompt do identity_agent."""
+    parts: list[str] = []
+    agent = (router_ctx.get("agent") or "").replace("_agent", "")
+    if agent:
+        parts.append(agent)
+    svc = (router_ctx.get("service") or "").strip()
+    if svc:
+        parts.append(svc)
+    dt = (router_ctx.get("date_mentioned") or "").strip()
+    if dt:
+        parts.append(dt)
+    if parts:
+        return " · ".join(parts)
+    return (message or "").strip()[:120]
+
+
+def _gate_write_action_with_identity(
+    router_ctx: dict,
+    context: dict,
+    message: str,
+    previous_router_ctx: dict | None,
+) -> dict:
+    """
+    Se o router escolheu um agente de escrita mas o cadastro está incompleto,
+    redireciona para identity_agent e salva `pending_intent` no router_ctx.
+    Inverso: se o router escolheu identity_agent mas já estamos completos, e
+    há pending_intent no estado anterior, restaura a intenção original.
+    """
+    identity_status = context.get("identity_status") or {}
+    incomplete = bool(identity_status.get("missing"))
+    agent = router_ctx.get("agent")
+
+    prev_pending = (
+        (previous_router_ctx or {}).get("pending_intent")
+        if previous_router_ctx
+        else None
+    )
+
+    demands_identity = _router_ctx_demands_identity(
+        router_ctx, message, previous_router_ctx
+    )
+
+    # Caso 1: cadastro incompleto e o router escolheu write-action OU já estamos
+    # em identity_agent (continuação do fluxo) → mantém em identity_agent e
+    # preserva a `pending_intent` existente (sem sobrescrever a intenção
+    # original com algo classificado no meio do cadastro).
+    if incomplete and (demands_identity or agent == "identity_agent"):
+        if prev_pending and prev_pending.get("agent"):
+            pending = prev_pending
+        elif demands_identity:
+            # Primeira vez que o gate dispara — captura a intenção atual.
+            pending = {
+                "agent": agent,
+                "service": router_ctx.get("service"),
+                "active_pet": router_ctx.get("active_pet"),
+                "date_mentioned": router_ctx.get("date_mentioned"),
+                "selected_time": router_ctx.get("selected_time"),
+                "checkin_mentioned": router_ctx.get("checkin_mentioned"),
+                "checkout_mentioned": router_ctx.get("checkout_mentioned"),
+                "specialty_type": router_ctx.get("specialty_type"),
+                "summary": _intent_summary_from_router_ctx(router_ctx, message),
+                "original_message": (message or "")[:500],
+            }
+        else:
+            # Já estamos em identity_agent sem pending — entrou direto, sem
+            # write-action prévio (raro). Sem pending pra restaurar depois.
+            pending = None
+
+        out = {
+            **router_ctx,
+            "agent": "identity_agent",
+            "stage": "COLLECT_IDENTITY",
+            "required_tools": ["none"],
+        }
+        if pending:
+            out["pending_intent"] = pending
+        if agent != "identity_agent":
+            logger.warning(
+                "router | write-action gated por cadastro incompleto | original=%s missing=%s",
+                agent,
+                identity_status.get("missing"),
+            )
+        return out
+
+    # Caso 2: cadastro completo e há pending_intent acumulada → restaura
+    # (independente do router ter escolhido identity_agent ou outro).
+    if not incomplete and prev_pending and prev_pending.get("agent"):
+        restored = {
+            **router_ctx,
+            "agent": prev_pending["agent"],
+            "stage": router_ctx.get("stage") or "WELCOME",
+            "service": router_ctx.get("service") or prev_pending.get("service"),
+            "active_pet": router_ctx.get("active_pet") or prev_pending.get("active_pet"),
+            "date_mentioned": (
+                router_ctx.get("date_mentioned") or prev_pending.get("date_mentioned")
+            ),
+            "selected_time": (
+                router_ctx.get("selected_time") or prev_pending.get("selected_time")
+            ),
+            "checkin_mentioned": (
+                router_ctx.get("checkin_mentioned") or prev_pending.get("checkin_mentioned")
+            ),
+            "checkout_mentioned": (
+                router_ctx.get("checkout_mentioned") or prev_pending.get("checkout_mentioned")
+            ),
+            "specialty_type": (
+                router_ctx.get("specialty_type") or prev_pending.get("specialty_type")
+            ),
+        }
+        restored.pop("pending_intent", None)
+        logger.info(
+            "router | identity completou → restaurando pending_intent agent=%s",
+            prev_pending["agent"],
+        )
+        return restored
+
+    return router_ctx
+
+
 async def run_router(
     message: str,
     context: dict,
@@ -776,6 +973,11 @@ async def run_router(
     )
     router_ctx = _coerce_onboarding_awaiting_without_pet(router_ctx)
     router_ctx = _ensure_active_pet_when_booking(router_ctx, context, message)
+    # Gate de identidade: write-actions sem cadastro completo viram identity_agent;
+    # identity_agent com cadastro completo restaura a pending_intent original.
+    router_ctx = _gate_write_action_with_identity(
+        router_ctx, context, message, previous_router_ctx
+    )
     router_model = _agent_configured_model_id(router)
 
     agent_name = router_ctx.get("agent", "onboarding_agent")
@@ -790,6 +992,38 @@ async def run_router(
         router_ctx.get("awaiting_confirmation"),
         format_required_tools_for_log(router_ctx),
     )
+
+    # ── 1.5 Pré-processamento de identidade ───────────────
+    # Quando o agente é identity_agent, executa a extração da mensagem atual
+    # ANTES de invocar o LLM e injeta o snapshot consolidado no contexto.
+    # Isso garante que a memória entre turnos seja determinística — o agente
+    # não precisa lembrar de chamar `parse_personal_data`, ele só decide o que
+    # responder com base nos campos `identity_partial_snapshot` já mesclados.
+    if agent_name == "identity_agent":
+        try:
+            from tools.identity_agent_tools import preprocess_identity_message
+            # Prefere o phone do request (sempre presente) ao do client_dict
+            # (que pode vir vazio se o cliente ainda não existe no banco).
+            client_phone_for_partial = (
+                context.get("request_client_phone")
+                or (context.get("client") or {}).get("phone")
+                or ""
+            )
+            snapshot = preprocess_identity_message(
+                company_id=context["company_id"],
+                client_phone=client_phone_for_partial,
+                client=context.get("client") or {},
+                message_text=message,
+            )
+            context["identity_partial_snapshot"] = snapshot
+            logger.info(
+                "identity preprocess | missing=%s reroute=%s cpf_invalid=%s",
+                snapshot.get("missing"),
+                snapshot.get("reroute_cpf_to_phone"),
+                snapshot.get("cpf_invalid"),
+            )
+        except Exception:
+            logger.exception("identity preprocess falhou — agente seguirá sem snapshot")
 
     # ── 2. Especialista ───────────────────────────
     logger.info("Invocando especialista → %s", agent_name)
@@ -956,6 +1190,7 @@ def _build_specialist(agent_name: str, context: dict, router_ctx: dict) -> Agent
         "faq_agent": build_faq_agent,
         "sales_agent": build_sales_agent,
         "escalation_agent": build_escalation_agent,
+        "identity_agent": build_identity_agent,
     }
     builder = builders.get(agent_name, build_faq_agent)
     return builder(context, router_ctx)
@@ -998,6 +1233,12 @@ def _format_router_state(router_ctx: dict | None) -> str:
         parts.append(f"required_tools={required_tools}")
     if router_ctx.get("awaiting_confirmation"):
         parts.append("awaiting_confirmation=true")
+    pending = router_ctx.get("pending_intent")
+    if pending and pending.get("agent"):
+        parts.append(
+            f"pending_intent={pending['agent']}"
+            + (f"/{pending['summary']}" if pending.get("summary") else "")
+        )
     return "Resumo do último estado do roteador: " + " | ".join(parts)
 
 

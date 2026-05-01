@@ -150,12 +150,23 @@ def build_router_prompt(context: dict) -> str:
         "deste petshop ao montar o JSON.\n\n"
         + context_tail
     )
-    if context.get("identity_flow_required"):
+    identity_status = context.get("identity_status") or {}
+    missing = identity_status.get("missing") or []
+    if missing:
+        # Sinaliza ao router que existe cadastro incompleto. O sistema vai
+        # interceptar e desviar pra identity_agent quando a intenção for de
+        # escrita — o router não precisa fazer essa decisão.
+        labels = {
+            "name": "nome",
+            "email": "e-mail",
+            "manual_phone": "telefone",
+            "cpf": "CPF",
+        }
+        missing_pt = ", ".join(labels.get(m, m) for m in missing)
         out += (
-            "\n\n━━━ RECADASTRO (cadastro incompleto) ━━━\n"
-            "Este cliente ainda não tem CPF nem telefone manual na base (migração/recadastro). "
-            "Um fluxo automático pode estar conduzindo isso. Recusa clara de cadastro ou mensagem sobre "
-            "pet já em serviço (hotel, buscar pet, como está o pet) → `escalation_agent`.\n"
+            "\n\n━━━ CADASTRO INCOMPLETO (informativo) ━━━\n"
+            f"Faltam estes dados do cliente: {missing_pt}. Continue roteando normalmente — "
+            "o sistema desvia para o agente de cadastro quando necessário.\n"
         )
     return out
 

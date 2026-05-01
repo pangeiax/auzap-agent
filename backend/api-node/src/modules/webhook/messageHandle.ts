@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma'
 import { sendTextMessage, sendTyping, clearTyping } from '../../services/baileysService'
 import { runAgent, popFromHistory } from '../../agent/AgentService'
 import { linkLidToManualIfMatch } from './senderPnMatch'
+import { resolvePhoneFromMessage } from './resolvePhone'
 
 const DEBOUNCE_MS = 8000
 
@@ -422,6 +423,11 @@ async function processMessage(
     where: { companyId_phone: { companyId, phone } },
   })
 
+  // Resolução do telefone real (E.164 BR) a partir do JID + senderPn. Para
+  // JIDs `@lid` sem senderPn, retorna null e o listener `chats.phoneNumberShare`
+  // (em baileysService.ts) preenche `manual_phone` retroativamente.
+  const resolvedPhone = resolvePhoneFromMessage(jid, realPhone ?? null)
+
   // Match por senderPn → manual_phone (cenário A1): só roda na PRIMEIRA mensagem
   // do @lid. Se casar, o registro manual adota o @lid como phone. Sem senderPn,
   // sem match, ou se o @lid já existe, segue fluxo normal (cadastro cuida do merge).
@@ -439,19 +445,35 @@ async function processMessage(
         companyId,
         phone,
         name: pushName,
+        // Já preenche manual_phone com o telefone resolvido — assim o agente
+        // não precisa pedir telefone no cadastro quando ele é deduzível do JID.
+        ...(resolvedPhone ? { manualPhone: resolvedPhone } : {}),
         conversationStage: 'initial',
         lastMessageAt: new Date(),
       },
     })
-    console.log(`[Handler][company:${companyId}] Novo cliente criado: ${phone} (${pushName ?? 'sem nome'})`)
+    console.log(
+      `[Handler][company:${companyId}] Novo cliente criado: ${phone} (${pushName ?? 'sem nome'})${
+        resolvedPhone ? ` | manual_phone=${resolvedPhone}` : ''
+      }`,
+    )
   } else {
+    // Backfill de manual_phone para clientes existentes que ainda não tinham
+    // (ex.: criados antes desta mudança ou via @lid que só agora resolveu o PN).
+    const shouldBackfillManualPhone = resolvedPhone && !client.manualPhone
     await prisma.client.update({
       where: { id: client.id },
       data: {
         lastMessageAt: new Date(),
         ...(pushName ? { name: pushName } : {}),
+        ...(shouldBackfillManualPhone ? { manualPhone: resolvedPhone } : {}),
       },
     })
+    if (shouldBackfillManualPhone) {
+      console.log(
+        `[Handler][company:${companyId}] Backfill manual_phone=${resolvedPhone} para cliente existente ${client.id}`,
+      )
+    }
   }
 
   // ── 2. Busca ou cria conversa ────────────
