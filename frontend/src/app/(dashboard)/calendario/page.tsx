@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DashboardLayout } from "@/components/templates/DashboardLayout";
 import { CalendarHeader } from "@/components/molecules/CalendarHeader";
+import { HotelTimelineView } from "@/components/molecules/HotelTimelineView";
+import { lodgingReservationService, type LodgingReservation } from "@/services/lodgingService";
 import {
   CalendarGrid,
   type CalendarEvent,
@@ -303,6 +305,32 @@ export default function CalendarioPage() {
   }, [toast]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [agendaMode, setAgendaMode] = useState<"agenda" | "hotel">("agenda");
+  const [lodgingReservations, setLodgingReservations] = useState<LodgingReservation[]>([]);
+  const [lodgingLoading, setLodgingLoading] = useState(false);
+  const [selectedLodging, setSelectedLodging] = useState<LodgingReservation | null>(null);
+
+  // Carrega reservas de hotel/creche apenas quando o toggle vai pra "hotel" pela primeira vez.
+  useEffect(() => {
+    if (agendaMode !== "hotel") return;
+    let cancelled = false;
+    setLodgingLoading(true);
+    lodgingReservationService
+      .list()
+      .then((res) => {
+        if (!cancelled) setLodgingReservations(res);
+      })
+      .catch((err) => {
+        console.error("[calendario] falha ao carregar reservas de lodging:", err);
+        if (!cancelled) toast.error("Erro", "Não foi possível carregar as reservas de hotel/creche.");
+      })
+      .finally(() => {
+        if (!cancelled) setLodgingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agendaMode, toast]);
   const [formData, setFormData] =
     useState<NewAppointmentForm>(initialFormState);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
@@ -933,6 +961,45 @@ export default function CalendarioPage() {
     [visibleEvents],
   );
 
+  // Estatísticas da aba Hotel/Creche — todas escopadas ao mês visível.
+  // Quando o usuário navega entre meses, os badges acompanham — não mostra dado de outro mês.
+  //   reservados = confirmadas/needs_reschedule que tocam o mês
+  //   hospedados = checked_in que tocam o mês
+  //   concluidos = checked_out que tocam o mês
+  const lodgingStats = useMemo(() => {
+    const parseYmd = (s: string): Date => {
+      const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return new Date(NaN);
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    };
+
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    const touchesVisibleMonth = (r: LodgingReservation): boolean => {
+      const cin = parseYmd(r.checkin_date);
+      const cout = parseYmd(r.checkout_date);
+      // Creche: backend grava checkout_date = "dia seguinte ao último". Ajusta pra comparar.
+      const lastRealDay =
+        r.type === "daycare"
+          ? new Date(cout.getFullYear(), cout.getMonth(), cout.getDate() - 1)
+          : cout;
+      return lastRealDay >= firstDay && cin <= lastDay;
+    };
+
+    const inMonth = lodgingReservations.filter(touchesVisibleMonth);
+
+    return {
+      reservados: inMonth.filter(
+        (r) => r.status === "confirmed" || r.status === "needs_reschedule",
+      ).length,
+      hospedados: inMonth.filter((r) => r.status === "checked_in").length,
+      concluidos: inMonth.filter((r) => r.status === "checked_out").length,
+    };
+  }, [lodgingReservations, currentDate]);
+
   const weekAppointments = useMemo(() => {
     const weekFullDates = new Set(weekDays.map((d) => d.fullDate));
     return visibleEvents
@@ -966,10 +1033,28 @@ export default function CalendarioPage() {
             activeView={activeView}
             onViewChange={setActiveView}
             stats={stats}
+            agendaMode={agendaMode}
+            onAgendaModeChange={setAgendaMode}
+            lodgingStats={lodgingStats}
           />
 
           <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 lg:flex-row lg:gap-0">
-            {eventsLoading ? (
+            {agendaMode === "hotel" ? (
+              lodgingLoading ? (
+                <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-[rgba(114,123,142,0.1)] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D]">
+                  <div className="flex flex-col items-center gap-3 text-sm text-[#727B8E] dark:text-[#8a94a6]">
+                    <Loader2 className="h-8 w-8 animate-spin text-[#1E62EC] dark:text-[#2172e5]" />
+                    <span>Carregando reservas...</span>
+                  </div>
+                </div>
+              ) : (
+                <HotelTimelineView
+                  currentDate={currentDate}
+                  reservations={lodgingReservations}
+                  onReservationClick={setSelectedLodging}
+                />
+              )
+            ) : eventsLoading ? (
               <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-[rgba(114,123,142,0.1)] bg-white dark:border-[#40485A] dark:bg-[#1A1B1D]">
                 <div className="flex flex-col items-center gap-3 text-sm text-[#727B8E] dark:text-[#8a94a6]">
                   <Loader2 className="h-8 w-8 animate-spin text-[#1E62EC] dark:text-[#2172e5]" />
@@ -1543,6 +1628,101 @@ export default function CalendarioPage() {
                   </p>
                 </div>
               ) : null}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={selectedLodging !== null}
+        onClose={() => setSelectedLodging(null)}
+        title="Detalhes da hospedagem"
+        className="max-w-[440px]"
+      >
+        {selectedLodging && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#F4F6F9] dark:bg-[#212225] text-sm font-bold text-[#727B8E] dark:text-[#8a94a6]">
+                {(selectedLodging.pet_name ?? "?").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="truncate text-base font-semibold text-[#434A57] dark:text-[#f5f9fc]">
+                  {selectedLodging.pet_name ?? "Pet sem nome"}
+                </h3>
+                <p className="text-xs text-[#727B8E] dark:text-[#8a94a6]">
+                  {selectedLodging.type === "daycare" ? "Creche" : "Hotel"}
+                  {selectedLodging.pet_breed ? ` · ${selectedLodging.pet_breed}` : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg bg-[#F4F6F9] dark:bg-[#212225] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Status</span>
+                <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                  {selectedLodging.status === "checked_in"
+                    ? "Hospedado"
+                    : selectedLodging.status === "checked_out"
+                      ? "Concluído"
+                      : selectedLodging.status === "needs_reschedule"
+                        ? "Reserva (precisa remarcar)"
+                        : "Reserva"}
+                </span>
+              </div>
+              {selectedLodging.client_name && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Tutor</span>
+                  <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedLodging.client_name}
+                  </span>
+                </div>
+              )}
+              {(() => {
+                // Só mostra telefone quando foi inserido manualmente E é um número real
+                // (descarta JID interno do WhatsApp tipo "1825...@lid").
+                const manual = selectedLodging.phone_client_manual;
+                const isRealPhone =
+                  !!manual && !manual.includes("@") && !/[a-z]/i.test(manual);
+                if (!isRealPhone) return null;
+                return (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">
+                      Telefone
+                    </span>
+                    <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                      {manual}
+                    </span>
+                  </div>
+                );
+              })()}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Período</span>
+                <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                  {(() => {
+                    const fmt = (s: string) => {
+                      const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                      return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
+                    };
+                    return `${fmt(selectedLodging.checkin_date)} → ${fmt(selectedLodging.checkout_date)}`;
+                  })()}
+                </span>
+              </div>
+              {selectedLodging.room_type_name && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Acomodação</span>
+                  <span className="truncate text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedLodging.room_type_name}
+                  </span>
+                </div>
+              )}
+              {selectedLodging.kennel_id && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs uppercase tracking-wide text-[#727B8E] dark:text-[#8a94a6]">Vaga</span>
+                  <span className="text-sm font-medium text-[#434A57] dark:text-[#f5f9fc]">
+                    {selectedLodging.kennel_id}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}

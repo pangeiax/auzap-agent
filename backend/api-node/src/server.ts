@@ -14,6 +14,8 @@ async function main() {
     console.warn('[Server] O servidor continuará rodando normalmente.')
   }
 
+  // Inicia cron job de geração de slots (segunda, 06h BRT)
+
   app.listen(PORT, () => {
     console.log(`[Server] Rodando em http://localhost:${PORT}`)
   })

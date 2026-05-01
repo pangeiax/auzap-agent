@@ -1238,7 +1238,7 @@ export default function HotelCrechePage() {
       <Modal
         isOpen={detailReservation !== null}
         onClose={() => setDetailReservation(null)}
-        title="Detalhes da reserva"
+        title="Detalhes da hospedagem"
         className="max-w-[440px]"
       >
         {detailReservation && (
